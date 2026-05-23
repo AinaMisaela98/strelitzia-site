@@ -14,26 +14,34 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
 
-    const res = await fetch("/api/login", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ email, password }),
-    });
+    try {
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
 
-    const data = await res.json();
+      const data = await res.json();
 
-if (!res.ok) {
-  setError(data.error || "Erreur login");
-  return;
-}
+      if (!res.ok) {
+        setError(data.error || "Erreur login");
+        setLoading(false);
+        return;
+      }
 
-if (data.role === "ADMIN") {
-  window.location.href = "/admin";
-} else {
-  window.location.href = "/user";
-}
+      const role = String(data.role || "").toUpperCase();
+
+      if (role === "ADMIN") {
+        window.location.replace("/admin");
+        return;
+      }
+
+      window.location.replace("/user");
+    } catch {
+      setError("Erreur serveur");
+      setLoading(false);
+    }
+  }
 
   return (
     <main className="min-h-screen bg-[#0f172a] flex items-center justify-center p-6">
@@ -47,17 +55,12 @@ if (data.role === "ADMIN") {
             STRELITZIA
           </h1>
 
-          <p className="text-gray-500 mt-2">
-            Connexion espace école
-          </p>
+          <p className="text-gray-500 mt-2">Connexion espace école</p>
         </div>
 
         <form onSubmit={handleLogin} className="space-y-5">
           <div>
-            <label className="text-sm font-semibold text-gray-700">
-              Email
-            </label>
-
+            <label className="text-sm font-semibold text-gray-700">Email</label>
             <input
               className="mt-2 w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
               type="email"
@@ -71,7 +74,6 @@ if (data.role === "ADMIN") {
             <label className="text-sm font-semibold text-gray-700">
               Mot de passe
             </label>
-
             <input
               className="mt-2 w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
               type="password"
@@ -98,5 +100,4 @@ if (data.role === "ADMIN") {
       </div>
     </main>
   );
-}
 }
