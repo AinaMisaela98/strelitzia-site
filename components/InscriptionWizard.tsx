@@ -326,11 +326,11 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
             {step === 1 && (
               <Panel title="Info parents">
                 <Grid>
-                  <Input label="Nom du père" value={form.pereNom} onChange={(v) => update("pereNom", v)} />
-                  <Input label="Téléphone père" value={form.pereTel} onChange={(v) => update("pereTel", v)} />
-                  <Input label="Nom de la mère" value={form.mereNom} onChange={(v) => update("mereNom", v)} />
-                  <Input label="Téléphone mère" value={form.mereTel} onChange={(v) => update("mereTel", v)} />
-                  <Input label="Adresse des parents" value={form.parentAdresse} onChange={(v) => update("parentAdresse", v)} />
+                  <Input label="Nom du père" value={form.pereNom} onChange={(v: string) => update("pereNom", v)} />
+                  <Input label="Téléphone père" value={form.pereTel} onChange={(v: string) => update("pereTel", v)} />
+                  <Input label="Nom de la mère" value={form.mereNom} onChange={(v: string) => update("mereNom", v)} />
+                  <Input label="Téléphone mère" value={form.mereTel} onChange={(v: string) => update("mereTel", v)} />
+                  <Input label="Adresse des parents" value={form.parentAdresse} onChange={(v: string) => update("parentAdresse", v)} />
                 </Grid>
               </Panel>
             )}
@@ -338,10 +338,10 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
             {step === 2 && (
               <Panel title="Tuteur">
                 <Grid>
-                  <Input label="Nom du tuteur" value={form.tuteurNom} onChange={(v) => update("tuteurNom", v)} />
-                  <Input label="Lien avec l’étudiant" value={form.tuteurLien} onChange={(v) => update("tuteurLien", v)} />
-                  <Input label="Téléphone tuteur" value={form.tuteurTel} onChange={(v) => update("tuteurTel", v)} />
-                  <Input label="Adresse tuteur" value={form.tuteurAdresse} onChange={(v) => update("tuteurAdresse", v)} />
+                  <Input label="Nom du tuteur" value={form.tuteurNom} onChange={(v: string) => update("tuteurNom", v)} />
+                  <Input label="Lien avec l’étudiant" value={form.tuteurLien} onChange={(v: string) => update("tuteurLien", v)} />
+                  <Input label="Téléphone tuteur" value={form.tuteurTel} onChange={(v: string) => update("tuteurTel", v)} />
+                  <Input label="Adresse tuteur" value={form.tuteurAdresse} onChange={(v: string) => update("tuteurAdresse", v)} />
                 </Grid>
               </Panel>
             )}
@@ -356,7 +356,7 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
                       label: level.name,
                       value: String(level.id),
                     }))}
-                    onChange={(value) => {
+                    onChange={(value: string) => {
                       setSelectedLevelId(value);
                       setSelectedClassId("");
 
@@ -377,7 +377,7 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
                       label: classe.name,
                       value: String(classe.id),
                     }))}
-                    onChange={(value) => {
+                    onChange={(value: string) => {
                       setSelectedClassId(value);
 
                       const classe = selectedLevel?.classes.find(
