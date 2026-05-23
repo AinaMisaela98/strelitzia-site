@@ -1,12 +1,25 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 
 export async function POST(req: Request) {
   try {
     const { email, password } = await req.json();
+
+    if (!email || !password) {
+      return NextResponse.json(
+        { error: "Email et mot de passe obligatoires" },
+        { status: 400 }
+      );
+    }
+
+    if (!process.env.JWT_SECRET) {
+      return NextResponse.json(
+        { error: "JWT_SECRET manquant dans Vercel" },
+        { status: 500 }
+      );
+    }
 
     const user = await prisma.user.findUnique({
       where: { email },
@@ -14,54 +27,50 @@ export async function POST(req: Request) {
 
     if (!user) {
       return NextResponse.json(
-        { error: "Email incorrect" },
+        { error: "Compte introuvable" },
         { status: 401 }
       );
     }
 
-    const validPassword = await bcrypt.compare(password, user.password);
+    const ok = await bcrypt.compare(password, user.password);
 
-    if (!validPassword) {
+    if (!ok) {
       return NextResponse.json(
         { error: "Mot de passe incorrect" },
         { status: 401 }
       );
     }
 
-    if (!user.active) {
-      return NextResponse.json(
-        { error: "Compte désactivé" },
-        { status: 403 }
-      );
-    }
-
     const token = jwt.sign(
       {
         id: user.id,
-        name: user.name,
         email: user.email,
+        name: user.name,
         role: user.role,
       },
-      process.env.JWT_SECRET!,
-      { expiresIn: "1d" }
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
     );
 
-    const cookieStore = await cookies();
-
-    cookieStore.set("token", token, {
-      httpOnly: true,
-      path: "/",
-      maxAge: 60 * 60 * 24,
+    const res = NextResponse.json({
+      success: true,
+      role: user.role,
     });
 
-    if (user.role === "ADMIN") {
-      return NextResponse.json({ redirect: "/admin" });
-    }
+    res.cookies.set("token", token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 7,
+    });
 
-    return NextResponse.json({ redirect: "/user" });
-  } catch {
+    return res;
+  } catch (error: any) {
+    console.error("LOGIN ERROR:", error);
+
     return NextResponse.json(
-      { error: "Erreur serveur" },
+      { error: error?.message || "Erreur serveur login" },
       { status: 500 }
     );
   }
