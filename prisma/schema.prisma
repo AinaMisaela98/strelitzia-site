@@ -1,0 +1,124 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  DIRECTEUR
+  SECRETAIRE
+}
+
+enum Sexe {
+  Masculin
+  Feminin
+}
+model SchoolYear {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  active    Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role     @default(SECRETAIRE)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model Permission {
+  id      Int     @id @default(autoincrement())
+  role    Role
+  action  String
+  allowed Boolean @default(false)
+
+  @@unique([role, action])
+}
+
+model Student {
+  id               Int      @id @default(autoincrement())
+  matricule        String   @unique
+  site             String   @default("Strelitzia School")
+  anneeScolaire    String   @default("2025-2026")
+  dateInscription  DateTime
+
+  photoUrl         String?
+  nom              String
+  prenoms          String
+  sexe             Sexe
+  classe           String
+  section          String
+
+  contact          String?
+  dateNaissance    DateTime?
+  lieuNaissance    String?
+  adresse          String?
+  signeParticulier String?
+  maladieAllergie  String?
+  email            String?
+  
+
+  pereNom          String?
+  pereTel          String?
+  mereNom          String?
+  mereTel          String?
+  parentAdresse    String?
+
+  tuteurNom        String?
+  tuteurLien       String?
+  tuteurTel        String?
+  tuteurAdresse    String?
+
+  niveau           String?
+  fraisInscription String?
+  fraisScolarite   String?
+
+  activite         String?
+  remarque         String?
+
+  createdAt        DateTime @default(now())
+}
+
+model Level {
+  id             Int        @id @default(autoincrement())
+  name           String
+  schoolYearName String
+  createdAt      DateTime   @default(now())
+
+  classes        ClassRoom[]
+
+  @@unique([name, schoolYearName])
+}
+
+model ClassRoom {
+  id             Int      @id @default(autoincrement())
+  name           String
+  levelId        Int
+  schoolYearName String
+  createdAt      DateTime @default(now())
+
+  level          Level    @relation(fields: [levelId], references: [id], onDelete: Cascade)
+  series         Serie[]
+
+  @@unique([name, levelId, schoolYearName])
+}
+
+model Serie {
+  id             Int       @id @default(autoincrement())
+  name           String
+  classRoomId    Int
+  schoolYearName String
+  createdAt      DateTime  @default(now())
+
+  classRoom      ClassRoom @relation(fields: [classRoomId], references: [id], onDelete: Cascade)
+
+  @@unique([name, classRoomId, schoolYearName])
+}
