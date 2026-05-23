@@ -243,81 +243,81 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
                     label="Date inscription *"
                     type="date"
                     value={form.dateInscription}
-                    onChange={(v) => update("dateInscription", v)}
+                    onChange={(v: string) => update("dateInscription", v)}
                     disabled
                   />
 
                   <Input
                     label="Numéro matricule *"
                     value={form.matricule}
-                    onChange={(v) => update("matricule", v)}
+                    onChange={(v: string) => update("matricule", v)}
                   />
 
                   <PhotoInput
                     value={form.photoUrl}
-                    onChange={(v) => update("photoUrl", v)}
+                    onChange={(v: string) => update("photoUrl", v)}
                   />
 
                   <Input
                     label="Nom *"
                     value={form.nom}
-                    onChange={(v) => update("nom", v)}
+                    onChange={(v: string) => update("nom", v)}
                   />
 
                   <Input
                     label="Prénoms *"
                     value={form.prenoms}
-                    onChange={(v) => update("prenoms", v)}
+                    onChange={(v: string) => update("prenoms", v)}
                   />
 
                   <Select
                     label="Genre *"
                     value={form.sexe}
                     options={["Masculin", "Feminin"]}
-                    onChange={(v) => update("sexe", v)}
+                    onChange={(v: string) => update("sexe", v)}
                   />
 
                   <Input
                     label="Date de naissance"
                     type="date"
                     value={form.dateNaissance}
-                    onChange={(v) => update("dateNaissance", v)}
+                    onChange={(v: string) => update("dateNaissance", v)}
                   />
 
                   <Input
                     label="Lieu de naissance"
                     value={form.lieuNaissance}
-                    onChange={(v) => update("lieuNaissance", v)}
+                    onChange={(v: string) => update("lieuNaissance", v)}
                   />
 
                   <Input
                     label="Téléphone"
                     value={form.telephone}
-                    onChange={(v) => update("telephone", v)}
+                    onChange={(v: string) => update("telephone", v)}
                   />
 
                   <Input
                     label="Adresse"
                     value={form.adresse}
-                    onChange={(v) => update("adresse", v)}
+                    onChange={(v: string) => update("adresse", v)}
                   />
 
                   <Input
                     label="Signe particulier"
                     value={form.signeParticulier}
-                    onChange={(v) => update("signeParticulier", v)}
+                    onChange={(v: string) => update("signeParticulier", v)}
                   />
 
                   <Input
                     label="Maladie ou allergique"
                     value={form.maladieAllergie}
-                    onChange={(v) => update("maladieAllergie", v)}
+                    onChange={(v: string) => update("maladieAllergie", v)}
                   />
 
                   <Input
                     label="Email"
                     value={form.email}
-                    onChange={(v) => update("email", v)}
+                    onChange={(v: string) => update("email", v)}
                   />
                 </Grid>
               </Panel>
@@ -393,19 +393,19 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
                     label="Série / Section *"
                     value={form.section}
                     options={(selectedClass?.series || []).map((serie) => serie.name)}
-                    onChange={(v) => update("section", v)}
+                    onChange={(v: string) => update("section", v)}
                   />
 
                   <Input
                     label="Frais d’inscription"
                     value={form.fraisInscription}
-                    onChange={(v) => update("fraisInscription", v)}
+                    onChange={(v: string) => update("fraisInscription", v)}
                   />
 
                   <Input
                     label="Frais de scolarité"
                     value={form.fraisScolarite}
-                    onChange={(v) => update("fraisScolarite", v)}
+                    onChange={(v: string) => update("fraisScolarite", v)}
                   />
                 </Grid>
 
@@ -430,13 +430,13 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
                     label="Activité extras"
                     value={form.activite}
                     options={["Aucune", "Sport", "Danse", "Musique", "Informatique"]}
-                    onChange={(v) => update("activite", v)}
+                    onChange={(v: string) => update("activite", v)}
                   />
 
                   <Textarea
                     label="Remarque"
                     value={form.remarque}
-                    onChange={(v) => update("remarque", v)}
+                    onChange={(v: string) => update("remarque", v)}
                   />
                 </Grid>
               </Panel>
