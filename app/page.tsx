@@ -24,15 +24,16 @@ export default function LoginPage() {
 
     const data = await res.json();
 
-    setLoading(false);
+if (!res.ok) {
+  setError(data.error || "Erreur login");
+  return;
+}
 
-    if (!res.ok) {
-      setError(data.error || "Erreur de connexion");
-      return;
-    }
-
-    window.location.href = data.redirect;
-  }
+if (data.role === "ADMIN") {
+  window.location.href = "/admin";
+} else {
+  window.location.href = "/user";
+}
 
   return (
     <main className="min-h-screen bg-[#0f172a] flex items-center justify-center p-6">
@@ -97,4 +98,5 @@ export default function LoginPage() {
       </div>
     </main>
   );
+}
 }
