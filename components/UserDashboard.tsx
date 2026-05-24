@@ -356,107 +356,285 @@ export default function UserDashboard({ user }: { user: AuthUser }) {
         </div>
       </aside>
 
-      {sidebarOpen && (
-        <div
-          onClick={() => setSidebarOpen(false)}
-          className="fixed inset-0 bg-black/40 z-40 lg:hidden"
-        />
-      )}
+     {sidebarOpen && (
+  <div
+    onClick={() => setSidebarOpen(false)}
+    className="fixed inset-0 bg-black/40 z-40 lg:hidden"
+  />
+)}
 
-      <section className="flex-1 min-w-0 h-full flex flex-col overflow-hidden">
-        <header className="h-[45px] shrink-0 bg-white border-b flex items-center justify-between px-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="lg:hidden bg-[#2f3540] text-white px-3 py-2 rounded"
-            >
-              ☰
-            </button>
+<section className="flex-1 min-w-0 h-full flex flex-col overflow-hidden">
+  <header className="shrink-0 bg-[#f8fafc] border-b border-slate-200 px-3 md:px-5 py-4">
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 md:p-4">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="lg:hidden bg-[#2f3540] text-white px-3 py-2 rounded-xl"
+          >
+            ☰
+          </button>
 
-            <h1 className="text-[12px] font-semibold truncate">
-              Listes des étudiants({filtered.length})
+          <div className="min-w-0">
+            <h1 className="text-[15px] md:text-[18px] font-black text-slate-800 truncate">
+              Liste des étudiants
             </h1>
+            <p className="text-[11px] md:text-[12px] text-slate-500 font-semibold">
+              {filtered.length} étudiant{filtered.length > 1 ? "s" : ""} inscrit
+              {filtered.length > 1 ? "s" : ""}
+            </p>
+          </div>
+        </div>
+
+        <div className="shrink-0 bg-blue-600 text-white rounded-xl px-3 py-2 text-[12px] font-black shadow-sm">
+          Total : {filtered.length}
+        </div>
+      </div>
+
+      <div className="w-full overflow-x-auto pb-1">
+        <div className="flex flex-nowrap items-center gap-2 min-w-max pr-2">
+          <button
+            onClick={() => loadStudents(selectedYear)}
+            className="h-[40px] px-4 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white text-[12px] font-bold whitespace-nowrap transition shadow-sm"
+          >
+            ⟳ Actualiser
+          </button>
+
+          <select
+            value={selectedYear}
+            onChange={(e) => {
+              setSelectedYear(e.target.value);
+              setClasse("TOUT");
+              setSerie("TOUT");
+            }}
+            className="h-[40px] min-w-[190px] rounded-xl bg-[#1f2937] text-white px-3 text-[12px] font-bold outline-none border border-slate-700"
+          >
+            {schoolYears.length === 0 && (
+              <option value="">Année scolaire</option>
+            )}
+
+            {schoolYears.map((year) => (
+              <option key={year.id} value={year.name}>
+                Année scolaire : {year.name}
+                {year.active ? " (active)" : ""}
+              </option>
+            ))}
+          </select>
+
+          <div className="h-[40px] min-w-[180px] rounded-xl bg-slate-100 border border-slate-200 text-slate-800 px-3 flex items-center text-[12px] font-bold whitespace-nowrap">
+            Sites : Strelitzia School
           </div>
 
-          <div className="top-actions hidden xl:flex items-center gap-[1px]">
-            <button
-              onClick={() => loadStudents(selectedYear)}
-              className="bg-cyan-600 hover:bg-cyan-700 text-white px-3 py-[7px] font-semibold"
-            >
-              ⟳ Actualiser
-            </button>
+          <select
+            value={classe}
+            onChange={(e) => {
+              setClasse(e.target.value);
+              setSerie("TOUT");
+            }}
+            className="h-[40px] min-w-[160px] rounded-xl bg-[#1f2937] text-white px-3 text-[12px] font-bold outline-none border border-slate-700"
+          >
+            <option value="TOUT">Classe : TOUT</option>
 
-            <select
-              value={selectedYear}
-              onChange={(e) => {
-                setSelectedYear(e.target.value);
-                setClasse("TOUT");
-                setSerie("TOUT");
-              }}
-              className="bg-[#1f2937] text-white px-2 py-[7px] font-semibold"
-            >
-              {schoolYears.length === 0 && (
-                <option value="">Année scolaire</option>
-              )}
+            {allClasses.map((c) => (
+              <option key={c.id} value={c.name}>
+                Classe : {c.name}
+              </option>
+            ))}
+          </select>
 
-              {schoolYears.map((year) => (
-                <option key={year.id} value={year.name}>
-                  Année scolaire : {year.name}
-                  {year.active ? " (active)" : ""}
-                </option>
-              ))}
-            </select>
+          <select
+            value={serie}
+            onChange={(e) => setSerie(e.target.value)}
+            className="h-[40px] min-w-[150px] rounded-xl bg-[#1f2937] text-white px-3 text-[12px] font-bold outline-none border border-slate-700"
+          >
+            <option value="TOUT">Série : TOUT</option>
 
-            <select className="bg-[#1f2937] text-white px-2 py-[7px] font-semibold">
-              <option>Sites : Strelitzia School</option>
-            </select>
+            {availableSeries.map((s) => (
+              <option key={s.id} value={s.name}>
+                Série : {s.name}
+              </option>
+            ))}
+          </select>
 
-            <select
-              value={classe}
-              onChange={(e) => {
-                setClasse(e.target.value);
-                setSerie("TOUT");
-              }}
-              className="bg-[#1f2937] text-white px-2 py-[7px] font-semibold"
-            >
-              <option value="TOUT">Classe : TOUT</option>
+          <button
+            onClick={() => {
+              const rows = filtered.map((s) => ({
+                Matricule: s.matricule || "",
+                Nom: s.nom || "",
+                Prenoms: s.prenoms || "",
+                Classe: s.classe || "",
+                Serie: s.section || "",
+                Telephone: s.contact || "",
+              }));
 
-              {allClasses.map((c) => (
-                <option key={c.id} value={c.name}>
-                  Classe : {c.name}
-                </option>
-              ))}
-            </select>
+              import("xlsx").then((XLSX) => {
+                const worksheet = XLSX.utils.json_to_sheet(rows);
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, worksheet, "Etudiants");
+                XLSX.writeFile(
+                  workbook,
+                  `etudiants_${selectedYear || "2025-2026"}.xlsx`
+                );
+              });
+            }}
+            className="h-[40px] px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[12px] font-bold whitespace-nowrap transition shadow-sm"
+          >
+            Export Excel
+          </button>
 
-            <select
-              value={serie}
-              onChange={(e) => setSerie(e.target.value)}
-              className="bg-[#1f2937] text-white px-2 py-[7px] font-semibold"
-            >
-              <option value="TOUT">Série : TOUT</option>
+          <button
+  onClick={() => {
+    const byClass = filtered.reduce((acc: any, s: any) => {
+      const key = s.classe || "Sans classe";
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(s);
+      return acc;
+    }, {});
 
-              {availableSeries.map((s) => (
-                <option key={s.id} value={s.name}>
-                  Série : {s.name}
-                </option>
-              ))}
-            </select>
+    const html = `
+      <html>
+        <head>
+          <title>Liste des étudiants</title>
+          <style>
+            @page { size: A4; margin: 12mm; }
+            body { font-family: Arial, sans-serif; color: #111827; }
+            .page { page-break-after: always; }
+            .header { text-align: center; border-bottom: 2px solid #111827; padding-bottom: 10px; margin-bottom: 14px; }
+            .school { font-size: 22px; font-weight: 900; color: #dc2626; }
+            .sub { font-size: 13px; color: #16a34a; font-weight: 700; }
+            .meta { margin-top: 8px; font-size: 12px; color: #374151; }
+            h2 { font-size: 18px; margin: 12px 0; }
+            table { width: 100%; border-collapse: collapse; font-size: 11px; }
+            th { background: #111827; color: white; padding: 7px; border: 1px solid #111827; text-align: left; }
+            td { padding: 6px; border: 1px solid #cbd5e1; }
+            tr:nth-child(even) { background: #f8fafc; }
+            .footer { margin-top: 12px; font-size: 11px; color: #64748b; text-align: right; }
+          </style>
+        </head>
+        <body>
+          ${Object.entries(byClass)
+            .map(([classeName, students]: any) => `
+              <div class="page">
+                <div class="header">
+                  <div class="school">STRELITZIA SCHOOL</div>
+                  <div class="sub">Liste des étudiants par classe</div>
+                  <div class="meta">
+                    Année scolaire : ${selectedYear || "2025-2026"} |
+                    Classe : ${classeName} |
+                    Effectif : ${students.length}
+                  </div>
+                </div>
 
-            <button
-              onClick={() => alert("Export Excel bientôt disponible")}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-[7px]"
-            >
-              Export Excel
-            </button>
+                <div style="
+  margin: 14px 0 18px 0;
+  padding: 12px;
+  border-radius: 12px;
+  background: linear-gradient(to right, #0f172a, #1e293b);
+  color: white;
+">
+  <div style="
+    font-size: 20px;
+    font-weight: 900;
+    margin-bottom: 6px;
+  ">
+    Classe : ${classeName}
+  </div>
 
-            <button
-              onClick={() => window.print()}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-[7px]"
-            >
-              Imprimer PDF
-            </button>
-          </div>
-        </header>
+  <div style="
+    display:flex;
+    gap:12px;
+    flex-wrap:wrap;
+    font-size:12px;
+  ">
+    <div style="
+      background:#2563eb;
+      padding:6px 12px;
+      border-radius:999px;
+      font-weight:700;
+    ">
+      Série : ${
+        serie === "TOUT"
+          ? "Toutes les séries"
+          : serie
+      }
+    </div>
+
+    <div style="
+      background:#16a34a;
+      padding:6px 12px;
+      border-radius:999px;
+      font-weight:700;
+    ">
+      Effectif : ${students.length} étudiant(s)
+    </div>
+
+    <div style="
+      background:#dc2626;
+      padding:6px 12px;
+      border-radius:999px;
+      font-weight:700;
+    ">
+      Année : ${selectedYear || "2025-2026"}
+    </div>
+  </div>
+</div>
+
+                <table>
+                  <thead>
+                    <tr>
+                      <th>N°</th>
+                      <th>Matricule</th>
+                      <th>Nom</th>
+                      <th>Prénoms</th>
+                      <th>Sexe</th>
+                      <th>Série</th>
+                      <th>Téléphone</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${students.map((s: any, i: number) => `
+                      <tr>
+                        <td>${i + 1}</td>
+                        <td>${s.matricule || ""}</td>
+                        <td>${s.nom || ""}</td>
+                        <td>${s.prenoms || ""}</td>
+                        <td>${s.sexe || ""}</td>
+                        <td>${s.section || ""}</td>
+                        <td>${s.contact || ""}</td>
+                      </tr>
+                    `).join("")}
+                  </tbody>
+                </table>
+
+                <div class="footer">
+                  Imprimé le ${new Date().toLocaleDateString("fr-FR")}
+                </div>
+              </div>
+            `)
+            .join("")}
+        </body>
+      </html>
+    `;
+
+    const win = window.open("", "_blank", "width=900,height=700");
+    if (!win) return alert("Popup bloqué");
+
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+
+    setTimeout(() => {
+      win.print();
+    }, 500);
+  }}
+  className="h-[40px] px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-[12px] font-bold whitespace-nowrap transition shadow-sm"
+>
+  Imprimer PDF
+</button>
+        </div>
+      </div>
+    </div>
+  </header>
 
         <div className="search-zone shrink-0 bg-white px-2 py-3 border-b flex flex-wrap gap-2">
           <input
