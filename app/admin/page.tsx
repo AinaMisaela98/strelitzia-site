@@ -10,10 +10,27 @@ type User = {
   active: boolean;
 };
 
+const menus = [
+  {
+    title: "Tableau de bord",
+    items: ["Dashboard admin", "Liste des étudiants", "Années scolaires", "Niveaux / Classes / Séries"],
+  },
+  {
+    title: "Utilisateurs & accès",
+    items: ["Utilisateurs", "Créer utilisateur"],
+  },
+  {
+    title: "Paramètres",
+    items: ["Paramètres généraux", "Journal d’activités"],
+  },
+];
+
 export default function AdminPage() {
   const [users, setUsers] = useState<User[]>([]);
-  const [editingId, setEditingId] = useState<number | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [activePage, setActivePage] = useState("Utilisateurs");
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const [form, setForm] = useState({
     name: "",
@@ -24,7 +41,7 @@ export default function AdminPage() {
   });
 
   async function loadUsers() {
-    const res = await fetch("/api/users");
+    const res = await fetch("/api/users", { cache: "no-store" });
     const data = await res.json();
     setUsers(Array.isArray(data) ? data : []);
   }
@@ -33,21 +50,52 @@ export default function AdminPage() {
     loadUsers();
   }, []);
 
+  function handleMenu(item: string) {
+    if (item === "Liste des étudiants") {
+      window.location.href = "/user";
+      return;
+    }
+
+    if (item === "Années scolaires") {
+      window.location.href = "/user/school-years";
+      return;
+    }
+
+    if (item === "Niveaux / Classes / Séries") {
+      window.location.href = "/user/academics";
+      return;
+    }
+
+    setActivePage(item);
+    setSidebarOpen(false);
+  }
+
   async function saveUser(e: React.FormEvent) {
     e.preventDefault();
 
-    const url = editingId ? `/api/users/${editingId}` : "/api/users";
-    const method = editingId ? "PUT" : "POST";
+    if (!form.name || !form.email) {
+      alert("Nom sy email obligatoire");
+      return;
+    }
 
-    const res = await fetch(url, {
-      method,
+    if (!editingId && !form.password) {
+      alert("Mot de passe obligatoire rehefa mamorona utilisateur");
+      return;
+    }
+
+    setLoading(true);
+
+    const res = await fetch(editingId ? `/api/users/${editingId}` : "/api/users", {
+      method: editingId ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
     });
 
+    const data = await res.json();
+    setLoading(false);
+
     if (!res.ok) {
-      const data = await res.json();
-      alert(data.error || "Erreur");
+      alert(data.error || "Erreur utilisateur");
       return;
     }
 
@@ -60,11 +108,13 @@ export default function AdminPage() {
     });
 
     setEditingId(null);
+    setActivePage("Utilisateurs");
     loadUsers();
   }
 
   function editUser(user: User) {
     setEditingId(user.id);
+    setActivePage("Créer utilisateur");
     setForm({
       name: user.name,
       email: user.email,
@@ -75,14 +125,12 @@ export default function AdminPage() {
   }
 
   async function deleteUser(id: number) {
-    if (!confirm("Supprimer cet utilisateur ?")) return;
+    if (!confirm("Voulez-vous vraiment supprimer cet utilisateur ?")) return;
 
-    const res = await fetch(`/api/users/${id}`, {
-      method: "DELETE",
-    });
+    const res = await fetch(`/api/users/${id}`, { method: "DELETE" });
+    const data = await res.json();
 
     if (!res.ok) {
-      const data = await res.json();
       alert(data.error || "Erreur suppression");
       return;
     }
@@ -96,82 +144,56 @@ export default function AdminPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 flex text-slate-900">
+    <main className="fixed inset-0 bg-[#eef2f7] flex overflow-hidden text-[12px] text-slate-900">
       <aside
-        className={`fixed lg:static z-50 top-0 left-0 h-screen w-[280px] bg-[#071426] text-white flex flex-col transition-transform duration-300 ${
+        className={`fixed lg:relative z-50 h-full w-[230px] shrink-0 bg-[#4a4a4a] text-white flex flex-col border-r border-slate-600 transition-transform duration-300 ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         }`}
       >
-        <div className="p-5 border-b border-white/10">
-          <h1 className="text-2xl font-black">
-            NY <span className="text-green-400">SEKO</span>
-            <span className="text-red-400">LIKO</span>
-          </h1>
-          <p className="text-xs text-slate-400 mt-1">Gestion scolaire moderne</p>
-        </div>
-
-        <div className="p-5 flex items-center gap-3 border-b border-white/10">
-          <div className="w-12 h-12 rounded-full bg-slate-300" />
+        <div className="h-[68px] bg-white flex items-center px-3 border-b">
           <div>
-            <p className="font-bold">Administrateur</p>
-            <p className="text-xs text-green-400">● En ligne</p>
+            <div className="text-[19px] font-black text-red-600 leading-none">STRELITZIA</div>
+            <div className="text-[13px] font-black text-green-600">SCHOOL</div>
           </div>
         </div>
 
-        <nav className="flex-1 overflow-y-auto p-4 space-y-2 custom-scroll">
-          <p className="text-xs text-slate-400 px-3 mt-2">PRINCIPAL</p>
+        <div className="bg-[#303030] px-3 py-3 flex gap-2 items-center">
+          <div className="w-11 h-11 rounded-full bg-orange-300 flex items-center justify-center text-xl">
+            👑
+          </div>
+          <div>
+            <p className="font-bold">Administrateur</p>
+            <p className="text-[10px] text-green-400">● En ligne</p>
+          </div>
+        </div>
 
-          {[
-            "Tableau de bord",
-            "Liste des étudiants",
-            "Inscrire un étudiant",
-            "Paiement",
-            "Classes",
-            "Sections",
-            "Années scolaires",
-            "Sites",
-          ].map((item, i) => (
-            <button
-              key={item}
-              className={`w-full text-left px-4 py-3 rounded-xl transition ${
-                i === 0
-                  ? "bg-blue-600 text-white"
-                  : "hover:bg-white/10 text-slate-200"
-              }`}
-            >
-              {item}
-            </button>
+        <nav className="flex-1 overflow-y-auto pb-3">
+          {menus.map((menu) => (
+            <div key={menu.title}>
+              <div className="bg-[#2f3540] px-2 py-2 font-semibold flex justify-between">
+                <span>▣ {menu.title}</span>
+                <span>⌃</span>
+              </div>
+
+              {menu.items.map((item) => (
+                <button
+                  key={item}
+                  onClick={() => handleMenu(item)}
+                  className={`w-full text-left pl-8 pr-2 py-[8px] hover:bg-[#b7b7b7] transition ${
+                    activePage === item ? "bg-[#b7b7b7]" : ""
+                  }`}
+                >
+                  - {item}
+                </button>
+              ))}
+            </div>
           ))}
-
-          <p className="text-xs text-slate-400 px-3 pt-5">UTILISATEURS & ACCÈS</p>
-
-          {["Utilisateurs", "Rôles", "Permissions"].map((item) => (
-            <button
-              key={item}
-              className="w-full text-left px-4 py-3 rounded-xl hover:bg-white/10 text-slate-200"
-            >
-              {item}
-            </button>
-          ))}
-
-          <p className="text-xs text-slate-400 px-3 pt-5">PARAMÈTRES</p>
-
-          {["Paramètres généraux", "Mon profil", "Journal d’activités"].map(
-            (item) => (
-              <button
-                key={item}
-                className="w-full text-left px-4 py-3 rounded-xl hover:bg-white/10 text-slate-200"
-              >
-                {item}
-              </button>
-            )
-          )}
         </nav>
 
-        <div className="p-4">
+        <div className="p-2">
           <button
             onClick={logout}
-            className="w-full bg-red-600 hover:bg-red-700 text-white rounded-xl py-3 font-bold"
+            className="w-full bg-red-600 hover:bg-red-700 py-2 rounded-sm font-bold"
           >
             Déconnexion
           </button>
@@ -185,180 +207,97 @@ export default function AdminPage() {
         />
       )}
 
-      <section className="flex-1 min-w-0">
-        <header className="bg-white border-b px-4 lg:px-8 py-4 flex items-center justify-between sticky top-0 z-30">
-          <div className="flex items-center gap-4">
+      <section className="flex-1 min-w-0 h-full flex flex-col overflow-hidden">
+        <header className="h-[52px] bg-white border-b flex items-center justify-between px-4">
+          <div className="flex items-center gap-3">
             <button
               onClick={() => setSidebarOpen(true)}
-              className="lg:hidden bg-slate-100 px-3 py-2 rounded-lg"
+              className="lg:hidden bg-slate-900 text-white px-3 py-2 rounded-lg"
             >
               ☰
             </button>
 
-            <input
-              className="hidden md:block w-[360px] border rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Rechercher un étudiant, matricule, nom..."
-            />
+            <div>
+              <h1 className="text-[17px] font-black">Administration</h1>
+              <p className="text-[11px] text-slate-500">Gestion des utilisateurs et accès</p>
+            </div>
           </div>
 
-          <div className="font-bold">Administrateur</div>
+          <button
+            onClick={() => {
+              setEditingId(null);
+              setActivePage("Créer utilisateur");
+              setForm({
+                name: "",
+                email: "",
+                password: "",
+                role: "SECRETAIRE",
+                active: true,
+              });
+            }}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl font-bold"
+          >
+            + Créer utilisateur
+          </button>
         </header>
 
-        <div className="p-4 lg:p-8 space-y-8">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-3xl font-black">Dashboard Administrateur</h2>
-              <p className="text-slate-500">
-                Gestion des utilisateurs, rôles et accès.
-              </p>
+        <div className="flex-1 overflow-auto p-5">
+          {activePage === "Dashboard admin" && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Card title="Utilisateurs" value={users.length} icon="👥" />
+              <Card title="Actifs" value={users.filter((u) => u.active).length} icon="✅" />
+              <Card title="Administrateurs" value={users.filter((u) => u.role === "ADMIN").length} icon="👑" />
             </div>
+          )}
 
-            <div className="flex flex-wrap gap-3">
-              <button className="bg-blue-600 text-white px-4 py-3 rounded-xl font-bold">
-                Actualiser
-              </button>
-              <button className="bg-emerald-600 text-white px-4 py-3 rounded-xl font-bold">
-                Export Excel
-              </button>
-              <button className="bg-violet-600 text-white px-4 py-3 rounded-xl font-bold">
-                Imprimer PDF
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
-            <Card title="Étudiants" value="464" />
-            <Card title="Utilisateurs" value={String(users.length)} />
-            <Card title="Année scolaire" value="2025-2026" />
-            <Card title="Site" value="Strelitzia" />
-          </div>
-
-          <div className="grid grid-cols-1 xl:grid-cols-[420px_1fr] gap-6">
-            <form
-              onSubmit={saveUser}
-              className="bg-white rounded-2xl shadow-sm border p-6 space-y-4"
-            >
-              <h3 className="text-xl font-black">
-                {editingId ? "Modifier utilisateur" : "Créer utilisateur"}
-              </h3>
-
-              <input
-                className="w-full border rounded-xl px-4 py-3"
-                placeholder="Nom complet"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-              />
-
-              <input
-                className="w-full border rounded-xl px-4 py-3"
-                placeholder="Email login"
-                type="email"
-                value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
-              />
-
-              <input
-                className="w-full border rounded-xl px-4 py-3"
-                placeholder={
-                  editingId
-                    ? "Nouveau mot de passe (optionnel)"
-                    : "Mot de passe"
-                }
-                type="password"
-                value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-              />
-
-              <select
-                className="w-full border rounded-xl px-4 py-3"
-                value={form.role}
-                onChange={(e) => setForm({ ...form, role: e.target.value })}
-              >
-                <option value="SECRETAIRE">SECRETAIRE</option>
-                <option value="DIRECTEUR">DIRECTEUR</option>
-                <option value="ADMIN">ADMIN</option>
-              </select>
-
-              <label className="flex items-center gap-3">
-                <input
-                  type="checkbox"
-                  checked={form.active}
-                  onChange={(e) =>
-                    setForm({ ...form, active: e.target.checked })
-                  }
-                />
-                Compte actif
-              </label>
-
-              <button className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-3 font-bold">
-                {editingId ? "Enregistrer modification" : "Créer le compte"}
-              </button>
-
-              {editingId && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditingId(null);
-                    setForm({
-                      name: "",
-                      email: "",
-                      password: "",
-                      role: "SECRETAIRE",
-                      active: true,
-                    });
-                  }}
-                  className="w-full bg-slate-200 rounded-xl py-3 font-bold"
-                >
-                  Annuler
-                </button>
-              )}
-            </form>
-
-            <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
-              <div className="p-5 border-b">
-                <h3 className="text-xl font-black">Liste des utilisateurs</h3>
+          {activePage === "Utilisateurs" && (
+            <div className="bg-white rounded-2xl shadow border overflow-hidden">
+              <div className="p-5 border-b flex justify-between items-center">
+                <div>
+                  <h2 className="text-xl font-black">Liste des utilisateurs</h2>
+                  <p className="text-slate-500">Création, modification et suppression des comptes</p>
+                </div>
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px]">
-                  <thead className="bg-[#111827] text-white">
+                <table className="w-full min-w-[850px] border-collapse">
+                  <thead className="bg-slate-900 text-white">
                     <tr>
-                      <th className="p-4 text-left">Nom</th>
-                      <th className="p-4 text-left">Email</th>
-                      <th className="p-4 text-left">Rôle</th>
-                      <th className="p-4 text-left">Statut</th>
-                      <th className="p-4 text-left">Actions</th>
+                      <th className="p-3 text-left">Nom</th>
+                      <th className="p-3 text-left">Email</th>
+                      <th className="p-3 text-left">Rôle</th>
+                      <th className="p-3 text-left">Statut</th>
+                      <th className="p-3 text-center">Actions</th>
                     </tr>
                   </thead>
 
                   <tbody>
-                    {users.map((user) => (
-                      <tr key={user.id} className="border-b hover:bg-blue-50">
-                        <td className="p-4 font-bold">{user.name}</td>
-                        <td className="p-4">{user.email}</td>
-                        <td className="p-4">
-                          <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">
-                            {user.role}
+                    {users.map((u) => (
+                      <tr key={u.id} className="odd:bg-slate-50 hover:bg-blue-50">
+                        <td className="p-3 border-b font-bold">{u.name}</td>
+                        <td className="p-3 border-b">{u.email}</td>
+                        <td className="p-3 border-b">
+                          <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full font-bold text-xs">
+                            {u.role}
                           </span>
                         </td>
-                        <td className="p-4">
-                          {user.active ? (
+                        <td className="p-3 border-b">
+                          {u.active ? (
                             <span className="text-green-600 font-bold">Actif</span>
                           ) : (
                             <span className="text-red-600 font-bold">Bloqué</span>
                           )}
                         </td>
-                        <td className="p-4 flex gap-2">
+                        <td className="p-3 border-b text-center">
                           <button
-                            onClick={() => editUser(user)}
-                            className="bg-yellow-400 text-white px-3 py-2 rounded-lg font-bold"
+                            onClick={() => editUser(u)}
+                            className="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-2 rounded-lg mr-2"
                           >
-                            Edit
+                            Modifier
                           </button>
-
                           <button
-                            onClick={() => deleteUser(user.id)}
-                            className="bg-red-500 text-white px-3 py-2 rounded-lg font-bold"
+                            onClick={() => deleteUser(u.id)}
+                            className="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg"
                           >
                             Supprimer
                           </button>
@@ -368,7 +307,7 @@ export default function AdminPage() {
 
                     {users.length === 0 && (
                       <tr>
-                        <td className="p-6 text-center text-slate-500" colSpan={5}>
+                        <td colSpan={5} className="text-center p-8 text-slate-500">
                           Aucun utilisateur
                         </td>
                       </tr>
@@ -377,89 +316,112 @@ export default function AdminPage() {
                 </table>
               </div>
             </div>
-          </div>
+          )}
 
-          <StudentTable />
+          {activePage === "Créer utilisateur" && (
+            <div className="max-w-3xl bg-white rounded-2xl shadow border p-6">
+              <h2 className="text-2xl font-black mb-1">
+                {editingId ? "Modifier utilisateur" : "Créer utilisateur"}
+              </h2>
+              <p className="text-slate-500 mb-6">
+                Mamorona login sy mot de passe ho an’ny utilisateur.
+              </p>
+
+              <form onSubmit={saveUser} className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <Field label="Nom complet" value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
+                <Field label="Email login" type="email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} />
+
+                <Field
+                  label={editingId ? "Nouveau mot de passe (optionnel)" : "Mot de passe"}
+                  type="password"
+                  value={form.password}
+                  onChange={(v) => setForm({ ...form, password: v })}
+                />
+
+                <label>
+                  <span className="text-slate-600 font-semibold">Rôle</span>
+                  <select
+                    value={form.role}
+                    onChange={(e) => setForm({ ...form, role: e.target.value })}
+                    className="mt-2 w-full border rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="ADMIN">ADMIN</option>
+                    <option value="DIRECTEUR">DIRECTEUR</option>
+                    <option value="SECRETAIRE">SECRETAIRE</option>
+                  </select>
+                </label>
+
+                <label className="md:col-span-2 flex items-center gap-3 bg-slate-50 p-4 rounded-xl border">
+                  <input
+                    type="checkbox"
+                    checked={form.active}
+                    onChange={(e) => setForm({ ...form, active: e.target.checked })}
+                  />
+                  <span className="font-semibold">Compte actif</span>
+                </label>
+
+                <div className="md:col-span-2 flex gap-3">
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 rounded-xl font-bold disabled:opacity-60"
+                  >
+                    {loading ? "Enregistrement..." : editingId ? "Enregistrer modification" : "Créer utilisateur"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingId(null);
+                      setForm({
+                        name: "",
+                        email: "",
+                        password: "",
+                        role: "SECRETAIRE",
+                        active: true,
+                      });
+                    }}
+                    className="bg-slate-200 hover:bg-slate-300 px-5 py-3 rounded-xl font-bold"
+                  >
+                    Annuler
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {!["Dashboard admin", "Utilisateurs", "Créer utilisateur"].includes(activePage) && (
+            <div className="bg-white rounded-2xl shadow border p-8 text-center">
+              <h2 className="text-2xl font-black">{activePage}</h2>
+              <p className="text-slate-500 mt-2">Page bientôt disponible.</p>
+            </div>
+          )}
         </div>
       </section>
     </main>
   );
 }
 
-function Card({ title, value }: { title: string; value: string }) {
+function Card({ title, value, icon }: any) {
   return (
-    <div className="bg-white border rounded-2xl p-6 shadow-sm">
+    <div className="bg-white rounded-2xl shadow border p-6">
+      <div className="text-3xl mb-3">{icon}</div>
       <p className="text-slate-500">{title}</p>
-      <h3 className="text-3xl font-black mt-2">{value}</h3>
+      <h3 className="text-3xl font-black">{value}</h3>
     </div>
   );
 }
 
-function StudentTable() {
-  const students = [
-    ["ST0034", "Strelitzia School", "2025-2026", "31/10/2025", "VEROMANANTSOA", "Chan Jacyntha", "Feminin", "GRADE 6", "G6", "0340493034"],
-    ["ST0035", "Strelitzia School", "2025-2026", "03/07/2025", "RAZANADRASOA", "Dither ULEP", "Masculin", "GRADE 6", "G6", "0327921266"],
-    ["ST0037", "Strelitzia School", "2025-2026", "06/08/2025", "MERVAN", "Latifah Noemie", "Feminin", "GRADE 5", "G5A", "0341806868"],
-    ["ST0038", "Strelitzia School", "2025-2026", "30/06/2025", "ANDRIAMBOLAFO", "Maité Kerenia", "Feminin", "GRADE 5", "G5A", "0340855083"],
-  ];
-
+function Field({ label, value, onChange, type = "text" }: any) {
   return (
-    <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
-      <div className="p-5 border-b flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div>
-          <h3 className="text-xl font-black">Listes des étudiants (464)</h3>
-          <p className="text-slate-500">Page utilisateur/dashboard design école.</p>
-        </div>
-
-        <div className="flex flex-wrap gap-3">
-          <select className="border rounded-xl px-4 py-2">
-            <option>Année scolaire : 2025-2026</option>
-          </select>
-          <select className="border rounded-xl px-4 py-2">
-            <option>Classe : TOUT</option>
-          </select>
-          <select className="border rounded-xl px-4 py-2">
-            <option>Série : TOUT</option>
-          </select>
-        </div>
-      </div>
-
-      <div className="p-4 flex flex-wrap gap-3">
-        <input className="border rounded-xl px-4 py-3" placeholder="rechercher..." />
-        <button className="bg-slate-900 text-white px-4 py-3 rounded-xl">Rechercher</button>
-        <button className="bg-red-500 text-white px-4 py-3 rounded-xl">Initialiser</button>
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[1180px]">
-          <thead className="bg-[#111827] text-white">
-            <tr>
-              {["N°", "Site", "AS", "Date inscription", "Nom", "Prénom(s)", "Sexe", "Classe", "Section", "Contact", "Actions"].map((h) => (
-                <th key={h} className="p-4 text-left whitespace-nowrap">
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-
-          <tbody>
-            {students.map((s) => (
-              <tr key={s[0]} className="border-b odd:bg-blue-50/50 hover:bg-blue-100">
-                {s.map((v, i) => (
-                  <td key={i} className={`p-4 ${i === 0 ? "text-red-500 font-bold" : ""}`}>
-                    {v}
-                  </td>
-                ))}
-                <td className="p-4 flex gap-2">
-                  <button className="bg-blue-600 text-white px-3 py-2 rounded-lg">Voir</button>
-                  <button className="bg-yellow-400 text-white px-3 py-2 rounded-lg">Edit</button>
-                  <button className="bg-red-500 text-white px-3 py-2 rounded-lg">Del</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <label>
+      <span className="text-slate-600 font-semibold">{label}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="mt-2 w-full border rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
+      />
+    </label>
   );
 }
