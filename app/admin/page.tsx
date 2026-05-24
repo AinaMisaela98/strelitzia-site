@@ -328,14 +328,14 @@ export default function AdminPage() {
               </p>
 
               <form onSubmit={saveUser} className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <Field label="Nom complet" value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
-                <Field label="Email login" type="email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} />
+                <Field label="Nom complet" value={form.name} onChange={(v: string) => setForm({ ...form, name: v })} />
+                <Field label="Email login" type="email" value={form.email} onChange={(v: string) => setForm({ ...form, email: v })} />
 
                 <Field
                   label={editingId ? "Nouveau mot de passe (optionnel)" : "Mot de passe"}
                   type="password"
                   value={form.password}
-                  onChange={(v) => setForm({ ...form, password: v })}
+                  onChange={(v: string) => setForm({ ...form, password: v })}
                 />
 
                 <label>
