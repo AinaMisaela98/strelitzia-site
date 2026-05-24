@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type AuthUser = {
   id: number;
@@ -103,15 +103,23 @@ const [search, setSearch] = useState("");
 const [classe, setClasse] = useState("TOUT");
 const [serie, setSerie] = useState("TOUT");
 
+const loadingStudentsRef = useRef(false);
+const loadingAcademicsRef = useRef(false);
+
 async function loadSchoolYears() {
   try {
-    const res = await fetch("/api/school-years", { cache: "no-store" });
+    const res = await fetch("/api/school-years", {
+      cache: "no-store",
+    });
+
     const data = await res.json();
 
     if (Array.isArray(data)) {
       setSchoolYears(data);
 
-      const active = data.find((y: SchoolYear) => y.active);
+      const active = data.find(
+        (y: SchoolYear) => y.active
+      );
 
       if (active?.name) {
         setSelectedYear(active.name);
@@ -123,43 +131,67 @@ async function loadSchoolYears() {
 }
 
 async function loadAcademics(yearParam?: string) {
+  if (loadingAcademicsRef.current) return;
+
   try {
+    loadingAcademicsRef.current = true;
+
     const yearToUse = yearParam || selectedYear;
 
     if (!yearToUse) return;
 
     const res = await fetch(
       `/api/academics?year=${encodeURIComponent(yearToUse)}`,
-      { cache: "no-store" }
+      {
+        cache: "no-store",
+      }
     );
 
     const data = await res.json();
 
     setAcademics({
-      levels: Array.isArray(data?.levels) ? data.levels : [],
+      levels: Array.isArray(data?.levels)
+        ? data.levels
+        : [],
     });
   } catch {
-    setAcademics({ levels: [] });
+    setAcademics({
+      levels: [],
+    });
+  } finally {
+    loadingAcademicsRef.current = false;
   }
 }
 
 async function loadStudents(yearParam?: string) {
+  if (loadingStudentsRef.current) return;
+
   try {
+    loadingStudentsRef.current = true;
+    setLoadingStudents(true);
+
     const yearToUse = yearParam || selectedYear;
 
     if (!yearToUse) return;
 
     const res = await fetch(
       `/api/students?year=${encodeURIComponent(yearToUse)}`,
-      { cache: "no-store" }
+      {
+        cache: "no-store",
+      }
     );
 
     const data = await res.json();
 
-    setStudents(Array.isArray(data) ? data : []);
+    setStudents(
+      Array.isArray(data)
+        ? data
+        : []
+    );
   } catch {
     setStudents([]);
   } finally {
+    loadingStudentsRef.current = false;
     setLoadingStudents(false);
   }
 }
@@ -174,8 +206,11 @@ useEffect(() => {
   setClasse("TOUT");
   setSerie("TOUT");
 
-  loadStudents(selectedYear);
-  loadAcademics(selectedYear);
+  Promise.all([
+    loadStudents(selectedYear),
+    loadAcademics(selectedYear),
+  ]);
+
 }, [selectedYear]);
 
  
