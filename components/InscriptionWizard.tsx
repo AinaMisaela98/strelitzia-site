@@ -447,7 +447,10 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {Object.entries(form).map(([key, value]) => (
+                        {Object.entries(form)
+                          .filter(([key]) => key !== "photoUrl")
+                          .map(([key, value]) => (
+                            
                           <div key={key} className="bg-white rounded-2xl border p-4">
                             <p className="text-[11px] uppercase tracking-wide text-slate-400 font-bold">{key}</p>
                             <p className="font-bold text-slate-800 mt-1 break-words">{value || "-"}</p>
