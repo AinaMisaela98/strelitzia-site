@@ -87,7 +87,8 @@ const menus = [
 ];
 
 export default function UserDashboard({ user }: { user: AuthUser }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+const [sidebarOpen, setSidebarOpen] = useState(false);
+const [openActionId, setOpenActionId] = useState<string | number | null>(null);
 
 const [students, setStudents] = useState<Student[]>([]);
 const [loadingStudents, setLoadingStudents] = useState(false);
@@ -828,53 +829,86 @@ useEffect(() => {
         {s.lieuNaissance || "-"}
       </td>
 
-      {/* ACTION */}
-      <td className="border border-slate-300 px-[2px] py-[1px] text-center">
-        <div className="relative group inline-block">
-          <button className="border border-slate-400 bg-slate-100 hover:bg-slate-200 px-[4px] py-[1px] rounded text-[10px]">
-            ▾
+{/* ACTION */}
+<td className="border border-slate-300 px-[2px] py-[1px] text-center">
+  <div className="relative inline-block">
+    <button
+      type="button"
+      onClick={() =>
+        setOpenActionId(openActionId === s.id ? null : s.id)
+      }
+      className="border border-slate-400 bg-slate-100 hover:bg-slate-200 active:scale-95 transition px-[6px] py-[2px] rounded text-[11px] font-bold"
+    >
+      ⋮
+    </button>
+
+    {openActionId === s.id && (
+      <>
+        <div
+          onClick={() => setOpenActionId(null)}
+          className="fixed inset-0 z-40"
+        />
+
+        <div className="absolute right-0 mt-1 bg-white shadow-2xl border border-slate-200 rounded-xl z-50 min-w-[220px] overflow-hidden text-left">
+          <button
+            type="button"
+            onClick={() => {
+              setOpenActionId(null);
+              window.location.href = `/user/student/${s.id}`;
+            }}
+            className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium"
+          >
+            🧑 Information de l’étudiant
           </button>
 
-          <div className="absolute right-0 hidden group-hover:block bg-white shadow-2xl border rounded-md z-50 min-w-[210px] overflow-hidden text-left">
-            <button
-              onClick={() =>
-                (window.location.href = `/user/student/${s.id}`)
-              }
-              className="w-full text-left px-3 py-2 hover:bg-slate-100 text-[11px]"
-            >
-              🧑 Information de l’étudiant
-            </button>
+          <button
+            type="button"
+            onClick={() => {
+              setOpenActionId(null);
+              alert("Réinscription bientôt disponible");
+            }}
+            className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium"
+          >
+            ↻ Réinscription
+          </button>
 
-            <button
-              onClick={() => alert("Réinscription bientôt disponible")}
-              className="w-full text-left px-3 py-2 hover:bg-slate-100 text-[11px]"
-            >
-              ↻ Réinscription
-            </button>
+          <button
+            type="button"
+            onClick={() => {
+              setOpenActionId(null);
+              alert("Marquer étudiant bientôt");
+            }}
+            className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium"
+          >
+            📑 Marquer l’étudiant
+          </button>
 
-            <button
-              onClick={() => alert("Marquer étudiant bientôt")}
-              className="w-full text-left px-3 py-2 hover:bg-slate-100 text-[11px]"
-            >
-              📑 Marquer l’étudiant
-            </button>
+          <button
+            type="button"
+            onClick={() => {
+              setOpenActionId(null);
+              alert("Transfert bientôt");
+            }}
+            className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium"
+          >
+            🔁 Transférer à un site
+          </button>
 
-            <button
-              onClick={() => alert("Transfert bientôt")}
-              className="w-full text-left px-3 py-2 hover:bg-slate-100 text-[11px]"
-            >
-              🔁 Transférer à un site
-            </button>
-
-            <button
-              onClick={() => deleteStudent(s.id)}
-              className="w-full text-left px-3 py-2 hover:bg-red-50 text-red-600 text-[11px]"
-            >
-              🗑 Supprimer
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setOpenActionId(null);
+              deleteStudent(s.id);
+            }}
+            className="w-full text-left px-4 py-3 hover:bg-red-50 text-red-600 text-[12px] font-semibold"
+          >
+            🗑 Supprimer
+          </button>
         </div>
-      </td>
+      </>
+    )}
+  </div>
+</td>
     </tr>
   ))}
 
