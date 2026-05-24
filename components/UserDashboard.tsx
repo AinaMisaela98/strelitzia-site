@@ -832,15 +832,15 @@ useEffect(() => {
 {/* ACTION */}
 <td className="border border-slate-300 px-[2px] py-[1px] text-center">
   <div className="relative inline-block">
-    <button
-      type="button"
-      onClick={() =>
-        setOpenActionId(openActionId === s.id ? null : s.id)
-      }
-      className="border border-slate-400 bg-slate-100 hover:bg-slate-200 active:scale-95 transition px-[6px] py-[2px] rounded text-[11px] font-bold"
-    >
-      ⋮
-    </button>
+      <button
+        type="button"
+        onClick={() =>
+          setOpenActionId(openActionId === s.id ? null : s.id)
+        }
+        className="border border-slate-400 bg-slate-100 hover:bg-slate-200 active:scale-95 transition px-[4px] py-[1px] rounded text-[10px]"
+      >
+        ▾
+      </button>
 
     {openActionId === s.id && (
       <>
