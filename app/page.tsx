@@ -58,32 +58,50 @@ export default function LoginPage() {
           <p className="text-gray-500 mt-2">Connexion espace école</p>
         </div>
 
-        <form onSubmit={handleLogin} className="space-y-5">
-          <div>
-            <label className="text-sm font-semibold text-gray-700">Email</label>
-            <input
-              className="mt-2 w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="Email"
-              required
-            />
-          </div>
+       <form
+  onSubmit={handleLogin}
+  autoComplete="off"
+  className="space-y-5"
+>
+  <div>
+    <label className="text-sm font-semibold text-gray-700">
+      Email
+    </label>
 
-          <div>
-            <label className="text-sm font-semibold text-gray-700">
-              Mot de passe
-            </label>
-            <input
-              className="mt-2 w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Mot de passe"
-              required
-            />
-          </div>
+    <input
+      className="mt-2 w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+      type="email"
+      value={email}
+      onChange={(e) => setEmail(e.target.value)}
+      placeholder="Email"
+      autoComplete="off"
+      autoCorrect="off"
+      autoCapitalize="off"
+      spellCheck={false}
+      name="strelitzia_email"
+      required
+    />
+  </div>
+
+  <div>
+    <label className="text-sm font-semibold text-gray-700">
+      Mot de passe
+    </label>
+
+    <input
+      className="mt-2 w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+      type="password"
+      value={password}
+      onChange={(e) => setPassword(e.target.value)}
+      placeholder="Mot de passe"
+      autoComplete="new-password"
+      autoCorrect="off"
+      autoCapitalize="off"
+      spellCheck={false}
+      name="strelitzia_password"
+      required
+    />
+  </div>
 
           {error && (
             <div className="bg-red-50 text-red-700 px-4 py-3 rounded-xl text-sm">
