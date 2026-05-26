@@ -331,6 +331,26 @@ useEffect(() => {
         .table-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
         .table-scroll::-webkit-scrollbar-thumb { background: #9ca3af; border-radius: 10px; }
         .table-scroll::-webkit-scrollbar-track { background: #e5e7eb; }
+        .student-table-wrap { margin: 0 !important; border-radius: 0 !important; }
+        .sticky-action-col {
+          position: sticky;
+          right: 0;
+          z-index: 25;
+          box-shadow: -2px 0 6px rgba(15, 23, 42, 0.12);
+        }
+        thead .sticky-action-col { z-index: 45; }
+        @media (max-width: 768px) {
+          header.student-header { padding: 8px 6px !important; }
+          .student-table-wrap { width: 100%; }
+          .student-table { min-width: 1120px !important; font-size: 11.8px !important; }
+          .student-table th, .student-table td { padding-top: 5px !important; padding-bottom: 5px !important; }
+          .mobile-action-btn {
+            min-width: 38px;
+            height: 28px;
+            font-size: 13px !important;
+            font-weight: 900;
+          }
+        }
 
         @media print {
           aside, .top-actions, .search-zone, footer { display: none !important; }
@@ -421,7 +441,7 @@ useEffect(() => {
 )}
 
 <section className="flex-1 min-w-0 h-full flex flex-col overflow-hidden">
-  <header className="shrink-0 bg-[#f8fafc] border-b border-slate-200 px-3 md:px-5 py-4">
+  <header className="student-header shrink-0 bg-[#f8fafc] border-b border-slate-200 px-2 md:px-5 py-2 md:py-4">
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 md:p-4">
       <div className="flex items-center justify-between gap-3 mb-3">
         <div className="flex items-center gap-3 min-w-0">
@@ -735,8 +755,8 @@ useEffect(() => {
           </button>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-auto table-scroll bg-white">
-         <table className="w-max min-w-[1000px] border-separate border-spacing-0 text-[12px]">
+        <div className="student-table-wrap flex-1 min-h-0 overflow-auto table-scroll bg-white border-t border-slate-300">
+         <table className="student-table w-full min-w-[1120px] border-separate border-spacing-0 text-[12px]">
             <thead className="sticky top-0 z-30 bg-[#262b34] text-white shadow-sm">
               <tr>
                 {[
@@ -752,13 +772,15 @@ useEffect(() => {
                   "Contact",
                   "Date Naiss.",
                   "Lieu Naiss.",
-                         "-",
+                  "Action",
                 ].map((h) => (
                   <th
                     key={h}
-                    className="border border-slate-300 px-3 py-2 text-left whitespace-nowrap font-bold bg-[#262b34]"
+                    className={`border border-slate-300 px-3 py-2 text-left whitespace-nowrap font-bold bg-[#262b34] ${
+                      h === "Action" ? "sticky-action-col text-center w-[64px] min-w-[64px]" : ""
+                    }`}
                   >
-                    {h} ↕
+                    {h === "Action" ? "Action" : `${h} ↕`}
                   </th>
                 ))}
               </tr>
@@ -768,7 +790,7 @@ useEffect(() => {
   {filtered.length === 0 ? (
     <tr>
       <td
-        colSpan={15}
+        colSpan={13}
         className="p-8 text-center text-slate-500"
       >
         Aucun étudiant trouvé
@@ -781,74 +803,74 @@ useEffect(() => {
         className="odd:bg-[#eaf2fb] even:bg-white hover:bg-yellow-50 leading-none"
       >
       {/* MATRICULE */}
-      <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px] text-red-500 font-medium">
+      <td className="border border-slate-300 px-[4px] py-[4px] whitespace-nowrap text-[12px] text-red-500 font-medium">
         {s.matricule}
       </td>
 
       {/* SITE */}
-      <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px]">
+      <td className="border border-slate-300 px-[4px] py-[4px] whitespace-nowrap text-[12px]">
         {s.site}
       </td>
 
       {/* ANNEE */}
-      <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px]">
+      <td className="border border-slate-300 px-[4px] py-[4px] whitespace-nowrap text-[12px]">
         {s.anneeScolaire}
       </td>
 
       {/* DATE INSCRIPTION */}
-      <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px]">
+      <td className="border border-slate-300 px-[4px] py-[4px] whitespace-nowrap text-[12px]">
         {formatDate(s.dateInscription)}
       </td>
 
       {/* NOM */}
-      <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px] font-semibold">
+      <td className="border border-slate-300 px-[4px] py-[4px] whitespace-nowrap text-[12px] font-semibold">
         {s.nom}
       </td>
 
       {/* PRENOMS */}
-      <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px]">
+      <td className="border border-slate-300 px-[4px] py-[4px] whitespace-nowrap text-[12px]">
         {s.prenoms}
       </td>
 
       {/* SEXE */}
-      <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px] text-center">
+      <td className="border border-slate-300 px-[4px] py-[4px] whitespace-nowrap text-[12px] text-center">
         {s.sexe}
       </td>
 
       {/* CLASSE */}
-      <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px] font-medium">
+      <td className="border border-slate-300 px-[4px] py-[4px] whitespace-nowrap text-[12px] font-medium">
         {s.classe}
       </td>
 
       {/* SECTION */}
-      <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px]">
+      <td className="border border-slate-300 px-[4px] py-[4px] whitespace-nowrap text-[12px]">
         {s.section}
       </td>
 
       {/* CONTACT */}
-      <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px]">
+      <td className="border border-slate-300 px-[4px] py-[4px] whitespace-nowrap text-[12px]">
         {s.contact || "-"}
       </td>
 
       {/* DATE NAISSANCE */}
-      <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px]">
+      <td className="border border-slate-300 px-[4px] py-[4px] whitespace-nowrap text-[12px]">
         {formatDate(s.dateNaissance)}
       </td>
 
       {/* LIEU */}
-      <td className="border border-slate-300 px-[4px] py-[2px] text-[11.5px] max-w-[90px] truncate">
+      <td className="border border-slate-300 px-[4px] py-[4px] text-[12px] max-w-[90px] truncate">
         {s.lieuNaissance || "-"}
       </td>
 
 {/* ACTION */}
-<td className="border border-slate-300 px-[2px] py-[1px] text-center">
+<td className="sticky-action-col border border-slate-300 px-[3px] py-[2px] text-center bg-white">
   <div className="relative inline-block">
       <button
         type="button"
         onClick={() =>
           setOpenActionId(openActionId === s.id ? null : s.id)
         }
-        className="border border-slate-400 bg-slate-100 hover:bg-slate-200 active:scale-95 transition px-[4px] py-[1px] rounded text-[10px]"
+        className="mobile-action-btn border border-slate-400 bg-slate-100 hover:bg-slate-200 active:scale-95 transition px-[6px] py-[2px] rounded text-[11px] shadow-sm"
       >
         ▾
       </button>
@@ -860,7 +882,7 @@ useEffect(() => {
           className="fixed inset-0 z-40"
         />
 
-        <div className="fixed right-3 top-[120px] z-[9999] w-[220px] max-w-[calc(100vw-24px)] bg-white shadow-2xl border border-slate-200 rounded-xl overflow-hidden text-left sm:absolute sm:right-0 sm:top-auto sm:mt-1 sm:z-50">
+        <div className="absolute left-0 mt-1 bg-white shadow-2xl border border-slate-200 rounded-xl z-50 min-w-[220px] overflow-hidden text-left">
           <button
             type="button"
             onClick={() => {
@@ -920,6 +942,7 @@ useEffect(() => {
     )}
   </div>
 </td>
+
     </tr>
   )))}
             </tbody>
