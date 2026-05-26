@@ -863,17 +863,17 @@ useEffect(() => {
       </td>
 
 {/* ACTION */}
-<td className="sticky-action-col border border-slate-300 px-[3px] py-[2px] text-center bg-white">
-  <div className="relative inline-block">
-      <button
-        type="button"
-        onClick={() =>
-          setOpenActionId(openActionId === s.id ? null : s.id)
-        }
-        className="mobile-action-btn border border-slate-400 bg-slate-100 hover:bg-slate-200 active:scale-95 transition px-[6px] py-[2px] rounded text-[11px] shadow-sm"
-      >
-        ▾
-      </button>
+<td className="sticky-action-col border border-slate-300 px-[3px] py-[2px] text-center bg-white overflow-visible">
+  <div className="relative inline-block overflow-visible">
+    <button
+      type="button"
+      onClick={() =>
+        setOpenActionId(openActionId === s.id ? null : s.id)
+      }
+      className="mobile-action-btn border border-slate-400 bg-slate-100 hover:bg-slate-200 active:scale-95 transition px-[6px] py-[2px] rounded text-[11px] shadow-sm"
+    >
+      ▾
+    </button>
 
     {openActionId === s.id && (
       <>
@@ -882,14 +882,14 @@ useEffect(() => {
           className="fixed inset-0 z-40"
         />
 
-        <div className="absolute left-0 mt-1 bg-white shadow-2xl border border-slate-200 rounded-xl z-50 min-w-[220px] overflow-hidden text-left">
+        <div className="absolute right-0 top-full mt-1 bg-white shadow-2xl border border-slate-200 rounded-xl z-[9999] w-[230px] overflow-hidden text-left animate-in fade-in zoom-in-95 duration-100">
           <button
             type="button"
             onClick={() => {
               setOpenActionId(null);
               window.location.href = `/user/student/${s.id}`;
             }}
-            className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium"
+            className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium transition"
           >
             🧑 Information de l’étudiant
           </button>
@@ -900,7 +900,7 @@ useEffect(() => {
               setOpenActionId(null);
               alert("Réinscription bientôt disponible");
             }}
-            className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium"
+            className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium transition"
           >
             ↻ Réinscription
           </button>
@@ -911,7 +911,7 @@ useEffect(() => {
               setOpenActionId(null);
               alert("Marquer étudiant bientôt");
             }}
-            className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium"
+            className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium transition"
           >
             📑 Marquer l’étudiant
           </button>
@@ -922,7 +922,7 @@ useEffect(() => {
               setOpenActionId(null);
               alert("Transfert bientôt");
             }}
-            className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium"
+            className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium transition"
           >
             🔁 Transférer à un site
           </button>
@@ -933,7 +933,7 @@ useEffect(() => {
               setOpenActionId(null);
               deleteStudent(s.id);
             }}
-            className="w-full text-left px-4 py-3 hover:bg-red-50 text-red-600 text-[12px] font-semibold"
+            className="w-full text-left px-4 py-3 hover:bg-red-50 text-red-600 text-[12px] font-semibold transition"
           >
             🗑 Supprimer
           </button>
