@@ -860,7 +860,7 @@ useEffect(() => {
           className="fixed inset-0 z-40"
         />
 
-        <div className="absolute right-0 mt-1 bg-white shadow-2xl border border-slate-200 rounded-xl z-50 min-w-[220px] overflow-hidden text-left">
+        <div className="fixed right-3 top-[120px] z-[9999] w-[220px] max-w-[calc(100vw-24px)] bg-white shadow-2xl border border-slate-200 rounded-xl overflow-hidden text-left sm:absolute sm:right-0 sm:top-auto sm:mt-1 sm:z-50">
           <button
             type="button"
             onClick={() => {
