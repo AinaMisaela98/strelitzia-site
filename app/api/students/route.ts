@@ -2,45 +2,54 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthUser } from "@/lib/auth";
 
-function cleanString(value: any) {
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+function cleanString(value: unknown): string {
   if (value === null || value === undefined) return "";
   return String(value).trim();
 }
 
-function cleanDate(value: any) {
+function cleanDate(value: unknown): Date | null {
   if (!value) return null;
-  const date = new Date(value);
-  if (isNaN(date.getTime())) return null;
-  return date;
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
-async function getActiveSchoolYearName() {
-  let activeYear = await prisma.schoolYear.findFirst({
+async function getActiveSchoolYearName(): Promise<string> {
+  const activeYear = await prisma.schoolYear.findFirst({
     where: { active: true },
     select: { name: true },
   });
 
-  if (activeYear) return activeYear.name;
-
-  const created = await prisma.schoolYear.create({
-    data: {
-      name: "2025-2026",
-      active: true,
-    },
-    select: { name: true },
-  });
-
-  return created.name;
+  return activeYear?.name || "2025-2026";
 }
 
+const studentSelect = {
+  id: true,
+  matricule: true,
+  site: true,
+  anneeScolaire: true,
+  dateInscription: true,
+  photoUrl: true,
+  nom: true,
+  prenoms: true,
+  sexe: true,
+  classe: true,
+  section: true,
+  contact: true,
+  dateNaissance: true,
+  lieuNaissance: true,
+} as const;
+
 export async function GET(req: Request) {
-  const user = await getAuthUser();
-
-  if (!user) {
-    return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
-  }
-
   try {
+    const user = await getAuthUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+    }
+
     const url = new URL(req.url);
     const year = cleanString(url.searchParams.get("year"));
     const selectedYear = year || (await getActiveSchoolYearName());
@@ -49,84 +58,52 @@ export async function GET(req: Request) {
       where: {
         anneeScolaire: selectedYear,
       },
-      orderBy: [
-        { createdAt: "desc" },
-        { id: "desc" },
-      ],
-      take: 300,
-      select: {
-        id: true,
-        matricule: true,
-        site: true,
-        anneeScolaire: true,
-        dateInscription: true,
-        photoUrl: true,
-
-        nom: true,
-        prenoms: true,
-        sexe: true,
-        classe: true,
-        section: true,
-        contact: true,
-
-        dateNaissance: true,
-        lieuNaissance: true,
-        adresse: true,
-        signeParticulier: true,
-        maladieAllergie: true,
-        email: true,
-
-        pereNom: true,
-        pereTel: true,
-        mereNom: true,
-        mereTel: true,
-        parentAdresse: true,
-
-        tuteurNom: true,
-        tuteurLien: true,
-        tuteurTel: true,
-        tuteurAdresse: true,
-
-        niveau: true,
-        fraisInscription: true,
-        fraisScolarite: true,
-
-        activite: true,
-        remarque: true,
-        createdAt: true,
+      select: studentSelect,
+      orderBy: {
+        id: "desc",
       },
+      take: 500,
     });
 
-    return NextResponse.json(students, {
-      headers: {
-        "Cache-Control": "no-store, no-cache, must-revalidate",
-      },
-    });
-  } catch (error: any) {
     return NextResponse.json(
-      { error: error?.message || "Erreur récupération étudiants" },
+      { students },
+      {
+        status: 200,
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate",
+        },
+      }
+    );
+  } catch (error: any) {
+    console.error("GET /api/students error:", error);
+
+    return NextResponse.json(
+      {
+        error:
+          error?.code === "P2024"
+            ? "Base de données occupée. Réessayez dans quelques secondes."
+            : error?.code === "P1017"
+            ? "Connexion base de données fermée. Vérifiez Supabase."
+            : "Erreur récupération étudiants",
+      },
       { status: 500 }
     );
   }
 }
 
 export async function POST(req: Request) {
-  const user = await getAuthUser();
-
-  if (!user) {
-    return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
-  }
-
   try {
-    const body = await req.json();
+    const user = await getAuthUser();
 
-    const activeYearName =
-      cleanString(body.anneeScolaire) || (await getActiveSchoolYearName());
+    if (!user) {
+      return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+    }
+
+    const body = await req.json();
 
     const matricule = cleanString(body.matricule);
     const nom = cleanString(body.nom);
     const prenoms = cleanString(body.prenoms);
-    const sexe = body.sexe === "Feminin" ? "Feminin" : "Masculin";
     const classe = cleanString(body.classe);
     const section = cleanString(body.section);
 
@@ -140,6 +117,9 @@ export async function POST(req: Request) {
       );
     }
 
+    const activeYearName =
+      cleanString(body.anneeScolaire) || (await getActiveSchoolYearName());
+
     const student = await prisma.student.create({
       data: {
         matricule,
@@ -151,7 +131,7 @@ export async function POST(req: Request) {
 
         nom,
         prenoms,
-        sexe,
+        sexe: body.sexe === "Feminin" ? "Feminin" : "Masculin",
         classe,
         section,
 
@@ -182,15 +162,21 @@ export async function POST(req: Request) {
         activite: cleanString(body.activite),
         remarque: cleanString(body.remarque),
       },
+      select: studentSelect,
     });
 
-    return NextResponse.json(student, {
-      status: 201,
-      headers: {
-        "Cache-Control": "no-store, no-cache, must-revalidate",
-      },
-    });
+    return NextResponse.json(
+      { student },
+      {
+        status: 201,
+        headers: {
+          "Cache-Control": "no-store",
+        },
+      }
+    );
   } catch (error: any) {
+    console.error("POST /api/students error:", error);
+
     if (error?.code === "P2002") {
       return NextResponse.json(
         { error: "Ce matricule existe déjà" },
@@ -199,7 +185,12 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json(
-      { error: error?.message || "Erreur base de données" },
+      {
+        error:
+          error?.code === "P2024"
+            ? "Base de données occupée. Réessayez."
+            : error?.message || "Erreur base de données",
+      },
       { status: 500 }
     );
   }

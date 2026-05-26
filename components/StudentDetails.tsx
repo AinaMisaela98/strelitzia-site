@@ -1,16 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 
 export default function StudentDetails({ user, student }: any) {
   const [tab, setTab] = useState("PDF");
   const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({
-  ...student,
+ const initialForm = useMemo(
+  () => ({
+    ...student,
 
-  signeParticulier: student.signeParticulier || "",
-  maladieAllergie: student.maladieAllergie || "",
-});
+    signeParticulier: student.signeParticulier || "",
+    maladieAllergie: student.maladieAllergie || "",
+  }),
+  [student]
+);
+
+const [form, setForm] = useState(initialForm);
   const [saving, setSaving] = useState(false);
 
   const tabs = [

@@ -21,7 +21,6 @@ type Student = {
   site: string;
   anneeScolaire: string;
   dateInscription: string;
-  photoUrl?: string | null;
   nom: string;
   prenoms: string;
   sexe: string;
@@ -106,6 +105,7 @@ const [serie, setSerie] = useState("TOUT");
 
 const loadingStudentsRef = useRef(false);
 const loadingAcademicsRef = useRef(false);
+const initializedRef = useRef(false);
 
 async function loadSchoolYears() {
   try {
@@ -118,16 +118,14 @@ async function loadSchoolYears() {
     if (Array.isArray(data)) {
       setSchoolYears(data);
 
-      const active = data.find(
-        (y: SchoolYear) => y.active
-      );
-
-      if (active?.name) {
-        setSelectedYear(active.name);
-      }
+      const active = data.find((y: SchoolYear) => y.active);
+      return active?.name || data[0]?.name || "2025-2026";
     }
+
+    return "2025-2026";
   } catch {
     setSchoolYears([]);
+    return "2025-2026";
   }
 }
 
@@ -187,21 +185,38 @@ async function loadStudents(yearParam?: string) {
     setStudents(
       Array.isArray(data)
         ? data
-        : []
+        : data.students || []
     );
-  } catch {
-    setStudents([]);
+
+  } catch (error) {
+    console.error(error);
   } finally {
     loadingStudentsRef.current = false;
     setLoadingStudents(false);
   }
 }
-
+  
 useEffect(() => {
-  loadSchoolYears();
+  async function initDashboard() {
+    const yearToUse = await loadSchoolYears();
+
+    setSelectedYear(yearToUse);
+    setClasse("TOUT");
+    setSerie("TOUT");
+
+    await Promise.all([
+      loadStudents(yearToUse),
+      loadAcademics(yearToUse),
+    ]);
+
+    initializedRef.current = true;
+  }
+
+  initDashboard();
 }, []);
 
 useEffect(() => {
+  if (!initializedRef.current) return;
   if (!selectedYear) return;
 
   setClasse("TOUT");
@@ -211,7 +226,6 @@ useEffect(() => {
     loadStudents(selectedYear),
     loadAcademics(selectedYear),
   ]);
-
 }, [selectedYear]);
 
  
@@ -437,7 +451,11 @@ useEffect(() => {
       <div className="w-full overflow-x-auto pb-1">
         <div className="flex flex-nowrap items-center gap-2 min-w-max pr-2">
           <button
-            onClick={() => loadStudents(selectedYear)}
+            onClick={() => {
+              loadSchoolYears();
+              loadStudents(selectedYear);
+              loadAcademics(selectedYear);
+            }}
             className="h-[40px] px-4 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white text-[12px] font-bold whitespace-nowrap transition shadow-sm"
           >
             ⟳ Actualiser
@@ -629,6 +647,7 @@ useEffect(() => {
                       <th>Matricule</th>
                       <th>Nom</th>
                       <th>Prénoms</th>
+                      <th>Date de naissance</th>
                       <th>Sexe</th>
                       <th>Série</th>
                       <th>Téléphone</th>
@@ -641,6 +660,13 @@ useEffect(() => {
                         <td>${s.matricule || ""}</td>
                         <td>${s.nom || ""}</td>
                         <td>${s.prenoms || ""}</td>
+                        <td>
+                          ${
+                            s.dateNaissance
+                              ? new Date(s.dateNaissance).toLocaleDateString("fr-FR")
+                              : ""
+                          }
+                        </td>
                         <td>${s.sexe || ""}</td>
                         <td>${s.section || ""}</td>
                         <td>${s.contact || ""}</td>
@@ -714,7 +740,6 @@ useEffect(() => {
             <thead className="sticky top-0 z-30 bg-[#262b34] text-white shadow-sm">
               <tr>
                 {[
-                  "Photo",
                   "M°",
                   "Site",
                   "AS",
@@ -740,35 +765,21 @@ useEffect(() => {
             </thead>
 
             <tbody>
-              {loadingStudents && (
-                <tr>
-                  <td colSpan={15} className="p-8 text-center text-slate-500">
-                    Chargement des étudiants...
-                  </td>
-                </tr>
-              )}
-
-               {!loadingStudents &&
-  filtered.map((s) => (
-    <tr
-      key={s.id}
-      className="odd:bg-[#eaf2fb] even:bg-white hover:bg-yellow-50 leading-none"
-    >
-      {/* PHOTO */}
-      <td className="border border-slate-300 px-[1px] py-[1px] w-[34px] min-w-[34px] max-w-[34px]">
-        {s.photoUrl ? (
-          <img
-            src={s.photoUrl}
-            alt={s.nom}
-            className="w-7 h-7 rounded-full object-cover border"
-          />
-        ) : (
-          <div className="w-7 h-7 rounded-full bg-slate-300 flex items-center justify-center text-[10px]">
-            👤
-          </div>
-        )}
+  {filtered.length === 0 ? (
+    <tr>
+      <td
+        colSpan={15}
+        className="p-8 text-center text-slate-500"
+      >
+        Aucun étudiant trouvé
       </td>
-
+    </tr>
+  ) : (
+    filtered.map((s) => (
+      <tr
+        key={s.id}
+        className="odd:bg-[#eaf2fb] even:bg-white hover:bg-yellow-50 leading-none"
+      >
       {/* MATRICULE */}
       <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px] text-red-500 font-medium">
         {s.matricule}
@@ -910,15 +921,7 @@ useEffect(() => {
   </div>
 </td>
     </tr>
-  ))}
-
-              {!loadingStudents && filtered.length === 0 && (
-                <tr>
-                  <td colSpan={15} className="p-8 text-center text-slate-500">
-                    Aucun étudiant trouvé
-                  </td>
-                </tr>
-              )}
+  )))}
             </tbody>
           </table>
         </div>

@@ -6,7 +6,12 @@
     "dev": "next dev",
     "build": "prisma generate && next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+
+    "prisma:local:push": "dotenv -e .env.local -- prisma db push --schema=prisma/schema.local.prisma",
+    "prisma:local:studio": "dotenv -e .env.local -- prisma studio --schema=prisma/schema.local.prisma",
+
+    "prisma:prod:generate": "dotenv -e .env -- prisma generate --schema=prisma/schema.prisma"
   },
   "dependencies": {
     "@prisma/client": "^6.9.0",
@@ -27,6 +32,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv-cli": "^11.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",
