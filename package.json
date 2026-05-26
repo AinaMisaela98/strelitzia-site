@@ -4,13 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:local": "dotenv -e .env.local -- next dev",
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
 
     "prisma:local:push": "dotenv -e .env.local -- prisma db push --schema=prisma/schema.local.prisma",
+    "prisma:local:generate": "dotenv -e .env.local -- prisma generate --schema=prisma/schema.local.prisma",
     "prisma:local:studio": "dotenv -e .env.local -- prisma studio --schema=prisma/schema.local.prisma",
-
     "prisma:prod:generate": "dotenv -e .env -- prisma generate --schema=prisma/schema.prisma"
   },
   "dependencies": {

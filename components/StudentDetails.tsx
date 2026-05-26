@@ -1,22 +1,54 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 
 export default function StudentDetails({ user, student }: any) {
   const [tab, setTab] = useState("PDF");
   const [editing, setEditing] = useState(false);
- const initialForm = useMemo(
-  () => ({
-    ...student,
 
-    signeParticulier: student.signeParticulier || "",
-    maladieAllergie: student.maladieAllergie || "",
-  }),
-  [student]
-);
+  const initialForm = useMemo(
+    () => ({
+      ...student,
+      signeParticulier: student.signeParticulier || "",
+      maladieAllergie: student.maladieAllergie || "",
+    }),
+    [student]
+  );
 
-const [form, setForm] = useState(initialForm);
+  const [form, setForm] = useState(initialForm);
   const [saving, setSaving] = useState(false);
+
+  const [academics, setAcademics] = useState<any[]>([]);
+
+  useEffect(() => {
+    async function loadAcademics() {
+      try {
+        const year = form.anneeScolaire || "2025-2026";
+        const res = await fetch(`/api/academics?year=${encodeURIComponent(year)}`);
+        const data = await res.json();
+
+        setAcademics(Array.isArray(data) ? data : data.levels || []);
+      } catch {
+        setAcademics([]);
+      }
+    }
+
+    loadAcademics();
+  }, [form.anneeScolaire]);
+
+  const classOptions = useMemo(() => {
+    const classes = academics.flatMap((level: any) => level.classes || []);
+    return Array.from(new Set(classes.map((c: any) => c.name).filter(Boolean)));
+  }, [academics]);
+
+  const serieOptions = useMemo(() => {
+    const classes = academics.flatMap((level: any) => level.classes || []);
+    const selectedClass = classes.find((c: any) => c.name === form.classe);
+
+    return Array.from(
+      new Set((selectedClass?.series || []).map((s: any) => s.name).filter(Boolean))
+    );
+  }, [academics, form.classe]);
 
   const tabs = [
     "PDF",
@@ -31,77 +63,87 @@ const [form, setForm] = useState(initialForm);
   ];
 
   function update(name: string, value: string) {
-    setForm((prev: any) => ({ ...prev, [name]: value }));
+    setForm((prev: any) => {
+      if (name === "classe") {
+        return {
+          ...prev,
+          classe: value,
+          section: "",
+        };
+      }
+
+      return { ...prev, [name]: value };
+    });
   }
 
   async function saveStudent() {
-  try {
-    setSaving(true);
+    try {
+      setSaving(true);
 
-    const payload = {
-      photoUrl: form.photoUrl || "",
-      matricule: form.matricule || "",
-      site: form.site || "Strelitzia School",
-      anneeScolaire: form.anneeScolaire || "2025-2026",
-      dateInscription: form.dateInscription,
+      const payload = {
+        photoUrl: form.photoUrl || "",
+        matricule: form.matricule || "",
+        site: form.site || "Strelitzia School",
+        anneeScolaire: form.anneeScolaire || "2025-2026",
+        dateInscription: form.dateInscription,
 
-      nom: form.nom || "",
-      prenoms: form.prenoms || "",
-      sexe: form.sexe === "Feminin" ? "Feminin" : "Masculin",
-      classe: form.classe || "",
-      section: form.section || "",
+        nom: form.nom || "",
+        prenoms: form.prenoms || "",
+        sexe: form.sexe === "Feminin" ? "Feminin" : "Masculin",
+        classe: form.classe || "",
+        section: form.section || "",
 
-      contact: form.contact || "",
-      dateNaissance: form.dateNaissance || null,
-      lieuNaissance: form.lieuNaissance || "",
-      adresse: form.adresse || "",
-      signeParticulier: form.signeParticulier || "",
-      maladieAllergie: form.maladieAllergie || "",
-      email: form.email || "",
+        contact: form.contact || "",
+        dateNaissance: form.dateNaissance || null,
+        lieuNaissance: form.lieuNaissance || "",
+        adresse: form.adresse || "",
+        signeParticulier: form.signeParticulier || "",
+        maladieAllergie: form.maladieAllergie || "",
+        email: form.email || "",
 
-      pereNom: form.pereNom || "",
-      pereTel: form.pereTel || "",
-      mereNom: form.mereNom || "",
-      mereTel: form.mereTel || "",
-      parentAdresse: form.parentAdresse || "",
+        pereNom: form.pereNom || "",
+        pereTel: form.pereTel || "",
+        mereNom: form.mereNom || "",
+        mereTel: form.mereTel || "",
+        parentAdresse: form.parentAdresse || "",
 
-      tuteurNom: form.tuteurNom || "",
-      tuteurLien: form.tuteurLien || "",
-      tuteurTel: form.tuteurTel || "",
-      tuteurAdresse: form.tuteurAdresse || "",
+        tuteurNom: form.tuteurNom || "",
+        tuteurLien: form.tuteurLien || "",
+        tuteurTel: form.tuteurTel || "",
+        tuteurAdresse: form.tuteurAdresse || "",
 
-      niveau: form.niveau || "",
-      fraisInscription: form.fraisInscription || "",
-      fraisScolarite: form.fraisScolarite || "",
+        niveau: form.niveau || "",
+        fraisInscription: form.fraisInscription || "",
+        fraisScolarite: form.fraisScolarite || "",
 
-      activite: form.activite || "",
-      remarque: form.remarque || "",
-    };
+        activite: form.activite || "",
+        remarque: form.remarque || "",
+      };
 
-    const res = await fetch(`/api/students/${form.id}`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
+      const res = await fetch(`/api/students/${form.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
 
-    const data = await res.json();
+      const data = await res.json();
 
-    if (!res.ok) {
-      alert(data.error || "Erreur modification étudiant");
-      return;
+      if (!res.ok) {
+        alert(data.error || "Erreur modification étudiant");
+        return;
+      }
+
+      setForm(data);
+      setEditing(false);
+      alert("Modification enregistrée avec succès !");
+    } catch {
+      alert("Erreur serveur");
+    } finally {
+      setSaving(false);
     }
-
-    setForm(data);
-    setEditing(false);
-    alert("Modification enregistrée avec succès !");
-  } catch {
-    alert("Erreur serveur");
-  } finally {
-    setSaving(false);
   }
-}
 
   async function deleteStudent() {
     const ok = confirm(
@@ -253,33 +295,33 @@ const [form, setForm] = useState(initialForm);
                     </span>
 
                     {editing ? (
-                     <input
-  type="file"
-  accept="image/*"
-  onChange={async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
 
-    const formData = new FormData();
-    formData.append("photo", file);
+                          const formData = new FormData();
+                          formData.append("photo", file);
 
-    const res = await fetch("/api/upload/student-photo", {
-      method: "POST",
-      body: formData,
-    });
+                          const res = await fetch("/api/upload/student-photo", {
+                            method: "POST",
+                            body: formData,
+                          });
 
-    const data = await res.json();
+                          const data = await res.json();
 
-    if (!res.ok) {
-      alert(data.error || "Erreur upload photo");
-      return;
-    }
+                          if (!res.ok) {
+                            alert(data.error || "Erreur upload photo");
+                            return;
+                          }
 
-    update("photoUrl", data.url);
-    alert("Photo chargée. Clique Enregistrer pour sauvegarder.");
-  }}
-  className="mt-2 w-full border border-slate-200 bg-white rounded-xl px-4 py-3"
-/>
+                          update("photoUrl", data.url);
+                          alert("Photo chargée. Clique Enregistrer pour sauvegarder.");
+                        }}
+                        className="mt-2 w-full border border-slate-200 bg-white rounded-xl px-4 py-3"
+                      />
                     ) : (
                       <p className="mt-2 text-slate-700">
                         {form.photoUrl ? "Photo enregistrée" : "Aucune photo"}
@@ -298,47 +340,25 @@ const [form, setForm] = useState(initialForm);
                 <Field label="Nom" name="nom" value={form.nom} editing={editing} onChange={update} />
                 <Field label="Prénoms" name="prenoms" value={form.prenoms} editing={editing} onChange={update} />
                 <SelectField label="Sexe" name="sexe" value={form.sexe} editing={editing} onChange={update} options={["Masculin", "Feminin"]} />
-                <Field label="Classe" name="classe" value={form.classe} editing={editing} onChange={update} />
-                <Field label="Section" name="section" value={form.section} editing={editing} onChange={update} />
+
+                <SelectField label="Classe" name="classe" value={form.classe} editing={editing} onChange={update} options={classOptions} />
+                <SelectField label="Série" name="section" value={form.section} editing={editing} onChange={update} options={serieOptions} />
+
                 <Field label="Date naissance" name="dateNaissance" value={toInputDate(form.dateNaissance)} editing={editing} onChange={update} type="date" />
                 <Field label="Lieu naissance" name="lieuNaissance" value={form.lieuNaissance} editing={editing} onChange={update} />
                 <Field label="Téléphone" name="contact" value={form.contact} editing={editing} onChange={update} />
                 <Field label="Adresse" name="adresse" value={form.adresse} editing={editing} onChange={update} />
-                <Field
-                    label="Signe particulier"
-                    name="signeParticulier"
-                    value={form.signeParticulier}
-                    editing={editing}
-                    onChange={update}
-                />
-                  <Field
-                    label="Maladie ou allergique"
-                    name="maladieAllergie"
-                    value={form.maladieAllergie}
-                    editing={editing}
-                    onChange={update}
-                />
-
-                
+                <Field label="Signe particulier" name="signeParticulier" value={form.signeParticulier} editing={editing} onChange={update} />
+                <Field label="Maladie ou allergique" name="maladieAllergie" value={form.maladieAllergie} editing={editing} onChange={update} />
                 <Field label="Email" name="email" value={form.email} editing={editing} onChange={update} />
               </Grid>
 
-              <BottomActions
-                editing={editing}
-                setEditing={setEditing}
-                saveStudent={saveStudent}
-                saving={saving}
-                deleteStudent={deleteStudent}
-                showDelete
-              />
+              <BottomActions editing={editing} setEditing={setEditing} saveStudent={saveStudent} saving={saving} deleteStudent={deleteStudent} showDelete />
             </ProCard>
           )}
 
           {tab === "PARENTS" && (
-            <ProCard
-              title="Informations des parents"
-              subtitle="Coordonnées et informations familiales"
-            >
+            <ProCard title="Informations des parents" subtitle="Coordonnées et informations familiales">
               <Grid>
                 <Field label="Nom du père" name="pereNom" value={form.pereNom} editing={editing} onChange={update} />
                 <Field label="Téléphone père" name="pereTel" value={form.pereTel} editing={editing} onChange={update} />
@@ -347,20 +367,12 @@ const [form, setForm] = useState(initialForm);
                 <Field label="Adresse parents" name="parentAdresse" value={form.parentAdresse} editing={editing} onChange={update} />
               </Grid>
 
-              <BottomActions
-                editing={editing}
-                setEditing={setEditing}
-                saveStudent={saveStudent}
-                saving={saving}
-              />
+              <BottomActions editing={editing} setEditing={setEditing} saveStudent={saveStudent} saving={saving} />
             </ProCard>
           )}
 
           {tab === "TUTEURS" && (
-            <ProCard
-              title="Informations du tuteur"
-              subtitle="Personne responsable ou contact secondaire"
-            >
+            <ProCard title="Informations du tuteur" subtitle="Personne responsable ou contact secondaire">
               <Grid>
                 <Field label="Nom tuteur" name="tuteurNom" value={form.tuteurNom} editing={editing} onChange={update} />
                 <Field label="Lien avec l’étudiant" name="tuteurLien" value={form.tuteurLien} editing={editing} onChange={update} />
@@ -368,20 +380,12 @@ const [form, setForm] = useState(initialForm);
                 <Field label="Adresse tuteur" name="tuteurAdresse" value={form.tuteurAdresse} editing={editing} onChange={update} />
               </Grid>
 
-              <BottomActions
-                editing={editing}
-                setEditing={setEditing}
-                saveStudent={saveStudent}
-                saving={saving}
-              />
+              <BottomActions editing={editing} setEditing={setEditing} saveStudent={saveStudent} saving={saving} />
             </ProCard>
           )}
 
           {tab === "FRAIS DE FORMATION" && (
-            <ProCard
-              title="Frais de formation"
-              subtitle="Niveau et informations financières"
-            >
+            <ProCard title="Frais de formation" subtitle="Niveau et informations financières">
               <Grid>
                 <Field label="Niveau" name="niveau" value={form.niveau} editing={editing} onChange={update} />
                 <Field label="Frais inscription" name="fraisInscription" value={form.fraisInscription} editing={editing} onChange={update} />
@@ -427,47 +431,27 @@ const [form, setForm] = useState(initialForm);
   );
 }
 
-function BottomActions({
-  editing,
-  setEditing,
-  saveStudent,
-  saving,
-  deleteStudent,
-  showDelete = false,
-}: any) {
+function BottomActions({ editing, setEditing, saveStudent, saving, deleteStudent, showDelete = false }: any) {
   return (
     <div className="mt-10 pt-6 border-t flex flex-wrap justify-end gap-3">
       {!editing ? (
-        <button
-          onClick={() => setEditing(true)}
-          className="bg-slate-900 hover:bg-black text-white px-5 py-3 rounded-xl font-bold shadow-sm"
-        >
+        <button onClick={() => setEditing(true)} className="bg-slate-900 hover:bg-black text-white px-5 py-3 rounded-xl font-bold shadow-sm">
           Modifier
         </button>
       ) : (
         <>
-          <button
-            onClick={() => setEditing(false)}
-            className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-5 py-3 rounded-xl font-bold"
-          >
+          <button onClick={() => setEditing(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-5 py-3 rounded-xl font-bold">
             Annuler
           </button>
 
-          <button
-            onClick={saveStudent}
-            disabled={saving}
-            className="bg-green-600 hover:bg-green-700 disabled:opacity-60 text-white px-5 py-3 rounded-xl font-bold shadow-sm"
-          >
+          <button onClick={saveStudent} disabled={saving} className="bg-green-600 hover:bg-green-700 disabled:opacity-60 text-white px-5 py-3 rounded-xl font-bold shadow-sm">
             {saving ? "Enregistrement..." : "Enregistrer"}
           </button>
         </>
       )}
 
       {showDelete && (
-        <button
-          onClick={deleteStudent}
-          className="bg-red-600 hover:bg-red-700 text-white px-5 py-3 rounded-xl font-bold shadow-sm"
-        >
+        <button onClick={deleteStudent} className="bg-red-600 hover:bg-red-700 text-white px-5 py-3 rounded-xl font-bold shadow-sm">
           Supprimer l’étudiant
         </button>
       )}
@@ -539,19 +523,11 @@ function PdfPage({ student, printPdfOnly }: any) {
   return (
     <div className="mx-auto">
       <div className="no-print mb-4 flex justify-end gap-3">
-        <button
-          onClick={printPdfOnly}
-          title="Imprimer la fiche PDF"
-          className="w-11 h-11 rounded-full bg-slate-900 text-white text-xl hover:bg-black shadow"
-        >
+        <button onClick={printPdfOnly} title="Imprimer la fiche PDF" className="w-11 h-11 rounded-full bg-slate-900 text-white text-xl hover:bg-black shadow">
           🖨
         </button>
 
-        <button
-          onClick={() => alert("Drive bientôt disponible")}
-          title="Drive"
-          className="w-11 h-11 rounded-full bg-green-600 text-white text-xl hover:bg-green-700 shadow"
-        >
+        <button onClick={() => alert("Drive bientôt disponible")} title="Drive" className="w-11 h-11 rounded-full bg-green-600 text-white text-xl hover:bg-green-700 shadow">
           ☁
         </button>
       </div>
@@ -566,11 +542,7 @@ function PdfPage({ student, printPdfOnly }: any) {
             </div>
 
             {student.photoUrl ? (
-              <img
-                src={student.photoUrl}
-                alt={student.nom}
-                className="w-[125px] h-[145px] object-cover border"
-              />
+              <img src={student.photoUrl} alt={student.nom} className="w-[125px] h-[145px] object-cover border" />
             ) : (
               <div className="w-[125px] h-[145px] bg-slate-200 border flex items-center justify-center text-[45px]">
                 👤
@@ -666,9 +638,7 @@ function Grid({ children }: any) {
 function Info({ label, value }: any) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-5 hover:bg-white transition">
-      <p className="text-[11px] uppercase tracking-wide text-slate-500">
-        {label}
-      </p>
+      <p className="text-[11px] uppercase tracking-wide text-slate-500">{label}</p>
       <p className="mt-1 text-[16px] font-semibold break-words text-slate-900">
         {value || "-"}
       </p>
