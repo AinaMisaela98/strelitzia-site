@@ -86,124 +86,149 @@ const menus = [
 ];
 
 export default function UserDashboard({ user }: { user: AuthUser }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [openActionId, setOpenActionId] = useState<string | number | null>(null);
+const [sidebarOpen, setSidebarOpen] = useState(false);
+const [openActionId, setOpenActionId] = useState<string | number | null>(null);
 
-  const [students, setStudents] = useState<Student[]>([]);
-  const [loadingStudents, setLoadingStudents] = useState(false);
+const [students, setStudents] = useState<Student[]>([]);
+const [loadingStudents, setLoadingStudents] = useState(false);
 
-  const [schoolYears, setSchoolYears] = useState<SchoolYear[]>([]);
-  const [selectedYear, setSelectedYear] = useState("2025-2026");
+const [schoolYears, setSchoolYears] = useState<SchoolYear[]>([]);
+const [selectedYear, setSelectedYear] = useState("2025-2026");
 
-  const [academics, setAcademics] = useState<{ levels: AcademicLevel[] }>({
-    levels: [],
-  });
+const [academics, setAcademics] = useState<{ levels: AcademicLevel[] }>({
+  levels: [],
+});
 
-  const [search, setSearch] = useState("");
-  const [classe, setClasse] = useState("TOUT");
-  const [serie, setSerie] = useState("TOUT");
+const [search, setSearch] = useState("");
+const [classe, setClasse] = useState("TOUT");
+const [serie, setSerie] = useState("TOUT");
 
-  const loadingStudentsRef = useRef(false);
-  const loadingAcademicsRef = useRef(false);
-  const initializedRef = useRef(false);
+const loadingStudentsRef = useRef(false);
+const loadingAcademicsRef = useRef(false);
+const initializedRef = useRef(false);
 
-  async function loadSchoolYears() {
-    try {
-      const res = await fetch("/api/school-years", { cache: "no-store" });
-      const data = await res.json();
+async function loadSchoolYears() {
+  try {
+    const res = await fetch("/api/school-years", {
+      cache: "no-store",
+    });
 
-      if (Array.isArray(data)) {
-        setSchoolYears(data);
-        const active = data.find((y: SchoolYear) => y.active);
-        return active?.name || data[0]?.name || "2025-2026";
+    const data = await res.json();
+
+    if (Array.isArray(data)) {
+      setSchoolYears(data);
+
+      const active = data.find((y: SchoolYear) => y.active);
+      return active?.name || data[0]?.name || "2025-2026";
+    }
+
+    return "2025-2026";
+  } catch {
+    setSchoolYears([]);
+    return "2025-2026";
+  }
+}
+
+async function loadAcademics(yearParam?: string) {
+  if (loadingAcademicsRef.current) return;
+
+  try {
+    loadingAcademicsRef.current = true;
+
+    const yearToUse = yearParam || selectedYear;
+
+    if (!yearToUse) return;
+
+    const res = await fetch(
+      `/api/academics?year=${encodeURIComponent(yearToUse)}`,
+      {
+        cache: "no-store",
       }
+    );
 
-      return "2025-2026";
-    } catch {
-      setSchoolYears([]);
-      return "2025-2026";
-    }
+    const data = await res.json();
+
+    setAcademics({
+      levels: Array.isArray(data?.levels)
+        ? data.levels
+        : [],
+    });
+  } catch {
+    setAcademics({
+      levels: [],
+    });
+  } finally {
+    loadingAcademicsRef.current = false;
   }
+}
 
-  async function loadAcademics(yearParam?: string) {
-    if (loadingAcademicsRef.current) return;
+async function loadStudents(yearParam?: string) {
+  if (loadingStudentsRef.current) return;
 
-    try {
-      loadingAcademicsRef.current = true;
-      const yearToUse = yearParam || selectedYear;
-      if (!yearToUse) return;
+  try {
+    loadingStudentsRef.current = true;
+    setLoadingStudents(true);
 
-      const res = await fetch(
-        `/api/academics?year=${encodeURIComponent(yearToUse)}`,
-        { cache: "no-store" }
-      );
+    const yearToUse = yearParam || selectedYear;
 
-      const data = await res.json();
+    if (!yearToUse) return;
 
-      setAcademics({
-        levels: Array.isArray(data?.levels)
-          ? data.levels
-          : Array.isArray(data)
-          ? data
-          : [],
-      });
-    } catch {
-      setAcademics({ levels: [] });
-    } finally {
-      loadingAcademicsRef.current = false;
-    }
+    const res = await fetch(
+      `/api/students?year=${encodeURIComponent(yearToUse)}`,
+      {
+        cache: "no-store",
+      }
+    );
+
+    const data = await res.json();
+
+    setStudents(
+      Array.isArray(data)
+        ? data
+        : data.students || []
+    );
+
+  } catch (error) {
+    console.error(error);
+  } finally {
+    loadingStudentsRef.current = false;
+    setLoadingStudents(false);
   }
+}
+  
+useEffect(() => {
+  async function initDashboard() {
+    const yearToUse = await loadSchoolYears();
 
-  async function loadStudents(yearParam?: string) {
-    if (loadingStudentsRef.current) return;
-
-    try {
-      loadingStudentsRef.current = true;
-      setLoadingStudents(true);
-
-      const yearToUse = yearParam || selectedYear;
-      if (!yearToUse) return;
-
-      const res = await fetch(
-        `/api/students?year=${encodeURIComponent(yearToUse)}`,
-        { cache: "no-store" }
-      );
-
-      const data = await res.json();
-      setStudents(Array.isArray(data) ? data : data.students || []);
-    } catch (error) {
-      console.error(error);
-    } finally {
-      loadingStudentsRef.current = false;
-      setLoadingStudents(false);
-    }
-  }
-
-  useEffect(() => {
-    async function initDashboard() {
-      const yearToUse = await loadSchoolYears();
-
-      setSelectedYear(yearToUse);
-      setClasse("TOUT");
-      setSerie("TOUT");
-
-      await Promise.all([loadStudents(yearToUse), loadAcademics(yearToUse)]);
-
-      initializedRef.current = true;
-    }
-
-    initDashboard();
-  }, []);
-
-  useEffect(() => {
-    if (!initializedRef.current) return;
-    if (!selectedYear) return;
-
+    setSelectedYear(yearToUse);
     setClasse("TOUT");
     setSerie("TOUT");
 
-    Promise.all([loadStudents(selectedYear), loadAcademics(selectedYear)]);
-  }, [selectedYear]);
+    await Promise.all([
+      loadStudents(yearToUse),
+      loadAcademics(yearToUse),
+    ]);
+
+    initializedRef.current = true;
+  }
+
+  initDashboard();
+}, []);
+
+useEffect(() => {
+  if (!initializedRef.current) return;
+  if (!selectedYear) return;
+
+  setClasse("TOUT");
+  setSerie("TOUT");
+
+  Promise.all([
+    loadStudents(selectedYear),
+    loadAcademics(selectedYear),
+  ]);
+}, [selectedYear]);
+
+ 
 
   const allClasses = useMemo(() => {
     return academics.levels.flatMap((level) => level.classes);
@@ -296,166 +321,6 @@ export default function UserDashboard({ user }: { user: AuthUser }) {
     alert(item);
   }
 
-  function exportExcel() {
-    const rows = filtered.map((s) => ({
-      Matricule: s.matricule || "",
-      Nom: s.nom || "",
-      Prenoms: s.prenoms || "",
-      Classe: s.classe || "",
-      Serie: s.section || "",
-      Telephone: s.contact || "",
-    }));
-
-    import("xlsx").then((XLSX) => {
-      const worksheet = XLSX.utils.json_to_sheet(rows);
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, "Etudiants");
-      XLSX.writeFile(workbook, `etudiants_${selectedYear || "2025-2026"}.xlsx`);
-    });
-  }
-
-  function printStudents() {
-    const byClass = filtered.reduce((acc: any, s: any) => {
-      const key = s.classe || "Sans classe";
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(s);
-      return acc;
-    }, {});
-
-    const html = `
-      <html>
-        <head>
-          <title>Liste des étudiants</title>
-          <meta name="viewport" content="width=device-width, initial-scale=1" />
-          <style>
-            @page { size: A4; margin: 10mm; }
-            body { font-family: Arial, sans-serif; color: #111827; margin: 0; padding: 12px; }
-            .page { page-break-after: always; max-width: 100%; }
-            .header { text-align: center; border-bottom: 2px solid #111827; padding-bottom: 10px; margin-bottom: 14px; }
-            .school { font-size: 22px; font-weight: 900; color: #dc2626; }
-            .sub { font-size: 13px; color: #16a34a; font-weight: 700; }
-            .meta { margin-top: 8px; font-size: 12px; color: #374151; }
-            .class-box { margin: 14px 0 18px 0; padding: 12px; border-radius: 12px; background: linear-gradient(to right, #0f172a, #1e293b); color: white; }
-            .class-title { font-size: 20px; font-weight: 900; margin-bottom: 6px; }
-            .badges { display:flex; gap:8px; flex-wrap:wrap; font-size:12px; }
-            .badge { padding:6px 10px; border-radius:999px; font-weight:700; }
-            .blue { background:#2563eb; }
-            .green { background:#16a34a; }
-            .red { background:#dc2626; }
-            .table-wrap { width: 100%; overflow-x: auto; }
-            table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
-            th { background: #111827; color: white; padding: 6px; border: 1px solid #111827; text-align: left; }
-            td { padding: 5px; border: 1px solid #cbd5e1; }
-            tr:nth-child(even) { background: #f8fafc; }
-            .footer { margin-top: 12px; font-size: 11px; color: #64748b; text-align: right; }
-
-            @media screen and (max-width: 700px) {
-              body { padding: 8px; }
-              .school { font-size: 18px; }
-              .class-title { font-size: 16px; }
-              table { font-size: 9.5px; min-width: 760px; }
-            }
-
-            @media print {
-              body { padding: 0; }
-              table { font-size: 10px; }
-            }
-          </style>
-        </head>
-        <body>
-          ${Object.entries(byClass)
-            .map(
-              ([classeName, students]: any) => `
-              <div class="page">
-                <div class="header">
-                  <div class="school">STRELITZIA SCHOOL</div>
-                  <div class="sub">Liste des étudiants par classe</div>
-                  <div class="meta">
-                    Année scolaire : ${selectedYear || "2025-2026"} |
-                    Classe : ${classeName} |
-                    Effectif : ${students.length}
-                  </div>
-                </div>
-
-                <div class="class-box">
-                  <div class="class-title">Classe : ${classeName}</div>
-                  <div class="badges">
-                    <div class="badge blue">Série : ${
-                      serie === "TOUT" ? "Toutes les séries" : serie
-                    }</div>
-                    <div class="badge green">Effectif : ${
-                      students.length
-                    } étudiant(s)</div>
-                    <div class="badge red">Année : ${
-                      selectedYear || "2025-2026"
-                    }</div>
-                  </div>
-                </div>
-
-                <div class="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>N°</th>
-                        <th>Matricule</th>
-                        <th>Nom</th>
-                        <th>Prénoms</th>
-                        <th>Date naissance</th>
-                        <th>Sexe</th>
-                        <th>Série</th>
-                        <th>Téléphone</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      ${students
-                        .map(
-                          (s: any, i: number) => `
-                        <tr>
-                          <td>${i + 1}</td>
-                          <td>${s.matricule || ""}</td>
-                          <td>${s.nom || ""}</td>
-                          <td>${s.prenoms || ""}</td>
-                          <td>${
-                            s.dateNaissance
-                              ? new Date(s.dateNaissance).toLocaleDateString(
-                                  "fr-FR"
-                                )
-                              : ""
-                          }</td>
-                          <td>${s.sexe || ""}</td>
-                          <td>${s.section || ""}</td>
-                          <td>${s.contact || ""}</td>
-                        </tr>
-                      `
-                        )
-                        .join("")}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div class="footer">
-                  Imprimé le ${new Date().toLocaleDateString("fr-FR")}
-                </div>
-              </div>
-            `
-            )
-            .join("")}
-        </body>
-      </html>
-    `;
-
-    const win = window.open("", "_blank", "width=900,height=700");
-    if (!win) return alert("Popup bloqué");
-
-    win.document.write(html);
-    win.document.close();
-    win.focus();
-
-    setTimeout(() => {
-      win.print();
-    }, 500);
-  }
-
   return (
     <main className="fixed inset-0 bg-[#eef2f7] flex overflow-hidden text-[12px] text-slate-900">
       <style>{`
@@ -475,11 +340,11 @@ export default function UserDashboard({ user }: { user: AuthUser }) {
       `}</style>
 
       <aside
-        className={`fixed lg:relative z-50 h-full w-[260px] lg:w-[215px] shrink-0 bg-[#4a4a4a] text-white flex flex-col border-r border-slate-600 transition-transform duration-300 ${
+        className={`fixed lg:relative z-50 h-full w-[215px] shrink-0 bg-[#4a4a4a] text-white flex flex-col border-r border-slate-600 transition-transform duration-300 ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         }`}
       >
-        <div className="h-[68px] shrink-0 bg-white flex items-center justify-between px-3 border-b">
+        <div className="h-[68px] shrink-0 bg-white flex items-center justify-between px-2 border-b">
           <div className="leading-none">
             <div className="text-[19px] font-black text-red-600">STRELITZIA</div>
             <div className="text-[13px] font-black text-green-600">SCHOOL</div>
@@ -489,7 +354,7 @@ export default function UserDashboard({ user }: { user: AuthUser }) {
             onClick={() => setSidebarOpen(false)}
             className="lg:hidden text-slate-700 text-xl"
           >
-            ✕
+            ☰
           </button>
         </div>
 
@@ -526,11 +391,8 @@ export default function UserDashboard({ user }: { user: AuthUser }) {
               {menu.items.map((item) => (
                 <button
                   key={item}
-                  onClick={() => {
-                    setSidebarOpen(false);
-                    handleMenuClick(item);
-                  }}
-                  className={`w-full text-left pl-8 pr-2 py-[8px] hover:bg-[#b7b7b7] transition ${
+                  onClick={() => handleMenuClick(item)}
+                  className={`w-full text-left pl-8 pr-2 py-[7px] hover:bg-[#b7b7b7] transition ${
                     item === "Liste des inscrits" ? "bg-[#b7b7b7]" : ""
                   }`}
                 >
@@ -551,151 +413,330 @@ export default function UserDashboard({ user }: { user: AuthUser }) {
         </div>
       </aside>
 
-      {sidebarOpen && (
-        <div
-          onClick={() => setSidebarOpen(false)}
-          className="fixed inset-0 bg-black/40 z-40 lg:hidden"
-        />
-      )}
+     {sidebarOpen && (
+  <div
+    onClick={() => setSidebarOpen(false)}
+    className="fixed inset-0 bg-black/40 z-40 lg:hidden"
+  />
+)}
 
-      <section className="flex-1 min-w-0 h-full flex flex-col overflow-hidden">
-        <header className="shrink-0 bg-[#f8fafc] border-b border-slate-200 px-2 sm:px-3 md:px-5 py-3 md:py-4">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 md:p-4">
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <div className="flex items-center gap-3 min-w-0">
-                <button
-                  onClick={() => setSidebarOpen(true)}
-                  className="lg:hidden bg-[#2f3540] text-white px-3 py-2 rounded-xl"
-                >
-                  ☰
-                </button>
+<section className="flex-1 min-w-0 h-full flex flex-col overflow-hidden">
+  <header className="shrink-0 bg-[#f8fafc] border-b border-slate-200 px-3 md:px-5 py-4">
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 md:p-4">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="lg:hidden bg-[#2f3540] text-white px-3 py-2 rounded-xl"
+          >
+            ☰
+          </button>
 
-                <div className="min-w-0">
-                  <h1 className="text-[15px] md:text-[18px] font-black text-slate-800 truncate">
-                    Liste des étudiants
-                  </h1>
-                  <p className="text-[11px] md:text-[12px] text-slate-500 font-semibold">
-                    {filtered.length} étudiant{filtered.length > 1 ? "s" : ""} inscrit
-                    {filtered.length > 1 ? "s" : ""}
-                  </p>
-                </div>
-              </div>
-
-              <div className="shrink-0 bg-blue-600 text-white rounded-xl px-3 py-2 text-[12px] font-black shadow-sm">
-                Total : {filtered.length}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:flex xl:flex-wrap items-center gap-2">
-              <button
-                onClick={() => {
-                  loadSchoolYears();
-                  loadStudents(selectedYear);
-                  loadAcademics(selectedYear);
-                }}
-                className="h-[40px] px-4 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white text-[12px] font-bold whitespace-nowrap transition shadow-sm"
-              >
-                ⟳ Actualiser
-              </button>
-
-              <select
-                value={selectedYear}
-                onChange={(e) => {
-                  setSelectedYear(e.target.value);
-                  setClasse("TOUT");
-                  setSerie("TOUT");
-                }}
-                className="h-[40px] w-full xl:w-[210px] rounded-xl bg-[#1f2937] text-white px-3 text-[12px] font-bold outline-none border border-slate-700"
-              >
-                {schoolYears.length === 0 && <option value="">Année scolaire</option>}
-
-                {schoolYears.map((year) => (
-                  <option key={year.id} value={year.name}>
-                    Année scolaire : {year.name}
-                    {year.active ? " (active)" : ""}
-                  </option>
-                ))}
-              </select>
-
-              <div className="h-[40px] rounded-xl bg-slate-100 border border-slate-200 text-slate-800 px-3 flex items-center text-[12px] font-bold whitespace-nowrap">
-                Sites : Strelitzia School
-              </div>
-
-              <select
-                value={classe}
-                onChange={(e) => {
-                  setClasse(e.target.value);
-                  setSerie("TOUT");
-                }}
-                className="h-[40px] w-full xl:w-[165px] rounded-xl bg-[#1f2937] text-white px-3 text-[12px] font-bold outline-none border border-slate-700"
-              >
-                <option value="TOUT">Classe : TOUT</option>
-
-                {allClasses.map((c) => (
-                  <option key={c.id} value={c.name}>
-                    Classe : {c.name}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={serie}
-                onChange={(e) => setSerie(e.target.value)}
-                className="h-[40px] w-full xl:w-[155px] rounded-xl bg-[#1f2937] text-white px-3 text-[12px] font-bold outline-none border border-slate-700"
-              >
-                <option value="TOUT">Série : TOUT</option>
-
-                {availableSeries.map((s) => (
-                  <option key={`${s.id}-${s.name}`} value={s.name}>
-                    Série : {s.name}
-                  </option>
-                ))}
-              </select>
-
-              <button
-                onClick={exportExcel}
-                className="h-[40px] px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[12px] font-bold whitespace-nowrap transition shadow-sm"
-              >
-                Export Excel
-              </button>
-
-              <button
-                onClick={printStudents}
-                className="h-[40px] px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-[12px] font-bold whitespace-nowrap transition shadow-sm"
-              >
-                Imprimer PDF
-              </button>
-            </div>
-          </div>
-        </header>
-
-        <div className="search-zone shrink-0 bg-white px-2 sm:px-3 py-3 border-b flex flex-col sm:flex-row gap-2">
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="border border-slate-300 px-3 py-2 w-full sm:w-[260px] outline-none rounded-lg"
-            placeholder="rechercher..."
-          />
-
-          <div className="flex gap-2">
-            <button
-              onClick={() => loadStudents(selectedYear)}
-              className="flex-1 sm:flex-none bg-[#1f2937] hover:bg-black text-white px-3 py-2 font-semibold rounded-lg"
-            >
-              🔍 Rechercher
-            </button>
-
-            <button
-              onClick={resetFilters}
-              className="flex-1 sm:flex-none bg-red-500 hover:bg-red-600 text-white px-3 py-2 font-semibold rounded-lg"
-            >
-              ✖ Initialiser
-            </button>
+          <div className="min-w-0">
+            <h1 className="text-[15px] md:text-[18px] font-black text-slate-800 truncate">
+              Liste des étudiants
+            </h1>
+            <p className="text-[11px] md:text-[12px] text-slate-500 font-semibold">
+              {filtered.length} étudiant{filtered.length > 1 ? "s" : ""} inscrit
+              {filtered.length > 1 ? "s" : ""}
+            </p>
           </div>
         </div>
 
-        <div className="hidden md:block flex-1 min-h-0 overflow-auto table-scroll bg-white">
-          <table className="w-full min-w-[980px] border-separate border-spacing-0 text-[12px]">
+        <div className="shrink-0 bg-blue-600 text-white rounded-xl px-3 py-2 text-[12px] font-black shadow-sm">
+          Total : {filtered.length}
+        </div>
+      </div>
+
+      <div className="w-full overflow-x-auto pb-1">
+        <div className="flex flex-nowrap items-center gap-2 min-w-max pr-2">
+          <button
+            onClick={() => {
+              loadSchoolYears();
+              loadStudents(selectedYear);
+              loadAcademics(selectedYear);
+            }}
+            className="h-[40px] px-4 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white text-[12px] font-bold whitespace-nowrap transition shadow-sm"
+          >
+            ⟳ Actualiser
+          </button>
+
+          <select
+            value={selectedYear}
+            onChange={(e) => {
+              setSelectedYear(e.target.value);
+              setClasse("TOUT");
+              setSerie("TOUT");
+            }}
+            className="h-[40px] min-w-[190px] rounded-xl bg-[#1f2937] text-white px-3 text-[12px] font-bold outline-none border border-slate-700"
+          >
+            {schoolYears.length === 0 && (
+              <option value="">Année scolaire</option>
+            )}
+
+            {schoolYears.map((year) => (
+              <option key={year.id} value={year.name}>
+                Année scolaire : {year.name}
+                {year.active ? " (active)" : ""}
+              </option>
+            ))}
+          </select>
+
+          <div className="h-[40px] min-w-[180px] rounded-xl bg-slate-100 border border-slate-200 text-slate-800 px-3 flex items-center text-[12px] font-bold whitespace-nowrap">
+            Sites : Strelitzia School
+          </div>
+
+          <select
+            value={classe}
+            onChange={(e) => {
+              setClasse(e.target.value);
+              setSerie("TOUT");
+            }}
+            className="h-[40px] min-w-[160px] rounded-xl bg-[#1f2937] text-white px-3 text-[12px] font-bold outline-none border border-slate-700"
+          >
+            <option value="TOUT">Classe : TOUT</option>
+
+            {allClasses.map((c) => (
+              <option key={c.id} value={c.name}>
+                Classe : {c.name}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={serie}
+            onChange={(e) => setSerie(e.target.value)}
+            className="h-[40px] min-w-[150px] rounded-xl bg-[#1f2937] text-white px-3 text-[12px] font-bold outline-none border border-slate-700"
+          >
+            <option value="TOUT">Série : TOUT</option>
+
+            {availableSeries.map((s) => (
+              <option key={s.id} value={s.name}>
+                Série : {s.name}
+              </option>
+            ))}
+          </select>
+
+          <button
+            onClick={() => {
+              const rows = filtered.map((s) => ({
+                Matricule: s.matricule || "",
+                Nom: s.nom || "",
+                Prenoms: s.prenoms || "",
+                Classe: s.classe || "",
+                Serie: s.section || "",
+                Telephone: s.contact || "",
+              }));
+
+              import("xlsx").then((XLSX) => {
+                const worksheet = XLSX.utils.json_to_sheet(rows);
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, worksheet, "Etudiants");
+                XLSX.writeFile(
+                  workbook,
+                  `etudiants_${selectedYear || "2025-2026"}.xlsx`
+                );
+              });
+            }}
+            className="h-[40px] px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[12px] font-bold whitespace-nowrap transition shadow-sm"
+          >
+            Export Excel
+          </button>
+
+          <button
+  onClick={() => {
+    const byClass = filtered.reduce((acc: any, s: any) => {
+      const key = s.classe || "Sans classe";
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(s);
+      return acc;
+    }, {});
+
+    const html = `
+      <html>
+        <head>
+          <title>Liste des étudiants</title>
+          <style>
+            @page { size: A4; margin: 12mm; }
+            body { font-family: Arial, sans-serif; color: #111827; }
+            .page { page-break-after: always; }
+            .header { text-align: center; border-bottom: 2px solid #111827; padding-bottom: 10px; margin-bottom: 14px; }
+            .school { font-size: 22px; font-weight: 900; color: #dc2626; }
+            .sub { font-size: 13px; color: #16a34a; font-weight: 700; }
+            .meta { margin-top: 8px; font-size: 12px; color: #374151; }
+            h2 { font-size: 18px; margin: 12px 0; }
+            table { width: 100%; border-collapse: collapse; font-size: 11px; }
+            th { background: #111827; color: white; padding: 7px; border: 1px solid #111827; text-align: left; }
+            td { padding: 6px; border: 1px solid #cbd5e1; }
+            tr:nth-child(even) { background: #f8fafc; }
+            .footer { margin-top: 12px; font-size: 11px; color: #64748b; text-align: right; }
+          </style>
+        </head>
+        <body>
+          ${Object.entries(byClass)
+            .map(([classeName, students]: any) => `
+              <div class="page">
+                <div class="header">
+                  <div class="school">STRELITZIA SCHOOL</div>
+                  <div class="sub">Liste des étudiants par classe</div>
+                  <div class="meta">
+                    Année scolaire : ${selectedYear || "2025-2026"} |
+                    Classe : ${classeName} |
+                    Effectif : ${students.length}
+                  </div>
+                </div>
+
+                <div style="
+  margin: 14px 0 18px 0;
+  padding: 12px;
+  border-radius: 12px;
+  background: linear-gradient(to right, #0f172a, #1e293b);
+  color: white;
+">
+  <div style="
+    font-size: 20px;
+    font-weight: 900;
+    margin-bottom: 6px;
+  ">
+    Classe : ${classeName}
+  </div>
+
+  <div style="
+    display:flex;
+    gap:12px;
+    flex-wrap:wrap;
+    font-size:12px;
+  ">
+    <div style="
+      background:#2563eb;
+      padding:6px 12px;
+      border-radius:999px;
+      font-weight:700;
+    ">
+      Série : ${
+        serie === "TOUT"
+          ? "Toutes les séries"
+          : serie
+      }
+    </div>
+
+    <div style="
+      background:#16a34a;
+      padding:6px 12px;
+      border-radius:999px;
+      font-weight:700;
+    ">
+      Effectif : ${students.length} étudiant(s)
+    </div>
+
+    <div style="
+      background:#dc2626;
+      padding:6px 12px;
+      border-radius:999px;
+      font-weight:700;
+    ">
+      Année : ${selectedYear || "2025-2026"}
+    </div>
+  </div>
+</div>
+
+                <table>
+                  <thead>
+                    <tr>
+                      <th>N°</th>
+                      <th>Matricule</th>
+                      <th>Nom</th>
+                      <th>Prénoms</th>
+                      <th>Date de naissance</th>
+                      <th>Sexe</th>
+                      <th>Série</th>
+                      <th>Téléphone</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${students.map((s: any, i: number) => `
+                      <tr>
+                        <td>${i + 1}</td>
+                        <td>${s.matricule || ""}</td>
+                        <td>${s.nom || ""}</td>
+                        <td>${s.prenoms || ""}</td>
+                        <td>
+                          ${
+                            s.dateNaissance
+                              ? new Date(s.dateNaissance).toLocaleDateString("fr-FR")
+                              : ""
+                          }
+                        </td>
+                        <td>${s.sexe || ""}</td>
+                        <td>${s.section || ""}</td>
+                        <td>${s.contact || ""}</td>
+                      </tr>
+                    `).join("")}
+                  </tbody>
+                </table>
+
+                <div class="footer">
+                  Imprimé le ${new Date().toLocaleDateString("fr-FR")}
+                </div>
+              </div>
+            `)
+            .join("")}
+        </body>
+      </html>
+    `;
+
+    const win = window.open("", "_blank", "width=900,height=700");
+    if (!win) return alert("Popup bloqué");
+
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+
+    setTimeout(() => {
+      win.print();
+    }, 500);
+  }}
+  className="h-[40px] px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-[12px] font-bold whitespace-nowrap transition shadow-sm"
+>
+  Imprimer PDF
+</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+        <div className="search-zone shrink-0 bg-white px-2 py-3 border-b flex flex-wrap gap-2">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="border border-slate-300 px-3 py-2 w-[210px] outline-none"
+            placeholder="rechercher..."
+          />
+
+          <button
+            onClick={() => loadStudents(selectedYear)}
+            className="bg-[#1f2937] hover:bg-black text-white px-3 py-2 font-semibold"
+          >
+            🔍 Rechercher
+          </button>
+
+          <button
+            onClick={resetFilters}
+            className="bg-red-500 hover:bg-red-600 text-white px-3 py-2 font-semibold"
+          >
+            ✖ Initialiser
+          </button>
+
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="bg-cyan-600 hover:bg-cyan-700 text-white px-3 py-2 lg:hidden"
+          >
+            ☰ Menu
+          </button>
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-auto table-scroll bg-white">
+         <table className="w-max min-w-[1000px] border-separate border-spacing-0 text-[12px]">
             <thead className="sticky top-0 z-30 bg-[#262b34] text-white shadow-sm">
               <tr>
                 {[
@@ -711,7 +752,7 @@ export default function UserDashboard({ user }: { user: AuthUser }) {
                   "Contact",
                   "Date Naiss.",
                   "Lieu Naiss.",
-                  "-",
+                         "-",
                 ].map((h) => (
                   <th
                     key={h}
@@ -724,129 +765,168 @@ export default function UserDashboard({ user }: { user: AuthUser }) {
             </thead>
 
             <tbody>
-              {loadingStudents ? (
-                <tr>
-                  <td colSpan={13} className="p-8 text-center text-slate-500">
-                    Chargement...
-                  </td>
-                </tr>
-              ) : filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={13} className="p-8 text-center text-slate-500">
-                    Aucun étudiant trouvé
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((s) => (
-                  <tr
-                    key={s.id}
-                    className="odd:bg-[#eaf2fb] even:bg-white hover:bg-yellow-50 leading-none"
-                  >
-                    <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px] text-red-500 font-medium">
-                      {s.matricule}
-                    </td>
-                    <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px]">
-                      {s.site}
-                    </td>
-                    <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px]">
-                      {s.anneeScolaire}
-                    </td>
-                    <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px]">
-                      {formatDate(s.dateInscription)}
-                    </td>
-                    <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px] font-semibold">
-                      {s.nom}
-                    </td>
-                    <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px]">
-                      {s.prenoms}
-                    </td>
-                    <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px] text-center">
-                      {s.sexe}
-                    </td>
-                    <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px] font-medium">
-                      {s.classe}
-                    </td>
-                    <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px]">
-                      {s.section}
-                    </td>
-                    <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px]">
-                      {s.contact || "-"}
-                    </td>
-                    <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px]">
-                      {formatDate(s.dateNaissance)}
-                    </td>
-                    <td className="border border-slate-300 px-[4px] py-[2px] text-[11.5px] max-w-[90px] truncate">
-                      {s.lieuNaissance || "-"}
-                    </td>
-                    <td className="border border-slate-300 px-[2px] py-[1px] text-center">
-                      <ActionMenu
-                        student={s}
-                        openActionId={openActionId}
-                        setOpenActionId={setOpenActionId}
-                        deleteStudent={deleteStudent}
-                      />
-                    </td>
-                  </tr>
-                ))
-              )}
+  {filtered.length === 0 ? (
+    <tr>
+      <td
+        colSpan={15}
+        className="p-8 text-center text-slate-500"
+      >
+        Aucun étudiant trouvé
+      </td>
+    </tr>
+  ) : (
+    filtered.map((s) => (
+      <tr
+        key={s.id}
+        className="odd:bg-[#eaf2fb] even:bg-white hover:bg-yellow-50 leading-none"
+      >
+      {/* MATRICULE */}
+      <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px] text-red-500 font-medium">
+        {s.matricule}
+      </td>
+
+      {/* SITE */}
+      <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px]">
+        {s.site}
+      </td>
+
+      {/* ANNEE */}
+      <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px]">
+        {s.anneeScolaire}
+      </td>
+
+      {/* DATE INSCRIPTION */}
+      <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px]">
+        {formatDate(s.dateInscription)}
+      </td>
+
+      {/* NOM */}
+      <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px] font-semibold">
+        {s.nom}
+      </td>
+
+      {/* PRENOMS */}
+      <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px]">
+        {s.prenoms}
+      </td>
+
+      {/* SEXE */}
+      <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px] text-center">
+        {s.sexe}
+      </td>
+
+      {/* CLASSE */}
+      <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px] font-medium">
+        {s.classe}
+      </td>
+
+      {/* SECTION */}
+      <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px]">
+        {s.section}
+      </td>
+
+      {/* CONTACT */}
+      <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px]">
+        {s.contact || "-"}
+      </td>
+
+      {/* DATE NAISSANCE */}
+      <td className="border border-slate-300 px-[4px] py-[2px] whitespace-nowrap text-[11.5px]">
+        {formatDate(s.dateNaissance)}
+      </td>
+
+      {/* LIEU */}
+      <td className="border border-slate-300 px-[4px] py-[2px] text-[11.5px] max-w-[90px] truncate">
+        {s.lieuNaissance || "-"}
+      </td>
+
+{/* ACTION */}
+<td className="border border-slate-300 px-[2px] py-[1px] text-center">
+  <div className="relative inline-block">
+      <button
+        type="button"
+        onClick={() =>
+          setOpenActionId(openActionId === s.id ? null : s.id)
+        }
+        className="border border-slate-400 bg-slate-100 hover:bg-slate-200 active:scale-95 transition px-[4px] py-[1px] rounded text-[10px]"
+      >
+        ▾
+      </button>
+
+    {openActionId === s.id && (
+      <>
+        <div
+          onClick={() => setOpenActionId(null)}
+          className="fixed inset-0 z-40"
+        />
+
+        <div className="absolute right-0 mt-1 bg-white shadow-2xl border border-slate-200 rounded-xl z-50 min-w-[220px] overflow-hidden text-left">
+          <button
+            type="button"
+            onClick={() => {
+              setOpenActionId(null);
+              window.location.href = `/user/student/${s.id}`;
+            }}
+            className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium"
+          >
+            🧑 Information de l’étudiant
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setOpenActionId(null);
+              alert("Réinscription bientôt disponible");
+            }}
+            className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium"
+          >
+            ↻ Réinscription
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setOpenActionId(null);
+              alert("Marquer étudiant bientôt");
+            }}
+            className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium"
+          >
+            📑 Marquer l’étudiant
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setOpenActionId(null);
+              alert("Transfert bientôt");
+            }}
+            className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium"
+          >
+            🔁 Transférer à un site
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setOpenActionId(null);
+              deleteStudent(s.id);
+            }}
+            className="w-full text-left px-4 py-3 hover:bg-red-50 text-red-600 text-[12px] font-semibold"
+          >
+            🗑 Supprimer
+          </button>
+        </div>
+      </>
+    )}
+  </div>
+</td>
+    </tr>
+  )))}
             </tbody>
           </table>
         </div>
 
-        <div className="md:hidden flex-1 min-h-0 overflow-auto bg-[#eef2f7] p-3 space-y-3">
-          {loadingStudents ? (
-            <div className="bg-white rounded-2xl p-5 text-center text-slate-500 shadow-sm border">
-              Chargement...
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="bg-white rounded-2xl p-5 text-center text-slate-500 shadow-sm border">
-              Aucun étudiant trouvé
-            </div>
-          ) : (
-            filtered.map((s) => (
-              <div
-                key={s.id}
-                className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-[15px] font-black text-slate-900 truncate">
-                      {s.nom} {s.prenoms}
-                    </p>
-                    <p className="text-[11px] font-bold text-red-500">
-                      {s.matricule}
-                    </p>
-                  </div>
-
-                  <ActionMenu
-                    student={s}
-                    openActionId={openActionId}
-                    setOpenActionId={setOpenActionId}
-                    deleteStudent={deleteStudent}
-                  />
-                </div>
-
-                <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
-                  <MobileInfo label="Classe" value={s.classe} />
-                  <MobileInfo label="Série" value={s.section} />
-                  <MobileInfo label="Sexe" value={s.sexe} />
-                  <MobileInfo label="Contact" value={s.contact || "-"} />
-                  <MobileInfo label="Naissance" value={formatDate(s.dateNaissance)} />
-                  <MobileInfo label="AS" value={s.anneeScolaire} />
-                </div>
-
-                <button
-                  onClick={() => (window.location.href = `/user/student/${s.id}`)}
-                  className="mt-3 w-full bg-slate-900 text-white py-2 rounded-xl font-bold text-[12px]"
-                >
-                  Voir la fiche étudiant
-                </button>
-              </div>
-            ))
-          )}
-        </div>
-
-        <footer className="shrink-0 bg-white border-t px-3 py-2 flex flex-col sm:flex-row justify-between gap-1 text-[11px]">
+        <footer className="shrink-0 bg-white border-t px-3 py-2 flex justify-between text-[11px]">
           <span>
             Connecté : <b>{user.name}</b> — {user.role}
           </span>
@@ -854,103 +934,5 @@ export default function UserDashboard({ user }: { user: AuthUser }) {
         </footer>
       </section>
     </main>
-  );
-}
-
-function MobileInfo({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 min-w-0">
-      <p className="text-[10px] text-slate-500 font-bold uppercase">{label}</p>
-      <p className="font-bold text-slate-800 truncate">{value || "-"}</p>
-    </div>
-  );
-}
-
-function ActionMenu({
-  student,
-  openActionId,
-  setOpenActionId,
-  deleteStudent,
-}: {
-  student: Student;
-  openActionId: string | number | null;
-  setOpenActionId: (id: string | number | null) => void;
-  deleteStudent: (id: number) => void;
-}) {
-  return (
-    <div className="relative inline-block">
-      <button
-        type="button"
-        onClick={() =>
-          setOpenActionId(openActionId === student.id ? null : student.id)
-        }
-        className="border border-slate-400 bg-slate-100 hover:bg-slate-200 active:scale-95 transition px-2 py-1 rounded text-[11px]"
-      >
-        ▾
-      </button>
-
-      {openActionId === student.id && (
-        <>
-          <div onClick={() => setOpenActionId(null)} className="fixed inset-0 z-40" />
-
-          <div className="absolute right-0 mt-1 bg-white shadow-2xl border border-slate-200 rounded-xl z-50 w-[230px] max-w-[80vw] overflow-hidden text-left">
-            <button
-              type="button"
-              onClick={() => {
-                setOpenActionId(null);
-                window.location.href = `/user/student/${student.id}`;
-              }}
-              className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium"
-            >
-              🧑 Information de l’étudiant
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setOpenActionId(null);
-                alert("Réinscription bientôt disponible");
-              }}
-              className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium"
-            >
-              ↻ Réinscription
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setOpenActionId(null);
-                alert("Marquer étudiant bientôt");
-              }}
-              className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium"
-            >
-              📑 Marquer l’étudiant
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setOpenActionId(null);
-                alert("Transfert bientôt");
-              }}
-              className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium"
-            >
-              🔁 Transférer à un site
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setOpenActionId(null);
-                deleteStudent(student.id);
-              }}
-              className="w-full text-left px-4 py-3 hover:bg-red-50 text-red-600 text-[12px] font-semibold"
-            >
-              🗑 Supprimer
-            </button>
-          </div>
-        </>
-      )}
-    </div>
   );
 }
