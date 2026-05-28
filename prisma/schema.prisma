@@ -3,9 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
 }
 
 enum Role {
@@ -55,7 +54,7 @@ model Permission {
 
 model Student {
   id               Int      @id @default(autoincrement())
-  matricule        String   
+  matricule        String  
   site             String   @default("Strelitzia School")
   anneeScolaire    String   @default("2025-2026")
   dateInscription  DateTime
@@ -101,8 +100,8 @@ model Student {
   @@index([anneeScolaire, classe, section])
   @@index([createdAt])
   @@index([nom])
-  @@unique([matricule, anneeScolaire])
   @@index([matricule])
+  @@unique([matricule, anneeScolaire])
 }
 
 model Level {

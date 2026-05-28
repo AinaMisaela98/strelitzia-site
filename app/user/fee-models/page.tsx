@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 type FeeSpecialTariff = {
@@ -39,6 +40,12 @@ type DraftRow = {
   code: string;
   montant: string;
   specials: Record<string, string>;
+};
+
+type SavedTariffDraft = {
+  libelle: string;
+  code: string;
+  montant: string;
 };
 
 export default function FeeModelsPage() {
@@ -89,10 +96,12 @@ export default function FeeModelsPage() {
   const [newSpecialColumn, setNewSpecialColumn] = useState("");
 
   const [draftRows, setDraftRows] = useState<DraftRow[]>([]);
+  const [savedTariffInputs, setSavedTariffInputs] = useState<Record<number, SavedTariffDraft>>({});
   const [cellSpecialInputs, setCellSpecialInputs] = useState<Record<string, string>>({});
 
   const [message, setMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
   const filteredModels = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -141,6 +150,22 @@ export default function FeeModelsPage() {
       montant: "",
       specials: {},
     };
+  }
+
+  function buildSavedTariffInputs(model: FeeModel) {
+    return model.tariffs.reduce<Record<number, SavedTariffDraft>>((acc, tariff) => {
+      acc[tariff.id] = {
+        libelle: tariff.libelle || "",
+        code: tariff.code || "",
+        montant: formatAmountInput(tariff.montant),
+      };
+
+      return acc;
+    }, {});
+  }
+
+  function sortedTariffs(model: FeeModel) {
+    return [...model.tariffs].sort((a, b) => a.id - b.id);
   }
 
   function extractSpecialColumns(model: FeeModel) {
@@ -282,6 +307,7 @@ export default function FeeModelsPage() {
       }
 
       setSelectedModel(data);
+      setSavedTariffInputs(buildSavedTariffInputs(data));
       setTitle(data.title);
       setClasse(data.classe || "GENERAL");
       setSchoolYearName(data.schoolYearName);
@@ -303,6 +329,7 @@ export default function FeeModelsPage() {
 
     if (res.ok) {
       setSelectedModel(data);
+      setSavedTariffInputs(buildSavedTariffInputs(data));
       setSpecialColumns((previous) => {
         const merged = Array.from(
           new Set([...previous, ...loadPersistedSpecialColumns(data)])
@@ -318,11 +345,54 @@ export default function FeeModelsPage() {
   }
 
   async function saveAll() {
-    if (!selectedModel) return;
+    if (!selectedModel || isSaving) return;
 
     try {
+      setIsSaving(true);
       setMessage("");
       persistSpecialColumns(selectedModel.id, specialColumns);
+
+      const savedRows = sortedTariffs(selectedModel);
+
+      for (const tariff of savedRows) {
+        const input = savedTariffInputs[tariff.id];
+
+        if (!input) continue;
+
+        if (!input.libelle.trim() || !input.code.trim() || !input.montant.trim()) {
+          setMessage("Chaque ligne enregistrée doit avoir Libellé, Code et Montant.");
+          return;
+        }
+      }
+
+      const rowsToSave = draftRows.filter(
+        (row) =>
+          row.libelle.trim() ||
+          row.code.trim() ||
+          row.montant.trim() ||
+          Object.values(row.specials).some((v: string) => v.trim())
+      );
+
+      for (const row of rowsToSave) {
+        if (!row.libelle.trim() || !row.code.trim() || !row.montant.trim()) {
+          setMessage("Chaque nouvelle ligne doit avoir Libellé, Code et Montant.");
+          return;
+        }
+      }
+
+      const allCodes = [
+        ...savedRows.map((tariff) => savedTariffInputs[tariff.id]?.code.trim().toLowerCase()).filter(Boolean),
+        ...rowsToSave.map((row) => row.code.trim().toLowerCase()).filter(Boolean),
+      ];
+
+      const duplicatedCode = allCodes.find(
+        (code, index) => allCodes.findIndex((item) => item === code) !== index
+      );
+
+      if (duplicatedCode) {
+        setMessage(`Le code "${duplicatedCode}" existe déjà.`);
+        return;
+      }
 
       const updateRes = await fetch(`/api/fee-models/${selectedModel.id}`, {
         method: "PUT",
@@ -343,20 +413,39 @@ export default function FeeModelsPage() {
         return;
       }
 
-     const rowsToSave = draftRows.filter(
-        (row) =>
-          row.libelle.trim() ||
-          row.code.trim() ||
-          row.montant.trim() ||
-          Object.values(row.specials).some((v) => v.trim())
-      );
+      for (const tariff of savedRows) {
+        const input = savedTariffInputs[tariff.id];
 
-      for (const row of rowsToSave) {
-        if (!row.libelle.trim() || !row.code.trim() || !row.montant.trim()) {
-          setMessage("Chaque ligne doit avoir Libellé, Code et Montant.");
+        if (!input) continue;
+
+        const hasChanged =
+          input.libelle.trim() !== tariff.libelle ||
+          input.code.trim() !== tariff.code ||
+          amountToNumber(input.montant) !== tariff.montant;
+
+        if (!hasChanged) continue;
+
+        const tariffUpdateRes = await fetch(`/api/fee-tariffs/${tariff.id}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            libelle: input.libelle.trim(),
+            code: input.code.trim(),
+            montant: amountToNumber(input.montant),
+          }),
+        });
+
+        const tariffUpdateData = await safeJson(tariffUpdateRes);
+
+        if (!tariffUpdateRes.ok) {
+          setMessage(tariffUpdateData.message || "Erreur modification tarif.");
           return;
         }
+      }
 
+      for (const row of rowsToSave) {
         const tariffRes = await fetch("/api/fee-tariffs", {
           method: "POST",
           headers: {
@@ -412,6 +501,8 @@ export default function FeeModelsPage() {
     } catch (error: any) {
       console.error("Erreur enregistrement modèle frais:", error);
       setMessage(error?.message || "Erreur lors de l'enregistrement.");
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -500,6 +591,20 @@ export default function FeeModelsPage() {
       if (previous.length <= 1) return previous;
       return previous.filter((row) => row.tempId !== tempId);
     });
+  }
+
+  function updateSavedTariffInput(
+    tariffId: number,
+    field: "libelle" | "code" | "montant",
+    value: string
+  ) {
+    setSavedTariffInputs((previous) => ({
+      ...previous,
+      [tariffId]: {
+        ...previous[tariffId],
+        [field]: field === "montant" ? formatAmountInput(value) : value,
+      },
+    }));
   }
 
   function updateDraftRow(
@@ -845,11 +950,12 @@ export default function FeeModelsPage() {
 <button
   type="button"
   onClick={addDraftRow}
-  className="mb-2 rounded bg-emerald-600 px-2.5 py-1.5 text-[11px] text-white font-black"
+  disabled={isSaving}
+  className="mb-2 rounded bg-emerald-600 px-2.5 py-1.5 text-[11px] text-white font-black disabled:cursor-not-allowed disabled:opacity-60"
 >
   + Ajouter une ligne
 </button>
-              <div className="max-h-[58vh] overflow-auto border border-slate-300">
+              <div className="max-h-[54vh] overflow-auto border border-slate-300">
                 <table className="w-full min-w-[760px] border-collapse text-[11px]">
                   <thead className="bg-[#2d333d] text-white">
                     <tr>
@@ -891,21 +997,59 @@ export default function FeeModelsPage() {
                   </thead>
 
                   <tbody>
-                    {selectedModel.tariffs.map((tariff, tariffIndex) => {
-                      const isLastSavedTariff = tariffIndex === selectedModel.tariffs.length - 1;
+                    {sortedTariffs(selectedModel).map((tariff, tariffIndex) => {
+                      const isLastSavedTariff = tariffIndex === sortedTariffs(selectedModel).length - 1;
+                      const savedInput = savedTariffInputs[tariff.id] || {
+                        libelle: tariff.libelle,
+                        code: tariff.code,
+                        montant: formatAmountInput(tariff.montant),
+                      };
 
                       return (
                       <tr key={tariff.id} className="odd:bg-[#eaf2fb] even:bg-white">
-                        <td className="border border-slate-300 px-2 py-[4px]">
-                          {tariff.libelle}
+                        <td className="border border-slate-300 p-[3px]">
+                          <input
+                            value={savedInput.libelle}
+                            onChange={(event) =>
+                              updateSavedTariffInput(
+                                tariff.id,
+                                "libelle",
+                                event.target.value
+                              )
+                            }
+                            disabled={isSaving}
+                            className="h-[30px] w-full border border-slate-300 bg-white px-1.5 py-1 text-[11px] outline-none disabled:bg-slate-100"
+                          />
                         </td>
 
-                        <td className="border border-slate-300 px-1.5 py-[4px] text-center">
-                          {tariff.code}
+                        <td className="border border-slate-300 p-[3px]">
+                          <input
+                            value={savedInput.code}
+                            onChange={(event) =>
+                              updateSavedTariffInput(
+                                tariff.id,
+                                "code",
+                                event.target.value
+                              )
+                            }
+                            disabled={isSaving}
+                            className="h-[30px] w-full border border-slate-300 bg-white px-1.5 py-1 text-center text-[11px] outline-none disabled:bg-slate-100"
+                          />
                         </td>
 
-                        <td className="border border-slate-300 px-1.5 py-[4px] text-right font-semibold">
-                          {formatMoney(tariff.montant)}
+                        <td className="border border-slate-300 p-[3px]">
+                          <input
+                            value={savedInput.montant}
+                            onChange={(event) =>
+                              updateSavedTariffInput(
+                                tariff.id,
+                                "montant",
+                                event.target.value
+                              )
+                            }
+                            disabled={isSaving}
+                            className="h-[30px] w-full border border-slate-300 bg-white px-1.5 py-1 text-right text-[11px] font-semibold outline-none disabled:bg-slate-100"
+                          />
                         </td>
 
                         {specialColumns.map((column) => {
@@ -925,7 +1069,8 @@ export default function FeeModelsPage() {
 
                                   <button
                                     onClick={() => deleteSpecial(found.id)}
-                                    className="rounded bg-red-500 px-1.5 py-[1px] text-[11px] text-white"
+                                    disabled={isSaving}
+                                    className="rounded bg-red-500 px-1.5 py-[1px] text-[11px] text-white disabled:cursor-not-allowed disabled:opacity-60"
                                   >
                                     ×
                                   </button>
@@ -942,14 +1087,16 @@ export default function FeeModelsPage() {
                                       )
                                     }
                                     placeholder="0"
-                                    className="h-[28px] w-full border border-slate-300 px-1.5 py-1 text-right text-[11px] outline-none"
+                                    disabled={isSaving}
+                                    className="h-[28px] w-full border border-slate-300 px-1.5 py-1 text-right text-[11px] outline-none disabled:bg-slate-100"
                                   />
 
                                   <button
                                     onClick={() =>
                                       addSpecialAmountToTariff(tariff.id, column)
                                     }
-                                    className="rounded bg-emerald-600 px-2 py-1 text-[11px] text-white"
+                                    disabled={isSaving}
+                                    className="rounded bg-emerald-600 px-2 py-1 text-[11px] text-white disabled:cursor-not-allowed disabled:opacity-60"
                                   >
                                     +
                                   </button>
@@ -963,7 +1110,8 @@ export default function FeeModelsPage() {
                           <div className="flex items-center justify-center gap-1">
                             <button
                               onClick={() => deleteTariff(tariff.id)}
-                              className="rounded bg-red-600 px-2 py-1 text-[11px] font-black text-white"
+                              disabled={isSaving}
+                              className="rounded bg-red-600 px-2 py-1 text-[11px] font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
                               title="Supprimer cette ligne"
                             >
                               ×
@@ -972,7 +1120,8 @@ export default function FeeModelsPage() {
                             {isLastSavedTariff && draftRows.length === 0 && (
                               <button
                                 onClick={addDraftRow}
-                                className="rounded bg-emerald-600 px-2 py-1 text-[11px] font-black text-white"
+                                disabled={isSaving}
+                                className="rounded bg-emerald-600 px-2 py-1 text-[11px] font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
                                 title="Ajouter une ligne vide"
                               >
                                 +
@@ -997,7 +1146,8 @@ export default function FeeModelsPage() {
                               )
                             }
                             placeholder="Libellé"
-                            className="h-[30px] w-full border border-slate-300 px-1.5 py-1 text-[11px] outline-none"
+                            disabled={isSaving}
+                            className="h-[30px] w-full border border-slate-300 px-1.5 py-1 text-[11px] outline-none disabled:bg-slate-100"
                           />
                         </td>
 
@@ -1008,7 +1158,8 @@ export default function FeeModelsPage() {
                               updateDraftRow(row.tempId, "code", event.target.value)
                             }
                             placeholder="Code"
-                            className="h-[30px] w-full border border-slate-300 px-1.5 py-1 text-center text-[11px] outline-none"
+                            disabled={isSaving}
+                            className="h-[30px] w-full border border-slate-300 px-1.5 py-1 text-center text-[11px] outline-none disabled:bg-slate-100"
                           />
                         </td>
 
@@ -1023,7 +1174,8 @@ export default function FeeModelsPage() {
                               )
                             }
                             placeholder="Montant"
-                            className="h-[30px] w-full border border-slate-300 px-1.5 py-1 text-right text-[11px] outline-none"
+                            disabled={isSaving}
+                            className="h-[30px] w-full border border-slate-300 px-1.5 py-1 text-right text-[11px] outline-none disabled:bg-slate-100"
                           />
                         </td>
 
@@ -1039,7 +1191,8 @@ export default function FeeModelsPage() {
                                 )
                               }
                               placeholder={column}
-                              className="h-[30px] w-full border border-slate-300 px-1.5 py-1 text-right text-[11px] outline-none"
+                              disabled={isSaving}
+                              className="h-[30px] w-full border border-slate-300 px-1.5 py-1 text-right text-[11px] outline-none disabled:bg-slate-100"
                             />
                           </td>
                         ))}
@@ -1049,7 +1202,8 @@ export default function FeeModelsPage() {
                             {index === draftRows.length - 1 && (
                               <button
                                 onClick={addDraftRow}
-                                className="rounded bg-emerald-600 px-2 py-1.5 text-[11px] font-black text-white"
+                                disabled={isSaving}
+                                className="rounded bg-emerald-600 px-2 py-1.5 text-[11px] font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
                                 title="Ajouter une ligne vide"
                               >
                                 +
@@ -1062,7 +1216,8 @@ export default function FeeModelsPage() {
                                   ? removeDraftRow(row.tempId)
                                   : clearDraftRow(row.tempId)
                               }
-                              className="rounded bg-red-600 px-2 py-1.5 text-[11px] font-black text-white"
+                              disabled={isSaving}
+                              className="rounded bg-red-600 px-2 py-1.5 text-[11px] font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
                               title={draftRows.length > 1 ? "Supprimer cette ligne" : "Vider cette ligne"}
                             >
                               ×
@@ -1075,19 +1230,27 @@ export default function FeeModelsPage() {
                 </table>
               </div>
 
-              <div className="mt-3 flex shrink-0 justify-end gap-2">
+              <div className="sticky bottom-0 z-40 -mx-3 mt-3 flex shrink-0 justify-end gap-2 border-t border-slate-200 bg-white px-3 py-3 shadow-[0_-8px_18px_rgba(15,23,42,0.12)]">
                 <button
+                  type="button"
                   onClick={() => setEditOpen(false)}
-                  className="rounded bg-slate-500 px-3 py-1.5 text-white text-[12px]"
+                  disabled={isSaving}
+                  className="rounded bg-slate-500 px-4 py-2 text-[12px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Fermer
                 </button>
 
                 <button
+                  type="button"
                   onClick={saveAll}
-                  className="rounded bg-blue-600 px-3 py-1.5 text-white text-[12px]"
+                  disabled={isSaving}
+                  className={`rounded px-4 py-2 text-[12px] font-bold text-white ${
+                    isSaving
+                      ? "cursor-not-allowed bg-slate-400 opacity-70"
+                      : "bg-blue-600 hover:bg-blue-700"
+                  }`}
                 >
-                  Enregistrer
+                  {isSaving ? "Enregistrement..." : "Enregistrer"}
                 </button>
               </div>
             </div>
@@ -1103,7 +1266,7 @@ function Field({
   children,
 }: {
   label: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <label className="block">
