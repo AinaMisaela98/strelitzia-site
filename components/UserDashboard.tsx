@@ -62,6 +62,7 @@ const menus = [
       "Liste des inscrits",
       "Inscrire un étudiant",
       "Réinscription",
+      "Modèles de frais",
       "Paiement",
       "État paiement des frais",
       "État paiement des activités",
@@ -91,6 +92,9 @@ const [openActionId, setOpenActionId] = useState<string | number | null>(null);
 
 const [students, setStudents] = useState<Student[]>([]);
 const [loadingStudents, setLoadingStudents] = useState(false);
+
+const [successMessage, setSuccessMessage] = useState("");
+const [highlightId, setHighlightId] = useState<string | null>(null);
 
 const [schoolYears, setSchoolYears] = useState<SchoolYear[]>([]);
 const [selectedYear, setSelectedYear] = useState("2025-2026");
@@ -196,11 +200,37 @@ async function loadStudents(yearParam?: string) {
   }
 }
   
-useEffect(() => {
+ useEffect(() => {
   async function initDashboard() {
-    const yearToUse = await loadSchoolYears();
+    const params = new URLSearchParams(window.location.search);
+
+    const urlYear = params.get("year");
+    const urlHighlight = params.get("highlight");
+
+    const yearToUse =
+      urlYear || (await loadSchoolYears());
+
+    const message =
+      localStorage.getItem("studentSuccessMessage");
+
+    if (message) {
+      setSuccessMessage(message);
+
+      setTimeout(() => {
+        setSuccessMessage("");
+      }, 6000);
+
+      localStorage.removeItem(
+        "studentSuccessMessage"
+      );
+    }
+
+    if (urlHighlight) {
+      setHighlightId(urlHighlight);
+    }
 
     setSelectedYear(yearToUse);
+
     setClasse("TOUT");
     setSerie("TOUT");
 
@@ -307,6 +337,15 @@ useEffect(() => {
       window.location.href = "/user/inscription";
       return;
     }
+        if (item === "Réinscription") {
+      window.location.href = "/user/reinscription";
+      return;
+    }
+        if (item === "Modèles de frais") {
+      window.location.href = "/user/fee-models";
+      return;
+    }
+
 
     if (item === "Années scolaires") {
       window.location.href = "/user/school-years";
@@ -439,6 +478,7 @@ useEffect(() => {
     className="fixed inset-0 bg-black/40 z-40 lg:hidden"
   />
 )}
+
 
 <section className="flex-1 min-w-0 h-full flex flex-col overflow-hidden">
   <header className="student-header shrink-0 bg-[#f8fafc] border-b border-slate-200 px-2 md:px-5 py-2 md:py-4">
@@ -863,14 +903,14 @@ useEffect(() => {
       </td>
 
 {/* ACTION */}
-<td className="sticky-action-col border border-slate-300 px-[3px] py-[2px] text-center bg-white overflow-visible">
+<td className="sticky-action-col border border-slate-300 px-[2px] py-[1px] text-center bg-white overflow-visible">
   <div className="relative inline-block overflow-visible">
     <button
       type="button"
       onClick={() =>
         setOpenActionId(openActionId === s.id ? null : s.id)
       }
-      className="mobile-action-btn border border-slate-400 bg-slate-100 hover:bg-slate-200 active:scale-95 transition px-[6px] py-[2px] rounded text-[11px] shadow-sm"
+      className="mobile-action-btn border border-slate-400 bg-slate-100 hover:bg-slate-200 active:scale-95 transition px-[4px] py-[1px] rounded text-[10px] shadow-sm"
     >
       ▾
     </button>
@@ -882,7 +922,7 @@ useEffect(() => {
           className="fixed inset-0 z-40"
         />
 
-        <div className="absolute right-0 top-full mt-1 bg-white shadow-2xl border border-slate-200 rounded-xl z-[9999] w-[230px] overflow-hidden text-left animate-in fade-in zoom-in-95 duration-100">
+        <div className="absolute right-0 top-full mt-1 bg-white shadow-2xl border border-slate-200 rounded-xl z-[9999] w-[220px] overflow-hidden text-left animate-in fade-in zoom-in-95 duration-100">
           <button
             type="button"
             onClick={() => {
@@ -898,7 +938,7 @@ useEffect(() => {
             type="button"
             onClick={() => {
               setOpenActionId(null);
-              alert("Réinscription bientôt disponible");
+              window.location.href = `/user/reinscription?studentId=${s.id}`;
             }}
             className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium transition"
           >
