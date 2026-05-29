@@ -402,6 +402,11 @@ async function paySelectedFees() {
   const selectedFees = getSelectedFeesToPay();
   if (selectedFees.length === 0) return;
 
+  if (!paymentForm.tresorerie) {
+    alert("Veuillez sélectionner une trésorerie avant de valider le paiement.");
+    return;
+  }
+
   const paymentReference = paymentForm.reference || buildPaymentReference();
   if (!paymentForm.reference) {
     setPaymentForm((p) => ({ ...p, reference: paymentReference }));
@@ -786,6 +791,70 @@ function printTicketMultiple(selectedFees: any[]) {
   return (
     <main className="fixed inset-0 flex bg-[#eef2f7] overflow-hidden text-slate-900">
       <style>{`
+        @media screen and (max-width: 768px) {
+          .student-main-content {
+            padding: 10px !important;
+            background: #eef2f7 !important;
+          }
+
+          .student-pdf-wrapper {
+            width: 100% !important;
+            margin: 0 !important;
+          }
+
+          #pdf-print-area {
+            width: 100% !important;
+            overflow: visible !important;
+          }
+
+          .pdf-page {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-height: auto !important;
+            padding: 18px !important;
+            font-size: 12px !important;
+            box-shadow: none !important;
+            border-radius: 14px !important;
+            overflow-wrap: anywhere !important;
+          }
+
+          .pdf-page h1 {
+            font-size: 17px !important;
+            margin-bottom: 20px !important;
+          }
+
+          .pdf-page h2 {
+            font-size: 15px !important;
+          }
+
+          .pdf-photo {
+            width: 86px !important;
+            height: 102px !important;
+          }
+
+          .pdf-section {
+            margin-bottom: 22px !important;
+          }
+
+          .pdf-line {
+            display: grid !important;
+            grid-template-columns: 118px minmax(0, 1fr) !important;
+            gap: 6px !important;
+            align-items: end !important;
+            min-height: 24px !important;
+          }
+
+          .pdf-line-label {
+            min-width: 0 !important;
+            font-size: 11px !important;
+          }
+
+          .pdf-line-value {
+            min-width: 0 !important;
+            word-break: break-word !important;
+          }
+        }
+
         @media print {
           @page {
             size: A4;
@@ -877,7 +946,7 @@ function printTicketMultiple(selectedFees: any[]) {
           ))}
         </div>
 
-        <div className="flex-1 overflow-auto bg-[#d9dde3] p-6">
+        <div className="student-main-content flex-1 overflow-auto bg-[#d9dde3] p-6">
           {tab === "PDF" && (
             <PdfPage student={form} printPdfOnly={printPdfOnly} />
           )}
@@ -1282,9 +1351,9 @@ function printTicketMultiple(selectedFees: any[]) {
                   </button>
                   <button
                     type="button"
-                    disabled={actionId !== null}
+                    disabled={actionId !== null || !paymentForm.tresorerie}
                     onClick={paySelectedFees}
-                    className="rounded-[2px] bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-60"
+                    className="rounded-[2px] bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {actionId !== null ? "Enregistrement..." : "Enregistrer"}
                   </button>
@@ -1423,7 +1492,7 @@ function TextAreaField({ label, name, value, editing, onChange }: any) {
 
 function PdfPage({ student, printPdfOnly }: any) {
   return (
-    <div className="mx-auto">
+    <div className="student-pdf-wrapper mx-auto">
       <div className="no-print mb-4 flex justify-end gap-3">
         <button onClick={printPdfOnly} title="Imprimer la fiche PDF" className="w-11 h-11 rounded-full bg-slate-900 text-white text-xl hover:bg-black shadow">
           🖨
@@ -1444,9 +1513,9 @@ function PdfPage({ student, printPdfOnly }: any) {
             </div>
 
             {student.photoUrl ? (
-              <img src={student.photoUrl} alt={student.nom} className="w-[125px] h-[145px] object-cover border" />
+              <img src={student.photoUrl} alt={student.nom} className="pdf-photo w-[125px] h-[145px] object-cover border" />
             ) : (
-              <div className="w-[125px] h-[145px] bg-slate-200 border flex items-center justify-center text-[45px]">
+              <div className="pdf-photo w-[125px] h-[145px] bg-slate-200 border flex items-center justify-center text-[45px]">
                 👤
               </div>
             )}
@@ -1517,7 +1586,7 @@ function ProCard({ title, subtitle, children }: any) {
 
 function PdfSection({ title, children }: any) {
   return (
-    <section className="mb-8">
+    <section className="pdf-section mb-8">
       <h3 className="text-center font-black underline mb-4">{title}</h3>
       <div className="space-y-2">{children}</div>
     </section>
@@ -1526,9 +1595,9 @@ function PdfSection({ title, children }: any) {
 
 function PdfLine({ label, value }: any) {
   return (
-    <div className="flex gap-2 border-b border-black min-h-[28px] items-end">
-      <span className="font-bold min-w-[220px]">{label} :</span>
-      <span>{value || "-"}</span>
+    <div className="pdf-line flex gap-2 border-b border-black min-h-[28px] items-end">
+      <span className="pdf-line-label font-bold min-w-[220px]">{label} :</span>
+      <span className="pdf-line-value">{value || "-"}</span>
     </div>
   );
 }
