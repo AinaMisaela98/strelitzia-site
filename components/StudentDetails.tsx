@@ -229,6 +229,12 @@ function getSelectedPaidFees() {
   return fees.filter((fee) => selectedPaidFeeIds.includes(fee.id) && isFeePaid(fee));
 }
 
+function canSelectMultiple(e?: any) {
+  if (e?.ctrlKey || e?.metaKey) return true;
+  if (typeof window === "undefined") return false;
+  return window.matchMedia("(max-width: 768px), (pointer: coarse)").matches;
+}
+
 function selectPaidFeeForCancel(fee: any, multiple = false) {
   setSelectedFeeIdsToPay([]);
   setSelectedPaidFeeIds((prev) => {
@@ -849,6 +855,92 @@ function printTicketMultiple(selectedFees: any[]) {
             font-size: 11px !important;
           }
 
+          .pdf-mobile-toolbar {
+            position: sticky !important;
+            top: 0 !important;
+            z-index: 20 !important;
+            width: 100% !important;
+            justify-content: space-between !important;
+            gap: 10px !important;
+            padding: 8px 0 !important;
+            margin-bottom: 10px !important;
+            background: #eef2f7 !important;
+          }
+
+          .pdf-mobile-toolbar button {
+            flex: 1 !important;
+            width: auto !important;
+            height: 44px !important;
+            border-radius: 14px !important;
+            font-size: 18px !important;
+          }
+
+          .pdf-header {
+            display: grid !important;
+            grid-template-columns: minmax(0, 1fr) 78px !important;
+            gap: 12px !important;
+            align-items: start !important;
+            margin-bottom: 18px !important;
+          }
+
+          .pdf-page {
+            border: 1px solid #e2e8f0 !important;
+          }
+
+          .training-fee-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            gap: 10px !important;
+          }
+
+          .training-fee-card {
+            min-height: 116px !important;
+            border-radius: 16px !important;
+            padding: 12px !important;
+            box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08) !important;
+            touch-action: manipulation !important;
+          }
+
+          .training-fee-actions {
+            position: sticky !important;
+            bottom: 0 !important;
+            z-index: 30 !important;
+            margin: 14px -12px -12px !important;
+            padding: 12px !important;
+            background: rgba(255,255,255,0.96) !important;
+            border-top: 1px solid #e2e8f0 !important;
+          }
+
+          .training-fee-actions button {
+            flex: 1 1 145px !important;
+            min-height: 46px !important;
+            border-radius: 14px !important;
+            font-weight: 800 !important;
+          }
+
+          .mobile-modal-panel {
+            max-height: calc(100dvh - 24px) !important;
+            border-radius: 18px !important;
+          }
+
+          .mobile-modal-body {
+            padding: 14px !important;
+          }
+
+          .mobile-modal-actions {
+            position: sticky !important;
+            bottom: -14px !important;
+            margin-left: -14px !important;
+            margin-right: -14px !important;
+            padding: 12px 14px !important;
+          }
+
+          .mobile-modal-actions button {
+            flex: 1 !important;
+            min-height: 45px !important;
+            border-radius: 14px !important;
+            font-weight: 800 !important;
+          }
+
           .pdf-line-value {
             min-width: 0 !important;
             word-break: break-word !important;
@@ -1077,8 +1169,10 @@ function printTicketMultiple(selectedFees: any[]) {
       </div>
     ) : (
       <>
-        <div className="mb-2 text-[11px] text-slate-500">Click = sélectionner un frais. CTRL + click = sélectionner plusieurs frais à payer ou à annuler ensemble.</div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
+        <div className="mb-3 rounded-xl bg-blue-50 px-3 py-2 text-[11px] font-semibold text-blue-700">
+          Mobile : touche plusieurs frais pour les sélectionner ensemble. PC : CTRL + click pour sélection multiple.
+        </div>
+        <div className="training-fee-grid grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
           {fees.map((fee) => {
             const paid = isFeePaid(fee);
             const selectedPaid = selectedPaidFeeIds.includes(fee.id);
@@ -1089,12 +1183,12 @@ function printTicketMultiple(selectedFees: any[]) {
                 key={fee.id}
                 onClick={(e) => {
                   if (paid) {
-                    selectPaidFeeForCancel(fee, e.ctrlKey || e.metaKey);
+                    selectPaidFeeForCancel(fee, canSelectMultiple(e));
                   } else {
-                    selectFeeForPayment(fee, e.ctrlKey || e.metaKey);
+                    selectFeeForPayment(fee, canSelectMultiple(e));
                   }
                 }}
-                className={`min-h-[103px] cursor-pointer rounded-[2px] border p-3 text-center transition ${
+                className={`training-fee-card min-h-[103px] cursor-pointer rounded-[2px] border p-3 text-center transition ${
                   paid
                     ? selectedPaid
                       ? "border-slate-400 bg-[#dfe3e6] text-black"
@@ -1128,7 +1222,7 @@ function printTicketMultiple(selectedFees: any[]) {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      selectFeeForPayment(fee, e.ctrlKey || e.metaKey);
+                      selectFeeForPayment(fee, canSelectMultiple(e));
                     }}
                     className="w-full bg-[#22ad3e] px-2 py-[6px] text-[11px] font-bold text-white hover:bg-[#188b31]"
                   >
@@ -1141,7 +1235,7 @@ function printTicketMultiple(selectedFees: any[]) {
         </div>
 
         {selectedFeeIdsToPay.length > 0 && !selectedPaidFee && (
-          <div className="mt-7 flex flex-wrap gap-3">
+          <div className="training-fee-actions mt-7 flex flex-wrap gap-3">
             <button
               type="button"
               onClick={openPaymentModal}
@@ -1161,7 +1255,7 @@ function printTicketMultiple(selectedFees: any[]) {
         )}
 
         {selectedPaidFeeIds.length > 0 && (
-          <div className="mt-7 flex flex-wrap gap-3">
+          <div className="training-fee-actions mt-7 flex flex-wrap gap-3">
             <button
               type="button"
               onClick={() => {
@@ -1186,13 +1280,13 @@ function printTicketMultiple(selectedFees: any[]) {
 
         {showEditFeesModal && (
           <div className="fixed inset-0 z-[999] flex items-start justify-center overflow-y-auto bg-black/50 px-4 py-6 sm:py-10">
-            <div className="flex max-h-[calc(100vh-48px)] w-full max-w-[640px] flex-col overflow-hidden rounded-[3px] bg-white shadow-2xl">
+            <div className="mobile-modal-panel flex max-h-[calc(100vh-48px)] w-full max-w-[640px] flex-col overflow-hidden rounded-[3px] bg-white shadow-2xl">
               <div className="flex items-center justify-between bg-[#2f343c] px-4 py-3 text-white">
                 <h3 className="text-[16px] font-bold">Modification des frais</h3>
                 <button type="button" onClick={() => setShowEditFeesModal(false)} className="text-lg leading-none text-white/80 hover:text-white">×</button>
               </div>
 
-              <div className="min-h-0 overflow-y-auto p-4 text-[12px]">
+              <div className="mobile-modal-body min-h-0 overflow-y-auto p-4 text-[12px]">
                 <div className="max-h-[360px] overflow-y-auto border border-slate-300">
                   <table className="w-full border-collapse text-[12px]">
                     <thead>
@@ -1223,7 +1317,7 @@ function printTicketMultiple(selectedFees: any[]) {
                   </table>
                 </div>
 
-                <div className="sticky bottom-0 mt-4 flex justify-end gap-2 border-t bg-white pt-3">
+                <div className="mobile-modal-actions sticky bottom-0 mt-4 flex justify-end gap-2 border-t bg-white pt-3">
                   <button
                     type="button"
                     onClick={() => setShowEditFeesModal(false)}
@@ -1246,13 +1340,13 @@ function printTicketMultiple(selectedFees: any[]) {
 
         {showPaymentModal && selectedFeeIdsToPay.length > 0 && (
           <div className="fixed inset-0 z-[999] flex items-start justify-center overflow-y-auto bg-black/50 px-4 py-6 sm:py-10">
-            <div className="flex max-h-[calc(100vh-48px)] w-full max-w-[640px] flex-col overflow-hidden rounded-[3px] bg-white shadow-2xl">
+            <div className="mobile-modal-panel flex max-h-[calc(100vh-48px)] w-full max-w-[640px] flex-col overflow-hidden rounded-[3px] bg-white shadow-2xl">
               <div className="flex items-center justify-between bg-[#2f343c] px-4 py-3 text-white">
                 <h3 className="text-[16px] font-bold">Payment des frais</h3>
                 <button type="button" onClick={closePaymentModal} className="text-lg leading-none text-white/80 hover:text-white">×</button>
               </div>
 
-              <div className="min-h-0 overflow-y-auto p-4 text-[12px]">
+              <div className="mobile-modal-body min-h-0 overflow-y-auto p-4 text-[12px]">
                 <div className="grid gap-5 md:grid-cols-2">
                   <label className="block">
                     <span className="mb-1 block text-slate-600">Date du paiement</span>
@@ -1341,7 +1435,7 @@ function printTicketMultiple(selectedFees: any[]) {
                   </table>
                 </div>
 
-                <div className="sticky bottom-0 mt-4 flex justify-end gap-2 border-t bg-white pt-3">
+                <div className="mobile-modal-actions sticky bottom-0 mt-4 flex justify-end gap-2 border-t bg-white pt-3">
                   <button
                     type="button"
                     onClick={closePaymentModal}
@@ -1493,7 +1587,7 @@ function TextAreaField({ label, name, value, editing, onChange }: any) {
 function PdfPage({ student, printPdfOnly }: any) {
   return (
     <div className="student-pdf-wrapper mx-auto">
-      <div className="no-print mb-4 flex justify-end gap-3">
+      <div className="pdf-mobile-toolbar no-print mb-4 flex justify-end gap-3">
         <button onClick={printPdfOnly} title="Imprimer la fiche PDF" className="w-11 h-11 rounded-full bg-slate-900 text-white text-xl hover:bg-black shadow">
           🖨
         </button>
@@ -1505,7 +1599,7 @@ function PdfPage({ student, printPdfOnly }: any) {
 
       <div id="pdf-print-area">
         <div className="pdf-page bg-white shadow-2xl w-[850px] min-h-[1180px] p-12 text-[14px] text-black mx-auto">
-          <div className="flex justify-between items-start mb-8">
+          <div className="pdf-header flex justify-between items-start mb-8">
             <div>
               <h2 className="font-black text-[18px] uppercase">Strelitzia School</h2>
               <p className="text-[12px]">Année scolaire : {student.anneeScolaire}</p>
