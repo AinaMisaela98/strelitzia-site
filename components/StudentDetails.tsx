@@ -17,7 +17,621 @@ export default function StudentDetails({ user, student }: any) {
 
   const [form, setForm] = useState(initialForm);
   const [saving, setSaving] = useState(false);
+const [fees, setFees] = useState<any[]>([]);
+const [loadingFees, setLoadingFees] = useState(false);
+const [actionId, setActionId] = useState<number | string | null>(null);
+const [selectedPaidFee, setSelectedPaidFee] = useState<any | null>(null);
+const [selectedPaidFeeIds, setSelectedPaidFeeIds] = useState<Array<number | string>>([]);
+const [selectedFeeIdsToPay, setSelectedFeeIdsToPay] = useState<Array<number | string>>([]);
+const [showPaymentModal, setShowPaymentModal] = useState(false);
+const [paymentForm, setPaymentForm] = useState({
+  datePaiement: new Date().toISOString().slice(0, 10),
+  tresorerie: "",
+  modePaiement: "Espèce",
+  reference: "",
+  commentaire: "",
+});
+const [showEditFeesModal, setShowEditFeesModal] = useState(false);
+const [editFeesRows, setEditFeesRows] = useState<any[]>([]);
 
+const feeOrder = ["DI", "FG", "UNIF", "SEPT", "OCT", "NOV", "DEC", "JAN", "FEV", "FÉV", "MAR", "AVR", "MAI", "JUIN"];
+
+function getFeeCode(fee: any) {
+  return String(fee.code || fee.month || fee.mois || fee.libelle || fee.name || "-")
+    .trim()
+    .toUpperCase();
+}
+
+function getFeeAmount(fee: any) {
+  return Number(fee.modifiedMontant ?? fee.montantTotal ?? fee.amount ?? fee.montant ?? fee.tarif ?? fee.value ?? 0);
+}
+
+function getFeeLabel(fee: any) {
+  return String(fee.libelle || fee.label || fee.name || fee.code || "Frais");
+}
+
+function getPaymentKey(fee: any) {
+  const code = getFeeCode(fee);
+  const trainingFeeId = fee.trainingFeeId || fee.trainingId || fee.sourceTrainingFeeId || fee.id;
+  return `${student.id}-${trainingFeeId}-${code}`;
+}
+
+function getLocalPayments() {
+  if (typeof window === "undefined") return {} as Record<string, any>;
+
+  try {
+    return JSON.parse(localStorage.getItem("studentFeePayments") || "{}");
+  } catch {
+    return {} as Record<string, any>;
+  }
+}
+
+function saveLocalPayment(key: string, value: any) {
+  if (typeof window === "undefined") return;
+  const payments = getLocalPayments();
+  payments[key] = value;
+  localStorage.setItem("studentFeePayments", JSON.stringify(payments));
+}
+
+function removeLocalPayment(key: string) {
+  if (typeof window === "undefined") return;
+  const payments = getLocalPayments();
+  delete payments[key];
+  localStorage.setItem("studentFeePayments", JSON.stringify(payments));
+}
+
+function getLocalFeeEdits() {
+  if (typeof window === "undefined") return {} as Record<string, any>;
+  try {
+    return JSON.parse(localStorage.getItem("studentFeeEdits") || "{}");
+  } catch {
+    return {} as Record<string, any>;
+  }
+}
+
+function saveLocalFeeEdit(key: string, value: any) {
+  if (typeof window === "undefined") return;
+  const edits = getLocalFeeEdits();
+  edits[key] = value;
+  localStorage.setItem("studentFeeEdits", JSON.stringify(edits));
+}
+
+function isFeePaid(fee: any) {
+  const status = String(fee.status || fee.statut || "").toUpperCase();
+  return Boolean(
+    fee.paid === true ||
+      fee.isPaid === true ||
+      fee.paye === true ||
+      status === "PAYE" ||
+      status === "PAYÉ" ||
+      status === "PAID" ||
+      (Number(fee.reste || 0) === 0 && Number(fee.montantPaye || 0) > 0)
+  );
+}
+
+function sortFees(list: any[]) {
+  return [...list].sort((a, b) => {
+    const ca = getFeeCode(a);
+    const cb = getFeeCode(b);
+    const ia = feeOrder.indexOf(ca);
+    const ib = feeOrder.indexOf(cb);
+    if (ia !== -1 || ib !== -1) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+    return ca.localeCompare(cb);
+  });
+}
+
+function normalizeTrainingFee(f: any, index: number, paidMap: Map<string, any>, localPayments: Record<string, any>) {
+  const code = getFeeCode(f);
+  const keyId = f.id ?? `tf-${index}`;
+  const linkedPaid = paidMap.get(String(f.id)) || paidMap.get(code);
+  const localKey = `${student.id}-${keyId}-${code}`;
+  const localPaid = localPayments[localKey];
+  const localEdit = getLocalFeeEdits()[localKey];
+  const paidInfo = linkedPaid || localPaid;
+
+  return {
+    id: paidInfo?.id || `training-${keyId}-${code}`,
+    studentFeeId: paidInfo?.id || null,
+    trainingFeeId: f.id,
+    sourceTrainingFeeId: f.id,
+    code: f.code || f.libelle || code,
+    libelle: f.libelle || f.code || code,
+    montantTotal: Number(localEdit?.montant ?? f.montant ?? f.montantTotal ?? f.amount ?? 0),
+    modifiedMontant: localEdit?.montant ? Number(localEdit.montant) : undefined,
+    montantPaye: paidInfo ? Number(paidInfo.montantPaye || paidInfo.amount || paidInfo.montantTotal || localEdit?.montant || f.montant || 0) : 0,
+    reste: paidInfo ? 0 : Number(localEdit?.montant ?? f.montant ?? f.montantTotal ?? f.amount ?? 0),
+    status: paidInfo ? "PAYE" : "NON_PAYE",
+    paid: Boolean(paidInfo),
+    localOnly: Boolean(localPaid && !linkedPaid),
+  };
+}
+
+function normalizeStudentFee(f: any, index: number) {
+  return {
+    ...f,
+    id: f.id ?? `student-fee-${index}`,
+    studentFeeId: f.id,
+    code: f.code || f.libelle || f.month || f.mois || `Frais ${index + 1}`,
+    libelle: f.libelle || f.label || f.name || f.code || `Frais ${index + 1}`,
+    montantTotal: getFeeAmount(f),
+    status: isFeePaid(f) ? "PAYE" : "NON_PAYE",
+    paid: isFeePaid(f),
+  };
+}
+
+useEffect(() => {
+  if (tab === "FRAIS DE FORMATION") {
+    loadStudentFees();
+  }
+}, [tab, student?.id]);
+
+async function loadStudentFees() {
+  setLoadingFees(true);
+
+  try {
+    const [studentRes, trainingRes] = await Promise.allSettled([
+      fetch(`/api/student-fees?studentId=${student.id}`, { cache: "no-store" }),
+      fetch("/api/training-fees", { cache: "no-store" }),
+    ]);
+
+    let studentData: any[] = [];
+    let trainingData: any[] = [];
+
+    if (studentRes.status === "fulfilled" && studentRes.value.ok) {
+      const json = await studentRes.value.json();
+      studentData = Array.isArray(json) ? json : [];
+    }
+
+    if (trainingRes.status === "fulfilled" && trainingRes.value.ok) {
+      const json = await trainingRes.value.json();
+      trainingData = Array.isArray(json) ? json : [];
+    }
+
+    const localPayments = getLocalPayments();
+    const paidMap = new Map<string, any>();
+
+    studentData.forEach((f: any) => {
+      if (!isFeePaid(f)) return;
+      if (f.trainingFeeId) paidMap.set(String(f.trainingFeeId), f);
+      paidMap.set(getFeeCode(f), f);
+    });
+
+    const visibleFees = trainingData.length > 0
+      ? trainingData.map((f, index) => normalizeTrainingFee(f, index, paidMap, localPayments))
+      : studentData.map((f, index) => normalizeStudentFee(f, index));
+
+    setFees(sortFees(visibleFees));
+  } catch {
+    setFees([]);
+  } finally {
+    setLoadingFees(false);
+  }
+}
+
+function formatAmount(value: number | string) {
+  return String(value || 0)
+    .replace(/\D/g, "")
+    .replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+}
+
+function buildPaymentReference() {
+  const d = new Date();
+  const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}${String(d.getHours()).padStart(2, "0")}${String(d.getMinutes()).padStart(2, "0")}${String(d.getSeconds()).padStart(2, "0")}`;
+  const random = Math.floor(100 + Math.random() * 900);
+  return `PAY-${student.id}-${stamp}-${random}`;
+}
+
+function getSelectedFeesToPay() {
+  return fees.filter((fee) => selectedFeeIdsToPay.includes(fee.id) && !isFeePaid(fee));
+}
+
+function getSelectedPaidFees() {
+  return fees.filter((fee) => selectedPaidFeeIds.includes(fee.id) && isFeePaid(fee));
+}
+
+function selectPaidFeeForCancel(fee: any, multiple = false) {
+  setSelectedFeeIdsToPay([]);
+  setSelectedPaidFeeIds((prev) => {
+    const next = multiple
+      ? prev.includes(fee.id)
+        ? prev.filter((id) => id !== fee.id)
+        : [...prev, fee.id]
+      : prev.length === 1 && prev[0] === fee.id
+        ? []
+        : [fee.id];
+
+    const selected = fees.filter((item) => next.includes(item.id) && isFeePaid(item));
+    setSelectedPaidFee(selected[selected.length - 1] || null);
+    return next;
+  });
+}
+
+function selectFeeForPayment(fee: any, multiple = false) {
+  setSelectedPaidFee(null);
+  setSelectedPaidFeeIds([]);
+  setSelectedFeeIdsToPay((prev) => {
+    if (multiple) {
+      return prev.includes(fee.id) ? prev.filter((id) => id !== fee.id) : [...prev, fee.id];
+    }
+    return prev.length === 1 && prev[0] === fee.id ? [] : [fee.id];
+  });
+}
+
+function openEditFeesModal() {
+  const selectedFees = getSelectedFeesToPay();
+  if (selectedFees.length === 0) return;
+  setEditFeesRows(
+    selectedFees.map((fee) => ({
+      id: fee.id,
+      key: getPaymentKey(fee),
+      code: getFeeCode(fee),
+      libelle: getFeeLabel(fee),
+      montant: String(getFeeAmount(fee)),
+    }))
+  );
+  setShowEditFeesModal(true);
+}
+
+function saveEditedFees() {
+  const cleanedRows = editFeesRows.map((row) => ({
+    ...row,
+    montant: Number(String(row.montant).replace(/\D/g, "") || 0),
+  }));
+
+  for (const row of cleanedRows) {
+    saveLocalFeeEdit(row.key, { montant: row.montant, updatedAt: new Date().toISOString() });
+  }
+
+  setFees((prev) =>
+    prev.map((fee) => {
+      const row = cleanedRows.find((r) => r.id === fee.id || r.key === getPaymentKey(fee));
+      if (!row) return fee;
+      return {
+        ...fee,
+        montantTotal: row.montant,
+        modifiedMontant: row.montant,
+        reste: isFeePaid(fee) ? 0 : row.montant,
+      };
+    })
+  );
+
+  setShowEditFeesModal(false);
+}
+
+function openPaymentModal() {
+  const selectedFees = getSelectedFeesToPay();
+  if (selectedFees.length === 0) return;
+  setPaymentForm({
+    datePaiement: new Date().toISOString().slice(0, 10),
+    tresorerie: "",
+    modePaiement: "Espèce",
+    reference: buildPaymentReference(),
+    commentaire: "",
+  });
+  setShowPaymentModal(true);
+}
+
+function closePaymentModal() {
+  setShowPaymentModal(false);
+}
+
+async function payOneFee(fee: any) {
+  if (isFeePaid(fee)) {
+    setSelectedPaidFee(fee);
+    return;
+  }
+
+  setActionId(fee.id);
+
+  const paymentReference = paymentForm.reference || buildPaymentReference();
+
+  const paidFee = {
+    ...fee,
+    status: "PAYE",
+    paid: true,
+    montantPaye: getFeeAmount(fee),
+    montantTotal: getFeeAmount(fee),
+    reste: 0,
+    paidAt: paymentForm.datePaiement || new Date().toISOString(),
+    tresorerie: paymentForm.tresorerie,
+    modePaiement: paymentForm.modePaiement,
+    reference: paymentReference,
+    commentaire: paymentForm.commentaire,
+  };
+
+  try {
+    let saved = false;
+
+    if (fee.studentFeeId && !String(fee.studentFeeId).startsWith("training-")) {
+      const res = await fetch("/api/student-fees", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: fee.studentFeeId,
+          action: "PAY",
+          montantPaye: getFeeAmount(fee),
+        }),
+      });
+      saved = res.ok;
+    } else {
+      const res = await fetch("/api/student-fees", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          studentId: student.id,
+          trainingFeeId: fee.trainingFeeId || fee.sourceTrainingFeeId,
+          code: getFeeCode(fee),
+          libelle: getFeeLabel(fee),
+          montantTotal: getFeeAmount(fee),
+          montantPaye: getFeeAmount(fee),
+          reste: 0,
+          status: "PAYE",
+          datePaiement: paymentForm.datePaiement,
+          tresorerie: paymentForm.tresorerie,
+          modePaiement: paymentForm.modePaiement,
+          reference: paymentReference,
+          commentaire: paymentForm.commentaire,
+        }),
+      });
+      saved = res.ok;
+    }
+
+    // Fallback local: mampandeha paiement/impression na dia mbola tsy vonona aza ny API POST/PATCH.
+    if (!saved) {
+      saveLocalPayment(getPaymentKey(fee), paidFee);
+    }
+
+    setFees((prev) =>
+      prev.map((item) =>
+        item.id === fee.id || getPaymentKey(item) === getPaymentKey(fee) ? paidFee : item
+      )
+    );
+    setSelectedPaidFee(paidFee);
+
+    if (saved) await loadStudentFees();
+  } catch {
+    saveLocalPayment(getPaymentKey(fee), paidFee);
+    setFees((prev) => prev.map((item) => (item.id === fee.id ? paidFee : item)));
+    setSelectedPaidFee(paidFee);
+  } finally {
+    setActionId(null);
+  }
+}
+
+async function paySelectedFees() {
+  const selectedFees = getSelectedFeesToPay();
+  if (selectedFees.length === 0) return;
+
+  const paymentReference = paymentForm.reference || buildPaymentReference();
+  if (!paymentForm.reference) {
+    setPaymentForm((p) => ({ ...p, reference: paymentReference }));
+  }
+
+  for (const fee of selectedFees) {
+    await payOneFee(fee);
+  }
+
+  const paidFees = selectedFees.map((fee) => ({
+    ...fee,
+    status: "PAYE",
+    paid: true,
+    montantPaye: getFeeAmount(fee),
+    montantTotal: getFeeAmount(fee),
+    reste: 0,
+    paidAt: paymentForm.datePaiement || new Date().toISOString(),
+    tresorerie: paymentForm.tresorerie,
+    modePaiement: paymentForm.modePaiement,
+    reference: paymentReference,
+    commentaire: paymentForm.commentaire,
+  }));
+
+  setSelectedPaidFee(paidFees[paidFees.length - 1] || null);
+  setSelectedPaidFeeIds(paidFees.map((fee) => fee.id));
+  setSelectedFeeIdsToPay([]);
+  setShowPaymentModal(false);
+  printTicketMultiple(paidFees);
+}
+
+async function cancelOnePayment(fee: any) {
+  let cancelled = false;
+
+  if (fee.studentFeeId && !fee.localOnly && !String(fee.studentFeeId).startsWith("training-")) {
+    const res = await fetch("/api/student-fees", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: fee.studentFeeId,
+        action: "CANCEL",
+      }),
+    });
+    cancelled = res.ok;
+  }
+
+  removeLocalPayment(getPaymentKey(fee));
+
+  const unpaidFee = {
+    ...fee,
+    status: "NON_PAYE",
+    paid: false,
+    montantPaye: 0,
+    reste: getFeeAmount(fee),
+    localOnly: false,
+  };
+
+  setFees((prev) =>
+    prev.map((item) =>
+      item.id === fee.id || getPaymentKey(item) === getPaymentKey(fee)
+        ? unpaidFee
+        : item
+    )
+  );
+
+  return cancelled;
+}
+
+async function cancelPayment() {
+  const selectedPayments = getSelectedPaidFees();
+  const paymentsToCancel = selectedPayments.length > 0 ? selectedPayments : selectedPaidFee ? [selectedPaidFee] : [];
+  if (paymentsToCancel.length === 0) return;
+
+  if (!confirm(paymentsToCancel.length > 1 ? `Annuler ces ${paymentsToCancel.length} paiements ?` : "Annuler ce paiement ?")) return;
+
+  setActionId("cancel-multiple");
+
+  try {
+    let shouldReload = false;
+
+    for (const fee of paymentsToCancel) {
+      const cancelled = await cancelOnePayment(fee);
+      shouldReload = shouldReload || cancelled;
+    }
+
+    setSelectedPaidFee(null);
+    setSelectedPaidFeeIds([]);
+
+    if (shouldReload) await loadStudentFees();
+  } finally {
+    setActionId(null);
+  }
+}
+
+function printTicket(fee: any) {
+  const win = window.open("", "_blank", "width=320,height=650");
+  if (!win) return;
+
+  const studentName = `${student.nom || ""} ${student.prenoms || ""}`.trim();
+  const classe = student.classe || student.className || student.classRoomName || "-";
+  const matricule = student.matricule || student.registrationNumber || "-";
+  const now = new Date().toLocaleString("fr-FR");
+
+  win.document.write(`
+    <html>
+      <head>
+        <title>Reçu ${getFeeCode(fee)}</title>
+        <style>
+          * { box-sizing: border-box; }
+          body {
+            width: 58mm;
+            font-family: Arial, monospace;
+            font-size: 11px;
+            padding: 6px;
+            color: #000;
+            margin: 0;
+          }
+          .center { text-align: center; }
+          .bold { font-weight: 700; }
+          .school { font-size: 14px; font-weight: 900; }
+          .small { font-size: 10px; }
+          .line { border-top: 1px dashed #000; margin: 7px 0; }
+          .row { display: flex; justify-content: space-between; gap: 7px; }
+          .total { font-size: 13px; font-weight: 900; }
+          @media print {
+            @page { size: 58mm auto; margin: 0; }
+            body { margin: 0; width: 58mm; }
+            button { display: none; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="center school">STRELITZIA SCHOOL</div>
+        <div class="center bold">REÇU FRAIS DE FORMATION</div>
+        <div class="center small">${now}</div>
+        <div class="line"></div>
+
+        <div>Élève : <span class="bold">${studentName || "-"}</span></div>
+        <div>Matricule : <span class="bold">${matricule}</span></div>
+        <div>Classe : <span class="bold">${classe}</span></div>
+
+        <div class="line"></div>
+
+        <div class="row"><span>Frais</span><span class="bold">${getFeeCode(fee)}</span></div>
+        <div class="bold">${getFeeLabel(fee)}</div>
+        <div class="row total"><span>Montant payé</span><span>${formatAmount(getFeeAmount(fee))} Ar</span></div>
+        <div class="row"><span>Reste</span><span>0 Ar</span></div>
+        <div class="row"><span>Statut</span><span class="bold">PAYÉ</span></div>
+        <div class="row"><span>Mode</span><span>${fee.modePaiement || "-"}</span></div>
+        <div class="row"><span>Référence</span><span>${fee.reference || "-"}</span></div>
+
+        <div class="line"></div>
+        <div class="center small">Merci pour votre paiement</div>
+        <br/>
+        <div class="center small">Signature / Cachet</div>
+        <br/><br/>
+
+        <script>
+          window.onload = function() {
+            window.focus();
+            window.print();
+          };
+        </script>
+      </body>
+    </html>
+  `);
+
+  win.document.close();
+}
+
+function printTicketMultiple(selectedFees: any[]) {
+  if (!selectedFees.length) return;
+
+  const win = window.open("", "_blank", "width=320,height=650");
+  if (!win) return;
+
+  const studentName = `${student.nom || ""} ${student.prenoms || ""}`.trim();
+  const classe = student.classe || student.className || student.classRoomName || "-";
+  const matricule = student.matricule || student.registrationNumber || "-";
+  const now = new Date().toLocaleString("fr-FR");
+  const total = selectedFees.reduce((sum, fee) => sum + getFeeAmount(fee), 0);
+  const rows = selectedFees
+    .map(
+      (fee) => `
+        <div class="row"><span>${getFeeCode(fee)}</span><span>${formatAmount(getFeeAmount(fee))} Ar</span></div>
+        <div class="small bold">${getFeeLabel(fee)}</div>
+      `
+    )
+    .join("");
+
+  win.document.write(`
+    <html>
+      <head>
+        <title>Reçu frais formation</title>
+        <style>
+          * { box-sizing: border-box; }
+          body { width: 58mm; font-family: Arial, monospace; font-size: 11px; padding: 6px; color: #000; margin: 0; }
+          .center { text-align: center; }
+          .bold { font-weight: 700; }
+          .school { font-size: 14px; font-weight: 900; }
+          .small { font-size: 10px; }
+          .line { border-top: 1px dashed #000; margin: 7px 0; }
+          .row { display: flex; justify-content: space-between; gap: 7px; }
+          .total { font-size: 13px; font-weight: 900; }
+          @media print { @page { size: 58mm auto; margin: 0; } body { margin: 0; width: 58mm; } button { display: none; } }
+        </style>
+      </head>
+      <body>
+        <div class="center school">STRELITZIA SCHOOL</div>
+        <div class="center bold">REÇU FRAIS DE FORMATION</div>
+        <div class="center small">${now}</div>
+        <div class="line"></div>
+        <div>Élève : <span class="bold">${studentName || "-"}</span></div>
+        <div>Matricule : <span class="bold">${matricule}</span></div>
+        <div>Classe : <span class="bold">${classe}</span></div>
+        <div class="line"></div>
+        ${rows}
+        <div class="line"></div>
+        <div class="row total"><span>Total payé</span><span>${formatAmount(total)} Ar</span></div>
+        <div class="row"><span>Mode</span><span>${paymentForm.modePaiement || "-"}</span></div>
+        <div class="row"><span>Référence</span><span>${paymentForm.reference || "-"}</span></div>
+        <div class="line"></div>
+        <div class="center small">Merci pour votre paiement</div>
+        <br/><div class="center small">Signature / Cachet</div><br/><br/>
+        <script>window.onload = function() { window.focus(); window.print(); };</script>
+      </body>
+    </html>
+  `);
+
+  win.document.close();
+}
   const [academics, setAcademics] = useState<any[]>([]);
 
   useEffect(() => {
@@ -385,16 +999,304 @@ export default function StudentDetails({ user, student }: any) {
           )}
 
           {tab === "FRAIS DE FORMATION" && (
-            <ProCard title="Frais de formation" subtitle="Niveau et informations financières">
-              <Grid>
-                <Field label="Niveau" name="niveau" value={form.niveau} editing={editing} onChange={update} />
-                <Field label="Frais inscription" name="fraisInscription" value={form.fraisInscription} editing={editing} onChange={update} />
-                <Field label="Frais scolarité" name="fraisScolarite" value={form.fraisScolarite} editing={editing} onChange={update} />
-              </Grid>
+  <div className="rounded border border-slate-300 bg-white p-3">
+    {loadingFees ? (
+      <div className="p-10 text-center text-slate-500">Chargement...</div>
+    ) : fees.length === 0 ? (
+      <div className="p-10 text-center text-slate-500">
+        Aucun détail de frais trouvé dans /api/training-fees.
+      </div>
+    ) : (
+      <>
+        <div className="mb-2 text-[11px] text-slate-500">Click = sélectionner un frais. CTRL + click = sélectionner plusieurs frais à payer ou à annuler ensemble.</div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
+          {fees.map((fee) => {
+            const paid = isFeePaid(fee);
+            const selectedPaid = selectedPaidFeeIds.includes(fee.id);
+            const selectedToPay = selectedFeeIdsToPay.includes(fee.id);
 
-              <BottomActions editing={editing} setEditing={setEditing} saveStudent={saveStudent} saving={saving} />
-            </ProCard>
-          )}
+            return (
+              <div
+                key={fee.id}
+                onClick={(e) => {
+                  if (paid) {
+                    selectPaidFeeForCancel(fee, e.ctrlKey || e.metaKey);
+                  } else {
+                    selectFeeForPayment(fee, e.ctrlKey || e.metaKey);
+                  }
+                }}
+                className={`min-h-[103px] cursor-pointer rounded-[2px] border p-3 text-center transition ${
+                  paid
+                    ? selectedPaid
+                      ? "border-slate-400 bg-[#dfe3e6] text-black"
+                      : "border-[#2f343c] bg-[#2f343c] text-white"
+                    : selectedToPay
+                      ? "border-slate-300 bg-[#dfe3e6] text-black"
+                      : "border-yellow-200 bg-[#fffec0] text-black"
+                }`}
+              >
+                <div className="mb-2 truncate text-[12px] font-bold uppercase">
+                  {getFeeCode(fee)}
+                </div>
+
+                <div className="mb-3 text-[12px]">
+                  ( {formatAmount(getFeeAmount(fee))} Ar )
+                </div>
+
+                {paid ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      printTicket(fee);
+                    }}
+                    className="w-full bg-[#737d86] px-2 py-[6px] text-[11px] font-bold text-white hover:bg-[#66707a]"
+                  >
+                    🖨 Imprimer ticket
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      selectFeeForPayment(fee, e.ctrlKey || e.metaKey);
+                    }}
+                    className="w-full bg-[#22ad3e] px-2 py-[6px] text-[11px] font-bold text-white hover:bg-[#188b31]"
+                  >
+                    Faire un règlement
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {selectedFeeIdsToPay.length > 0 && !selectedPaidFee && (
+          <div className="mt-7 flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={openPaymentModal}
+              className="min-w-[115px] rounded-[2px] border border-slate-700 bg-white px-5 py-2 text-[12px] font-medium text-slate-800 hover:bg-slate-100"
+            >
+              PAYÉE {selectedFeeIdsToPay.length > 1 ? `(${selectedFeeIdsToPay.length})` : ""}
+            </button>
+
+            <button
+              type="button"
+              onClick={openEditFeesModal}
+              className="min-w-[115px] rounded-[2px] border border-yellow-500 bg-yellow-400 px-5 py-2 text-[12px] font-medium text-slate-900 hover:bg-yellow-300"
+            >
+              ✎ MODIF FRAIS
+            </button>
+          </div>
+        )}
+
+        {selectedPaidFeeIds.length > 0 && (
+          <div className="mt-7 flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                const selectedPayments = getSelectedPaidFees();
+                selectedPayments.length > 1 ? printTicketMultiple(selectedPayments) : printTicket(selectedPayments[0] || selectedPaidFee);
+              }}
+              className="min-w-[115px] rounded-[2px] border border-slate-700 bg-white px-5 py-2 text-[12px] text-slate-800 hover:bg-slate-100"
+            >
+              🖨 IMPRIMER
+            </button>
+
+            <button
+              type="button"
+              disabled={actionId === "cancel-multiple"}
+              onClick={cancelPayment}
+              className="min-w-[115px] rounded-[2px] border border-red-500 bg-white px-5 py-2 text-[12px] text-red-600 hover:bg-red-50 disabled:opacity-60"
+            >
+              ↺ ANNULER {selectedPaidFeeIds.length > 1 ? `(${selectedPaidFeeIds.length})` : ""}
+            </button>
+          </div>
+        )}
+
+        {showEditFeesModal && (
+          <div className="fixed inset-0 z-[999] flex items-start justify-center overflow-y-auto bg-black/50 px-4 py-6 sm:py-10">
+            <div className="flex max-h-[calc(100vh-48px)] w-full max-w-[640px] flex-col overflow-hidden rounded-[3px] bg-white shadow-2xl">
+              <div className="flex items-center justify-between bg-[#2f343c] px-4 py-3 text-white">
+                <h3 className="text-[16px] font-bold">Modification des frais</h3>
+                <button type="button" onClick={() => setShowEditFeesModal(false)} className="text-lg leading-none text-white/80 hover:text-white">×</button>
+              </div>
+
+              <div className="min-h-0 overflow-y-auto p-4 text-[12px]">
+                <div className="max-h-[360px] overflow-y-auto border border-slate-300">
+                  <table className="w-full border-collapse text-[12px]">
+                    <thead>
+                      <tr className="sticky top-0 z-10 bg-[#2f343c] text-white">
+                        <th className="border-r border-slate-500 px-2 py-2 text-left">Nom du frais</th>
+                        <th className="w-[190px] px-2 py-2 text-right">Nouveau montant (Ar)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {editFeesRows.map((row, index) => (
+                        <tr key={row.id} className="bg-slate-50">
+                          <td className="border-r border-slate-300 px-2 py-2">{row.libelle}</td>
+                          <td className="px-2 py-2">
+                            <input
+                              value={formatAmount(row.montant)}
+                              onChange={(e) => {
+                                const raw = e.target.value.replace(/\D/g, "");
+                                setEditFeesRows((prev) =>
+                                  prev.map((item, i) => (i === index ? { ...item, montant: raw } : item))
+                                );
+                              }}
+                              className="w-full border border-slate-300 px-2 py-1 text-right outline-none focus:border-blue-500"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="sticky bottom-0 mt-4 flex justify-end gap-2 border-t bg-white pt-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowEditFeesModal(false)}
+                    className="rounded-[2px] bg-slate-500 px-4 py-2 text-white hover:bg-slate-600"
+                  >
+                    Fermer
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveEditedFees}
+                    className="rounded-[2px] bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+                  >
+                    Enregistrer
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showPaymentModal && selectedFeeIdsToPay.length > 0 && (
+          <div className="fixed inset-0 z-[999] flex items-start justify-center overflow-y-auto bg-black/50 px-4 py-6 sm:py-10">
+            <div className="flex max-h-[calc(100vh-48px)] w-full max-w-[640px] flex-col overflow-hidden rounded-[3px] bg-white shadow-2xl">
+              <div className="flex items-center justify-between bg-[#2f343c] px-4 py-3 text-white">
+                <h3 className="text-[16px] font-bold">Payment des frais</h3>
+                <button type="button" onClick={closePaymentModal} className="text-lg leading-none text-white/80 hover:text-white">×</button>
+              </div>
+
+              <div className="min-h-0 overflow-y-auto p-4 text-[12px]">
+                <div className="grid gap-5 md:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-1 block text-slate-600">Date du paiement</span>
+                    <input
+                      type="date"
+                      value={paymentForm.datePaiement}
+                      onChange={(e) => setPaymentForm((p) => ({ ...p, datePaiement: e.target.value }))}
+                      className="w-full border border-slate-300 px-3 py-2 outline-none focus:border-blue-500"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-1 block text-slate-600">Trésorerie</span>
+                    <select
+                      value={paymentForm.tresorerie}
+                      onChange={(e) => setPaymentForm((p) => ({ ...p, tresorerie: e.target.value }))}
+                      className="w-full border border-slate-300 px-3 py-2 outline-none focus:border-blue-500"
+                    >
+                      <option value="">Choisissez la trésorerie</option>
+                      <option value="Caisse principale">Caisse principale</option>
+                      <option value="Caisse école">Caisse école</option>
+                      <option value="Banque">Banque</option>
+                      <option value="Mobile money">Mobile money</option>
+                    </select>
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-1 block text-slate-600">Mode paiement</span>
+                    <select
+                      value={paymentForm.modePaiement}
+                      onChange={(e) => setPaymentForm((p) => ({ ...p, modePaiement: e.target.value }))}
+                      className="w-full border border-slate-300 px-3 py-2 outline-none focus:border-blue-500"
+                    >
+                      <option value="Espèce">Espèce</option>
+                      <option value="Chèque">Chèque</option>
+                      <option value="Mvola">Mvola</option>
+                      <option value="Orange monnaie">Orange monnaie</option>
+                      <option value="Virement">Virement</option>
+                    </select>
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-1 block text-slate-600">Commentaire</span>
+                    <input
+                      value={paymentForm.commentaire}
+                      onChange={(e) => setPaymentForm((p) => ({ ...p, commentaire: e.target.value }))}
+                      className="w-full border border-slate-300 px-3 py-2 outline-none focus:border-blue-500"
+                    />
+                  </label>
+                </div>
+
+                <label className="mt-4 block">
+                  <span className="mb-1 block text-slate-600">Référence automatique</span>
+                  <input
+                    value={paymentForm.reference}
+                    readOnly
+                    className="w-full bg-slate-100 border border-slate-300 px-3 py-2 font-bold text-slate-700 outline-none"
+                  />
+                  <span className="mt-1 block text-[10px] font-semibold text-slate-400">
+                    Elle change automatiquement à chaque nouveau paiement.
+                  </span>
+                </label>
+
+                <div className="mt-4 max-h-[260px] overflow-y-auto border border-slate-300">
+                  <table className="w-full border-collapse text-[12px]">
+                    <thead>
+                      <tr className="sticky top-0 z-10 bg-[#2f343c] text-white">
+                        <th className="border-r border-slate-500 px-2 py-2 text-left">Nom du frais</th>
+                        <th className="w-[170px] px-2 py-2 text-right">Montant (Ar)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {getSelectedFeesToPay().map((fee) => (
+                        <tr key={fee.id} className="bg-slate-50">
+                          <td className="border-r border-slate-300 px-2 py-2">{getFeeLabel(fee)}</td>
+                          <td className="px-2 py-2 text-right">{formatAmount(getFeeAmount(fee))}</td>
+                        </tr>
+                      ))}
+                      <tr className="sticky bottom-0 bg-white font-bold shadow-[0_-1px_0_#cbd5e1]">
+                        <td className="border-r border-slate-300 px-2 py-3">MONTANT TOTAL PAYÉE</td>
+                        <td className="px-2 py-3 text-right text-blue-600">
+                          {formatAmount(getSelectedFeesToPay().reduce((sum, fee) => sum + getFeeAmount(fee), 0))}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="sticky bottom-0 mt-4 flex justify-end gap-2 border-t bg-white pt-3">
+                  <button
+                    type="button"
+                    onClick={closePaymentModal}
+                    className="rounded-[2px] bg-slate-500 px-4 py-2 text-white hover:bg-slate-600"
+                  >
+                    Fermer
+                  </button>
+                  <button
+                    type="button"
+                    disabled={actionId !== null}
+                    onClick={paySelectedFees}
+                    className="rounded-[2px] bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-60"
+                  >
+                    {actionId !== null ? "Enregistrement..." : "Enregistrer"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </>
+    )}
+  </div>
+)}
 
           {tab === "ACTIVITÉS" && (
             <ProCard title="Activités" subtitle="Activités scolaires">

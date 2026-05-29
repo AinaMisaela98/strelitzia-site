@@ -3,9 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
 }
 
 enum Role {
@@ -189,4 +188,51 @@ model FeeSpecialTariff {
 
   @@index([feeTariffId])
   @@index([name])
+}
+model TrainingFee {
+  id             Int      @id @default(autoincrement())
+  schoolYearName String
+  site           String   @default("Strelitzia School")
+  levelId        Int?
+  classe         String
+  feeModelId     Int?
+  libelle        String
+  code           String
+  montant        Int
+  createdAt      DateTime @default(now())
+
+  @@index([schoolYearName])
+  @@index([classe])
+  @@index([code])
+  @@index([feeModelId])
+}
+
+model StudentPayment {
+  id             Int      @id @default(autoincrement())
+  studentId      Int
+  trainingFeeId  Int
+  schoolYearName String
+  montantTotal   Int
+  montantPaye    Int
+  reste          Int
+  status         String   @default("PARTIEL")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+model StudentFee {
+  id             Int      @id @default(autoincrement())
+  studentId      Int
+  trainingFeeId  Int
+  schoolYearName String
+  libelle        String
+  code           String
+  montantTotal   Int
+  montantPaye    Int      @default(0)
+  reste          Int
+  status         String   @default("NON_PAYE")
+  paidAt         DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([studentId, trainingFeeId, schoolYearName])
 }

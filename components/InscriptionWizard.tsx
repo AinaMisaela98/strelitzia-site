@@ -21,6 +21,18 @@ type AcademicLevel = {
   }[];
 };
 
+type TrainingFee = {
+  id: number;
+  libelle?: string;
+  intitule?: string;
+  title?: string;
+  name?: string;
+  code?: string;
+  montant?: number;
+  amount?: number;
+  tarif?: number;
+};
+
 type OptionType = string | { label: string; value: string };
 
 const steps = [
@@ -33,22 +45,37 @@ const steps = [
 ];
 
 const stepIcons = ["👨‍🎓", "👨‍👩‍👧", "🧑‍💼", "🎓", "🎨", "✅"];
-
 const today = new Date().toISOString().split("T")[0];
+
+function formatAmount(value: number | string) {
+  return String(value || 0)
+    .replace(/\D/g, "")
+    .replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+}
+
+function feeLabel(fee: TrainingFee) {
+  return fee.libelle || fee.intitule || fee.title || fee.name || "Frais";
+}
+
+function feeAmount(fee: TrainingFee) {
+  return Number(fee.montant || fee.amount || fee.tarif || 0);
+}
 
 export default function InscriptionWizard({ user }: { user: AuthUser }) {
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [loadingFees, setLoadingFees] = useState(false);
 
   const [academics, setAcademics] = useState<{
     year?: string;
     levels: AcademicLevel[];
-  }>({
-    levels: [],
-  });
+  }>({ levels: [] });
 
   const [selectedLevelId, setSelectedLevelId] = useState("");
   const [selectedClassId, setSelectedClassId] = useState("");
+
+  const [trainingFees, setTrainingFees] = useState<TrainingFee[]>([]);
+  const [selectedFeeIds, setSelectedFeeIds] = useState<number[]>([]);
 
   const [form, setForm] = useState({
     dateInscription: today,
@@ -80,32 +107,71 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
     niveau: "",
     classe: "",
     section: "",
-    fraisInscription: "",
-    fraisScolarite: "",
 
     activite: "",
     remarque: "",
   });
 
   useEffect(() => {
-    async function loadAcademics() {
-      try {
-        const res = await fetch("/api/academics", { cache: "no-store" });
-        const data = await res.json();
-
-        if (data?.levels) {
-          setAcademics(data);
-        }
-      } catch {
-        setAcademics({ levels: [] });
-      }
-    }
-
     loadAcademics();
   }, []);
 
+  useEffect(() => {
+    loadTrainingFeesByClass();
+  }, [selectedClassId]);
+
+  async function loadAcademics() {
+    try {
+      const res = await fetch("/api/academics", { cache: "no-store" });
+      const data = await res.json();
+
+      if (data?.levels) {
+        setAcademics(data);
+      }
+    } catch {
+      setAcademics({ levels: [] });
+    }
+  }
+
+  async function loadTrainingFeesByClass() {
+    const classRoomId = Number(selectedClassId);
+
+    if (!classRoomId) {
+      setTrainingFees([]);
+      setSelectedFeeIds([]);
+      return;
+    }
+
+    try {
+      setLoadingFees(true);
+
+      const res = await fetch(`/api/training-fees?classRoomId=${classRoomId}`, {
+        cache: "no-store",
+      });
+
+      const data = await res.json();
+      const fees = Array.isArray(data) ? data : [];
+
+      setTrainingFees(fees);
+      setSelectedFeeIds(fees.map((fee: TrainingFee) => fee.id));
+    } catch {
+      setTrainingFees([]);
+      setSelectedFeeIds([]);
+    } finally {
+      setLoadingFees(false);
+    }
+  }
+
   function update(name: string, value: string) {
     setForm((prev) => ({ ...prev, [name]: value }));
+  }
+
+  function toggleFee(id: number) {
+    if (selectedFeeIds.includes(id)) {
+      setSelectedFeeIds(selectedFeeIds.filter((x) => x !== id));
+    } else {
+      setSelectedFeeIds([...selectedFeeIds, id]);
+    }
   }
 
   function next() {
@@ -116,6 +182,18 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
     if (step > 0) setStep(step - 1);
   }
 
+  const selectedLevel = academics.levels.find(
+    (level) => String(level.id) === selectedLevelId
+  );
+
+  const selectedClass = selectedLevel?.classes.find(
+    (classe) => String(classe.id) === selectedClassId
+  );
+
+  const progress = useMemo(() => {
+    return Math.round(((step + 1) / steps.length) * 100);
+  }, [step]);
+
   async function save() {
     if (
       !form.dateInscription ||
@@ -123,8 +201,8 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
       !form.nom ||
       !form.prenoms ||
       !form.sexe ||
-      !form.classe ||
-      !form.section
+      !selectedLevelId ||
+      !selectedClassId
     ) {
       alert("Fenoy aloha ireo champs misy *");
       return;
@@ -139,7 +217,9 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
 
       const activeYear = yearRes.ok
         ? await yearRes.json()
-        : { name: "2025-2026" };
+        : { name: academics.year || "2025-2026" };
+
+      const activeYearName = activeYear.name || academics.year || "2025-2026";
 
       const res = await fetch("/api/students", {
         method: "POST",
@@ -149,7 +229,13 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
         body: JSON.stringify({
           ...form,
           site: "Strelitzia School",
-          anneeScolaire: activeYear.name || "2025-2026",
+          anneeScolaire: activeYearName,
+          schoolYearName: activeYearName,
+          levelId: Number(selectedLevelId),
+          classRoomId: Number(selectedClassId),
+          classId: Number(selectedClassId),
+          niveau: selectedLevel?.name || form.niveau,
+          classe: selectedClass?.name || form.classe,
         }),
       });
 
@@ -160,26 +246,45 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
         return;
       }
 
+      const createdStudent = data.student || data.data || data;
+
+      if (!createdStudent?.id) {
+        alert("Étudiant enregistré, mais ID étudiant introuvable.");
+        return;
+      }
+
+      if (selectedFeeIds.length > 0) {
+        const feeRes = await fetch("/api/student-fees", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            studentId: createdStudent.id,
+            trainingFeeIds: selectedFeeIds,
+            schoolYearName: activeYearName,
+          }),
+        });
+
+        const feeData = await feeRes.json();
+
+        if (!feeRes.ok) {
+          alert(
+            feeData.error ||
+              "Étudiant enregistré, mais erreur liaison frais de formation."
+          );
+          return;
+        }
+      }
+
       alert("Inscription enregistrée avec succès !");
-      window.location.href = "/user";
+      window.location.href = `/user/student/${createdStudent.id}`;
     } catch {
       alert("Erreur serveur");
     } finally {
       setLoading(false);
     }
   }
-
-  const selectedLevel = academics.levels.find(
-    (level) => String(level.id) === selectedLevelId
-  );
-
-  const selectedClass = selectedLevel?.classes.find(
-    (classe) => String(classe.id) === selectedClassId
-  );
-
-  const progress = useMemo(() => {
-    return Math.round(((step + 1) / steps.length) * 100);
-  }, [step]);
 
   return (
     <main className="fixed inset-0 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 flex text-[13px] text-slate-900 overflow-hidden">
@@ -207,285 +312,365 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
         </div>
 
         <nav className="flex-1 overflow-y-auto p-3 space-y-2">
-          <SideButton label="Liste des inscrits" onClick={() => (window.location.href = "/user")} />
+          <SideButton label="Tableau de bord" />
+          <SideButton label="Étudiants" active />
+          <SideButton label="Liste des inscrits" />
           <SideButton label="Inscrire un étudiant" active />
-          <SideButton label="Années scolaires" onClick={() => (window.location.href = "/user/school-years")} />
-          <SideButton label="Niveaux / Classes / Séries" onClick={() => (window.location.href = "/user/academics")} />
+          <SideButton label="Réinscription" />
+          <SideButton label="Paiement" />
+          <SideButton label="Activités extras" />
+          <SideButton label="Paramètres" />
         </nav>
       </aside>
 
-      <section className="flex-1 min-w-0 h-full flex flex-col overflow-hidden">
-        <header className="h-[76px] shrink-0 bg-white/95 backdrop-blur border-b border-slate-200 flex items-center justify-between px-5 shadow-sm">
-          <div>
-            <h1 className="text-[20px] font-black text-slate-900">
-              Fiche d’inscription
-            </h1>
-            <p className="text-slate-500 text-[12px]">
-              Année scolaire active :{" "}
-              <span className="font-bold text-blue-700">
-                {academics.year || "2025-2026"}
-              </span>
-            </p>
-          </div>
-
-          <button
-            onClick={() => (window.location.href = "/user")}
-            className="bg-slate-900 hover:bg-blue-700 text-white px-4 py-3 rounded-2xl font-bold shadow-lg shadow-slate-900/20 transition"
-          >
-            ← Liste des étudiants
-          </button>
-        </header>
-
-        <div className="flex-1 overflow-auto p-4 md:p-6">
-          <div className="max-w-7xl mx-auto">
-            <div className="bg-white/95 backdrop-blur rounded-[28px] border border-white/70 shadow-2xl overflow-hidden">
-              <div className="p-5 md:p-7 border-b bg-gradient-to-r from-white via-blue-50 to-white">
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <section className="flex-1 overflow-y-auto">
+        <div className="min-h-screen p-3 md:p-6">
+          <div className="mx-auto max-w-7xl">
+            <div className="rounded-[28px] bg-white/95 shadow-2xl overflow-hidden border border-white/50">
+              <div className="bg-gradient-to-r from-slate-900 via-blue-900 to-indigo-900 text-white p-5 md:p-7">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
                   <div>
-                    <p className="text-blue-700 font-black text-xs uppercase tracking-[0.2em]">
-                      Inscription étudiant
+                    <p className="text-blue-200 font-bold text-xs uppercase tracking-[0.25em]">
+                      Gestion scolaire
                     </p>
-                    <h2 className="text-2xl md:text-3xl font-black text-slate-900 mt-1">
-                      {steps[step]}
-                    </h2>
-                    <p className="text-slate-500 mt-1">
-                      Étape {step + 1} sur {steps.length} — progression {progress}%
+                    <h1 className="text-2xl md:text-4xl font-black mt-2">
+                      Inscription étudiant
+                    </h1>
+                    <p className="text-blue-100 mt-2">
+                      Année scolaire : <b>{academics.year || "2025-2026"}</b>
                     </p>
                   </div>
 
-                  <div className="w-full lg:w-[360px]">
-                    <div className="flex justify-between text-xs font-bold text-slate-500 mb-2">
-                      <span>Progression</span>
-                      <span>{progress}%</span>
-                    </div>
-                    <div className="h-3 bg-slate-200 rounded-full overflow-hidden">
+                  <div className="bg-white/10 border border-white/15 rounded-3xl px-5 py-4 min-w-[220px]">
+                    <p className="text-[11px] text-blue-200">Progression</p>
+                    <p className="text-2xl font-black">{progress}%</p>
+                    <div className="mt-3 h-2 rounded-full bg-white/20 overflow-hidden">
                       <div
-                        className="h-full bg-gradient-to-r from-blue-600 via-indigo-600 to-emerald-500 rounded-full transition-all duration-500"
+                        className="h-full bg-gradient-to-r from-green-400 to-emerald-300 rounded-full transition-all"
                         style={{ width: `${progress}%` }}
                       />
                     </div>
                   </div>
                 </div>
-
-                <StepHeader step={step} />
               </div>
 
-              <div className="p-5 md:p-8 bg-slate-50/70">
-                {step === 0 && (
-                  <Panel
-                    icon="👨‍🎓"
-                    title="Info sur l’étudiant"
-                    subtitle="Informations personnelles, contact, photo et santé."
-                  >
-                    <Grid>
-                      <Input label="Date inscription *" type="date" value={form.dateInscription} onChange={(v: string) => update("dateInscription", v)} disabled />
-                      <Input label="Numéro matricule *" value={form.matricule} onChange={(v: string) => update("matricule", v)} />
-                      <PhotoInput value={form.photoUrl} onChange={(v: string) => update("photoUrl", v)} />
-                      <Input label="Nom *" value={form.nom} onChange={(v: string) => update("nom", v)} />
-                      <Input label="Prénoms *" value={form.prenoms} onChange={(v: string) => update("prenoms", v)} />
-                      <Select label="Genre *" value={form.sexe} options={["Masculin", "Feminin"]} onChange={(v: string) => update("sexe", v)} />
-                      <Input label="Date de naissance" type="date" value={form.dateNaissance} onChange={(v: string) => update("dateNaissance", v)} />
-                      <Input label="Lieu de naissance" value={form.lieuNaissance} onChange={(v: string) => update("lieuNaissance", v)} />
-                      <Input label="Téléphone" value={form.telephone} onChange={(v: string) => update("telephone", v)} />
-                      <Input label="Adresse" value={form.adresse} onChange={(v: string) => update("adresse", v)} />
-                      <Input label="Signe particulier" value={form.signeParticulier} onChange={(v: string) => update("signeParticulier", v)} />
-                      <Input label="Maladie ou allergique" value={form.maladieAllergie} onChange={(v: string) => update("maladieAllergie", v)} />
-                      <Input label="Email" value={form.email} onChange={(v: string) => update("email", v)} />
-                    </Grid>
-                  </Panel>
-                )}
+              <div className="p-3 md:p-6 bg-slate-50">
+                <StepHeader step={step} />
 
-                {step === 1 && (
-                  <Panel
-                    icon="👨‍👩‍👧"
-                    title="Info parents"
-                    subtitle="Informations concernant le père, la mère et l’adresse familiale."
-                  >
-                    <Grid>
-                      <Input label="Nom du père" value={form.pereNom} onChange={(v: string) => update("pereNom", v)} />
-                      <Input label="Téléphone père" value={form.pereTel} onChange={(v: string) => update("pereTel", v)} />
-                      <Input label="Nom de la mère" value={form.mereNom} onChange={(v: string) => update("mereNom", v)} />
-                      <Input label="Téléphone mère" value={form.mereTel} onChange={(v: string) => update("mereTel", v)} />
-                      <Input label="Adresse des parents" value={form.parentAdresse} onChange={(v: string) => update("parentAdresse", v)} />
-                    </Grid>
-                  </Panel>
-                )}
+                <div className="mt-6">
+                  {step === 0 && (
+                    <Panel
+                      icon="👨‍🎓"
+                      title="Info sur l’étudiant"
+                      subtitle="Informations personnelles et identité de l’élève."
+                    >
+                      <Grid>
+                        <Input label="Date inscription *" type="date" value={form.dateInscription} onChange={(v: string) => update("dateInscription", v)} />
+                        <Input label="Matricule *" value={form.matricule} onChange={(v: string) => update("matricule", v)} />
+                        <PhotoInput value={form.photoUrl} onChange={(v: string) => update("photoUrl", v)} />
 
-                {step === 2 && (
-                  <Panel
-                    icon="🧑‍💼"
-                    title="Tuteur"
-                    subtitle="Personne responsable à contacter si besoin."
-                  >
-                    <Grid>
-                      <Input label="Nom du tuteur" value={form.tuteurNom} onChange={(v: string) => update("tuteurNom", v)} />
-                      <Input label="Lien avec l’étudiant" value={form.tuteurLien} onChange={(v: string) => update("tuteurLien", v)} />
-                      <Input label="Téléphone tuteur" value={form.tuteurTel} onChange={(v: string) => update("tuteurTel", v)} />
-                      <Input label="Adresse tuteur" value={form.tuteurAdresse} onChange={(v: string) => update("tuteurAdresse", v)} />
-                    </Grid>
-                  </Panel>
-                )}
+                        <Input label="Nom *" value={form.nom} onChange={(v: string) => update("nom", v)} />
+                        <Input label="Prénoms *" value={form.prenoms} onChange={(v: string) => update("prenoms", v)} />
+                        <Select label="Sexe *" value={form.sexe} options={["Masculin", "Féminin"]} onChange={(v: string) => update("sexe", v)} />
 
-                {step === 3 && (
-                  <Panel
-                    icon="🎓"
-                    title="Niveau & frais de formations"
-                    subtitle="Choix du niveau, classe, série et frais."
-                  >
-                    <Grid>
-                      <Select
-                        label="Niveau"
-                        value={selectedLevelId}
-                        options={academics.levels.map((level) => ({
-                          label: level.name,
-                          value: String(level.id),
-                        }))}
-                        onChange={(value: string) => {
-                          setSelectedLevelId(value);
-                          setSelectedClassId("");
+                        <Input label="Date de naissance" type="date" value={form.dateNaissance} onChange={(v: string) => update("dateNaissance", v)} />
+                        <Input label="Lieu de naissance" value={form.lieuNaissance} onChange={(v: string) => update("lieuNaissance", v)} />
+                        <Input label="Téléphone" value={form.telephone} onChange={(v: string) => update("telephone", v)} />
+                        <Input label="Adresse" value={form.adresse} onChange={(v: string) => update("adresse", v)} />
+                        <Input label="Signe particulier" value={form.signeParticulier} onChange={(v: string) => update("signeParticulier", v)} />
+                        <Input label="Maladie / Allergie" value={form.maladieAllergie} onChange={(v: string) => update("maladieAllergie", v)} />
+                        <Input label="Email" value={form.email} onChange={(v: string) => update("email", v)} />
+                      </Grid>
+                    </Panel>
+                  )}
 
-                          const level = academics.levels.find(
-                            (l) => String(l.id) === value
-                          );
+                  {step === 1 && (
+                    <Panel
+                      icon="👨‍👩‍👧"
+                      title="Info parents"
+                      subtitle="Informations concernant le père, la mère et l’adresse familiale."
+                    >
+                      <Grid>
+                        <Input label="Nom du père" value={form.pereNom} onChange={(v: string) => update("pereNom", v)} />
+                        <Input label="Téléphone père" value={form.pereTel} onChange={(v: string) => update("pereTel", v)} />
+                        <Input label="Nom de la mère" value={form.mereNom} onChange={(v: string) => update("mereNom", v)} />
+                        <Input label="Téléphone mère" value={form.mereTel} onChange={(v: string) => update("mereTel", v)} />
+                        <Input label="Adresse des parents" value={form.parentAdresse} onChange={(v: string) => update("parentAdresse", v)} />
+                      </Grid>
+                    </Panel>
+                  )}
 
-                          update("niveau", level?.name || "");
-                          update("classe", "");
-                          update("section", "");
-                        }}
-                      />
+                  {step === 2 && (
+                    <Panel
+                      icon="🧑‍💼"
+                      title="Tuteur"
+                      subtitle="Personne responsable à contacter si besoin."
+                    >
+                      <Grid>
+                        <Input label="Nom du tuteur" value={form.tuteurNom} onChange={(v: string) => update("tuteurNom", v)} />
+                        <Input label="Lien avec l’étudiant" value={form.tuteurLien} onChange={(v: string) => update("tuteurLien", v)} />
+                        <Input label="Téléphone tuteur" value={form.tuteurTel} onChange={(v: string) => update("tuteurTel", v)} />
+                        <Input label="Adresse tuteur" value={form.tuteurAdresse} onChange={(v: string) => update("tuteurAdresse", v)} />
+                      </Grid>
+                    </Panel>
+                  )}
 
-                      <Select
-                        label="Classe *"
-                        value={selectedClassId}
-                        options={(selectedLevel?.classes || []).map((classe) => ({
-                          label: classe.name,
-                          value: String(classe.id),
-                        }))}
-                        onChange={(value: string) => {
-                          setSelectedClassId(value);
+                  {step === 3 && (
+                    <Panel
+                      icon="🎓"
+                      title="Niveau & frais de formations"
+                      subtitle="Choix du niveau, classe, série et frais liés à l’étudiant."
+                    >
+                      <Grid>
+                        <Select
+                          label="Niveau *"
+                          value={selectedLevelId}
+                          options={academics.levels.map((level) => ({
+                            label: level.name,
+                            value: String(level.id),
+                          }))}
+                          onChange={(value: string) => {
+                            setSelectedLevelId(value);
+                            setSelectedClassId("");
+                            setTrainingFees([]);
+                            setSelectedFeeIds([]);
 
-                          const classe = selectedLevel?.classes.find(
-                            (c) => String(c.id) === value
-                          );
+                            const level = academics.levels.find(
+                              (l) => String(l.id) === value
+                            );
 
-                          update("classe", classe?.name || "");
-                          update("section", "");
-                        }}
-                      />
+                            update("niveau", level?.name || "");
+                            update("classe", "");
+                            update("section", "");
+                          }}
+                        />
 
-                      <Select
-                        label="Série / Section *"
-                        value={form.section}
-                        options={(selectedClass?.series || []).map((serie) => serie.name)}
-                        onChange={(v: string) => update("section", v)}
-                      />
+                        <Select
+                          label="Classe *"
+                          value={selectedClassId}
+                          options={(selectedLevel?.classes || []).map((classe) => ({
+                            label: classe.name,
+                            value: String(classe.id),
+                          }))}
+                          onChange={(value: string) => {
+                            setSelectedClassId(value);
 
-                      <Input label="Frais d’inscription" value={form.fraisInscription} onChange={(v: string) => update("fraisInscription", v)} />
-                      <Input label="Frais de scolarité" value={form.fraisScolarite} onChange={(v: string) => update("fraisScolarite", v)} />
-                    </Grid>
+                            const classe = selectedLevel?.classes.find(
+                              (c) => String(c.id) === value
+                            );
 
-                    {academics.levels.length === 0 && (
-                      <div className="mt-6 bg-yellow-50 text-yellow-800 border border-yellow-200 rounded-2xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-3">
-                        <span className="font-semibold">
-                          Aucun niveau/classe/série créé pour l’année active.
-                        </span>
-                        <button
-                          onClick={() => (window.location.href = "/user/academics")}
-                          className="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-3 rounded-xl font-bold"
-                        >
-                          Créer maintenant
-                        </button>
-                      </div>
-                    )}
-                  </Panel>
-                )}
+                            update("classe", classe?.name || "");
+                            update("section", "");
+                          }}
+                        />
 
-                {step === 4 && (
-                  <Panel
-                    icon="🎨"
-                    title="Activité"
-                    subtitle="Activités extras et remarque générale."
-                  >
-                    <Grid>
-                      <Select
-                        label="Activité extras"
-                        value={form.activite}
-                        options={["Aucune", "Sport", "Danse", "Musique", "Informatique"]}
-                        onChange={(v: string) => update("activite", v)}
-                      />
+                        <Select
+                          label="Série / Section"
+                          value={form.section}
+                          options={(selectedClass?.series || []).map((serie) => serie.name)}
+                          onChange={(v: string) => update("section", v)}
+                        />
+                      </Grid>
 
-                      <Textarea
-                        label="Remarque"
-                        value={form.remarque}
-                        onChange={(v: string) => update("remarque", v)}
-                      />
-                    </Grid>
-                  </Panel>
-                )}
+                      <div className="mt-6 rounded-[26px] border border-blue-100 bg-gradient-to-br from-blue-50 via-white to-indigo-50 p-4 md:p-5 shadow-sm">
+                        <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                          <div>
+                            <h3 className="text-base font-black text-slate-800">
+                              Frais de formation à lier à l’étudiant
+                            </h3>
+                            <p className="text-xs text-slate-500">
+                              Les frais créés dans Frais de formation apparaissent automatiquement selon la classe choisie.
+                            </p>
+                          </div>
 
-                {step === 5 && (
-                  <Panel
-                    icon="✅"
-                    title="Validation"
-                    subtitle="Vérifiez toutes les informations avant l’enregistrement."
-                  >
-                    <div className="grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-6">
-                      <div className="bg-white rounded-3xl border p-5 shadow-sm">
-                        {form.photoUrl ? (
-                          <img
-                            src={form.photoUrl}
-                            alt="Photo étudiant"
-                            className="w-full h-[260px] object-cover rounded-2xl border"
-                          />
+                          <span className="w-fit rounded-full bg-blue-600 px-4 py-2 text-xs font-black text-white shadow">
+                            {selectedFeeIds.length} sélectionné(s)
+                          </span>
+                        </div>
+
+                        {!selectedClassId ? (
+                          <div className="rounded-2xl border border-slate-200 bg-white p-5 text-center font-semibold text-slate-500">
+                            Sélectionnez d’abord une classe pour afficher les frais.
+                          </div>
+                        ) : loadingFees ? (
+                          <div className="rounded-2xl border border-slate-200 bg-white p-5 text-center font-semibold text-slate-500">
+                            Chargement des frais...
+                          </div>
+                        ) : trainingFees.length === 0 ? (
+                          <div className="rounded-2xl border border-orange-200 bg-orange-50 p-5 text-center font-semibold text-orange-700">
+                            Aucun frais créé pour cette classe.
+                          </div>
                         ) : (
-                          <div className="w-full h-[260px] bg-slate-100 rounded-2xl border flex items-center justify-center text-6xl">
-                            👤
+                          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                            {trainingFees.map((fee) => {
+                              const checked = selectedFeeIds.includes(fee.id);
+
+                              return (
+                                <button
+                                  key={fee.id}
+                                  type="button"
+                                  onClick={() => toggleFee(fee.id)}
+                                  className={`group flex items-center gap-3 rounded-2xl border p-4 text-left transition ${
+                                    checked
+                                      ? "border-blue-500 bg-white shadow-md ring-4 ring-blue-100"
+                                      : "border-slate-200 bg-white/80 hover:border-blue-300 hover:bg-white"
+                                  }`}
+                                >
+                                  <span
+                                    className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border text-xs font-black ${
+                                      checked
+                                        ? "border-blue-600 bg-blue-600 text-white"
+                                        : "border-slate-300 bg-white text-transparent"
+                                    }`}
+                                  >
+                                    ✓
+                                  </span>
+
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block truncate font-black text-slate-800">
+                                      {feeLabel(fee)}
+                                    </span>
+                                    <span className="mt-1 block text-xs font-semibold text-slate-500">
+                                      {fee.code || "-"} · {formatAmount(feeAmount(fee))} Ar
+                                    </span>
+                                  </span>
+                                </button>
+                              );
+                            })}
                           </div>
                         )}
-                        <h3 className="font-black text-lg mt-4">{form.nom || "-"} {form.prenoms || ""}</h3>
-                        <p className="text-slate-500">{form.classe || "-"} / {form.section || "-"}</p>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {Object.entries(form)
-                          .filter(([key]) => key !== "photoUrl")
-                          .map(([key, value]) => (
-                            
-                          <div key={key} className="bg-white rounded-2xl border p-4">
-                            <p className="text-[11px] uppercase tracking-wide text-slate-400 font-bold">{key}</p>
-                            <p className="font-bold text-slate-800 mt-1 break-words">{value || "-"}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </Panel>
-                )}
-
-                <div className="mt-8 flex flex-col md:flex-row justify-between gap-3">
-                  <button
-                    onClick={prev}
-                    disabled={step === 0}
-                    className="bg-white border border-slate-200 hover:bg-slate-100 disabled:opacity-40 px-5 py-3 rounded-2xl font-black shadow-sm"
-                  >
-                    ← Étape précédente
-                  </button>
-
-                  {step < steps.length - 1 ? (
-                    <button
-                      onClick={next}
-                      className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-7 py-3 rounded-2xl font-black shadow-lg shadow-blue-700/30"
-                    >
-                      Étape suivante →
-                    </button>
-                  ) : (
-                    <button
-                      onClick={save}
-                      disabled={loading}
-                      className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 disabled:opacity-60 text-white px-7 py-3 rounded-2xl font-black shadow-lg shadow-green-700/30"
-                    >
-                      {loading ? "Enregistrement..." : "✅ Enregistrer l’inscription"}
-                    </button>
+                      {academics.levels.length === 0 && (
+                        <div className="mt-6 bg-yellow-50 text-yellow-800 border border-yellow-200 rounded-2xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                          <span className="font-semibold">
+                            Aucun niveau/classe/série créé pour l’année active.
+                          </span>
+                          <button
+                            onClick={() => (window.location.href = "/user/academics")}
+                            className="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-3 rounded-xl font-bold"
+                          >
+                            Créer maintenant
+                          </button>
+                        </div>
+                      )}
+                    </Panel>
                   )}
+
+                  {step === 4 && (
+                    <Panel
+                      icon="🎨"
+                      title="Activité"
+                      subtitle="Activités extras et remarque générale."
+                    >
+                      <Grid>
+                        <Select
+                          label="Activité extras"
+                          value={form.activite}
+                          options={["Aucune", "Sport", "Danse", "Musique", "Informatique"]}
+                          onChange={(v: string) => update("activite", v)}
+                        />
+
+                        <Textarea
+                          label="Remarque"
+                          value={form.remarque}
+                          onChange={(v: string) => update("remarque", v)}
+                        />
+                      </Grid>
+                    </Panel>
+                  )}
+
+                  {step === 5 && (
+                    <Panel
+                      icon="✅"
+                      title="Validation"
+                      subtitle="Vérifiez toutes les informations avant l’enregistrement."
+                    >
+                      <div className="grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-6">
+                        <div className="bg-white rounded-3xl border p-5 shadow-sm">
+                          {form.photoUrl ? (
+                            <img
+                              src={form.photoUrl}
+                              alt="Photo étudiant"
+                              className="w-full h-[260px] object-cover rounded-2xl border"
+                            />
+                          ) : (
+                            <div className="w-full h-[260px] bg-slate-100 rounded-2xl border flex items-center justify-center text-6xl">
+                              👤
+                            </div>
+                          )}
+                          <h3 className="font-black text-lg mt-4">{form.nom || "-"} {form.prenoms || ""}</h3>
+                          <p className="text-slate-500">{form.classe || "-"} / {form.section || "-"}</p>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {Object.entries(form)
+                            .filter(([key]) => key !== "photoUrl")
+                            .map(([key, value]) => (
+                            <div key={key} className="bg-white rounded-2xl border p-4">
+                              <p className="text-[11px] uppercase tracking-wide text-slate-400 font-bold">{key}</p>
+                              <p className="font-bold text-slate-800 mt-1 break-words">{value || "-"}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="mt-6 bg-white rounded-3xl border p-5 shadow-sm">
+                        <div className="mb-3 flex items-center justify-between">
+                          <h3 className="font-black text-slate-800">Frais de formation sélectionnés</h3>
+                          <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-black text-blue-700">
+                            {selectedFeeIds.length} frais
+                          </span>
+                        </div>
+
+                        <div className="divide-y rounded-2xl border bg-slate-50">
+                          {trainingFees.filter((fee) => selectedFeeIds.includes(fee.id)).length === 0 ? (
+                            <div className="p-4 text-sm font-semibold text-slate-500">
+                              Aucun frais sélectionné.
+                            </div>
+                          ) : (
+                            trainingFees
+                              .filter((fee) => selectedFeeIds.includes(fee.id))
+                              .map((fee) => (
+                                <div key={fee.id} className="flex items-center justify-between gap-3 p-3 text-sm">
+                                  <span className="min-w-0">
+                                    <b>{fee.code || "-"}</b> — {feeLabel(fee)}
+                                  </span>
+                                  <b className="shrink-0">{formatAmount(feeAmount(fee))} Ar</b>
+                                </div>
+                              ))
+                          )}
+                        </div>
+                      </div>
+                    </Panel>
+                  )}
+
+                  <div className="mt-8 flex flex-col md:flex-row justify-between gap-3">
+                    <button
+                      onClick={prev}
+                      disabled={step === 0}
+                      className="bg-white border border-slate-200 hover:bg-slate-100 disabled:opacity-40 px-5 py-3 rounded-2xl font-black shadow-sm"
+                    >
+                      ← Étape précédente
+                    </button>
+
+                    {step < steps.length - 1 ? (
+                      <button
+                        onClick={next}
+                        className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-7 py-3 rounded-2xl font-black shadow-lg shadow-blue-700/30"
+                      >
+                        Étape suivante →
+                      </button>
+                    ) : (
+                      <button
+                        onClick={save}
+                        disabled={loading}
+                        className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 disabled:opacity-60 text-white px-7 py-3 rounded-2xl font-black shadow-lg shadow-green-700/30"
+                      >
+                        {loading ? "Enregistrement..." : "✅ Enregistrer l’inscription"}
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
