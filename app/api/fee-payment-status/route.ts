@@ -46,7 +46,7 @@ export async function GET(req: Request) {
       normalize(searchParams.get("schoolYearName")) ||
       normalize(searchParams.get("anneeScolaire"));
 
-    const schoolYearName = requestedSchoolYearName || activeSchoolYear?.name || undefined;
+    const schoolYearName = requestedSchoolYearName || undefined;
 
     const site = normalize(searchParams.get("site"));
     const classe = normalize(searchParams.get("classe"));
