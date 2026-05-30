@@ -144,6 +144,8 @@ export default function EtatPaiementFraisPage() {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [fixing, setFixing] = useState(false);
+  const [fixMessage, setFixMessage] = useState("");
 
   async function loadData(nextFilters: Filters = filters) {
     try {
@@ -191,6 +193,52 @@ export default function EtatPaiementFraisPage() {
       setError("Impossible de charger l'état de paiement des frais.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function correctData() {
+    if (fixing) return;
+
+    const ok = window.confirm(
+      "Corriger et mettre à jour les frais manquants pour cette année scolaire ?"
+    );
+    if (!ok) return;
+
+    try {
+      setFixing(true);
+      setError("");
+      setFixMessage("");
+
+      const res = await fetch("/api/fee-payment-status/correct", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          anneeScolaire: filters.anneeScolaire || activeYear,
+          site: filters.site,
+          classe: filters.classe,
+          section: filters.section,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.error || "Correction impossible");
+      }
+
+      setFixMessage(
+        `Correction terminée : ${Number(data.created || 0)} frais ajoutés, ${Number(
+          data.updated || 0
+        )} frais recalculés.`
+      );
+
+      await loadData(filters);
+    } catch (e: unknown) {
+      console.error(e);
+      const message = e instanceof Error ? e.message : "Correction impossible";
+      setError(message);
+    } finally {
+      setFixing(false);
     }
   }
 
@@ -322,6 +370,15 @@ export default function EtatPaiementFraisPage() {
             </button>
 
             <button
+              onClick={correctData}
+              disabled={fixing || loading}
+              title="Ajoute automatiquement les frais manquants et recalcule les paiements"
+              className="rounded bg-amber-500 px-3 py-2 font-semibold text-white hover:bg-amber-600 disabled:opacity-60"
+            >
+              {fixing ? "Correction..." : "🛠 Corriger"}
+            </button>
+
+            <button
               onClick={exportExcel}
               className="rounded bg-blue-600 px-3 py-2 font-semibold text-white hover:bg-blue-700"
             >
@@ -435,6 +492,12 @@ export default function EtatPaiementFraisPage() {
         {error && (
           <div className="mx-3 mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-red-700">
             {error}
+          </div>
+        )}
+
+        {fixMessage && (
+          <div className="mx-3 mb-3 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-700">
+            {fixMessage}
           </div>
         )}
 
