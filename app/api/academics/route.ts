@@ -116,13 +116,16 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Classe introuvable" }, { status: 404 });
       }
 
-      const names = Array.isArray(body.names)
-        ? body.names.map(cleanName).filter(Boolean)
-        : name.split(/[,;\n]/).map((item) => item.trim()).filter(Boolean);
+      const names: string[] = Array.isArray(body.names)
+        ? body.names.map((item: unknown) => cleanName(item)).filter((item: string) => item.length > 0)
+        : name
+            .split(/[,;\n]/)
+            .map((item: string) => item.trim())
+            .filter((item: string) => item.length > 0);
 
       if (names.length > 1) {
         const items = await prisma.$transaction(
-          names.map((serieName) =>
+          names.map((serieName: string) =>
             prisma.serie.create({
               data: {
                 name: serieName,
@@ -269,7 +272,7 @@ export async function DELETE(req: Request) {
         select: { id: true },
       });
 
-      const classIds = classes.map((item) => item.id);
+      const classIds: number[] = classes.map((item: { id: number }) => item.id);
 
       await prisma.$transaction([
         prisma.serie.deleteMany({ where: { classRoomId: { in: classIds.length ? classIds : [-1] } } }),
