@@ -3,34 +3,47 @@ import { prisma } from "@/lib/prisma";
 
 function normalize(value: string | null) {
   if (!value || value === "TOUT" || value === "ALL") return undefined;
-  return value;
+  return value.trim();
+}
+
+function normalizeText(value: string | null | undefined) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 }
 
 function normalizeStatus(status?: string | null) {
-  return (status || "")
-    .toUpperCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_");
+  return normalizeText(status).replace(/[\s-]+/g, "_");
 }
 
-function isFeeGreen(status?: string | null, reste?: number | null, paidAt?: Date | string | null) {
-  const normalized = normalizeStatus(status);
+/**
+ * Etat paiement: volontairement basé sur StudentFee seulement.
+ * On ne dépend plus de StudentPayment car la table n'existe pas en production.
+ *
+ * PAYE marina ihany no atao vert:
+ * - status PAYE / PAYÉ / PAID
+ * - ou montantPaye >= montantTotal avec montantTotal > 0
+ * - ou paidAt existe + montantPaye > 0
+ */
+function isFeePaid(fee: any) {
+  const status = normalizeStatus(fee?.status);
+
+  const montantTotal = Number(fee?.montantTotal || 0);
+  const montantPaye = Number(fee?.montantPaye || 0);
 
   return (
-    (reste ?? 999999999) <= 0 ||
-    Boolean(paidAt) ||
-    normalized === "PAYE" ||
-    normalized === "PAID" ||
-    normalized === "A_IMPRIMER" ||
-    normalized === "A_IMPRIME" ||
-    normalized === "IMPRIME" ||
-    normalized === "IMPRIMEE" ||
-    normalized === "PRINTABLE" ||
-    normalized.includes("PAYE") ||
-    normalized.includes("IMPRIMER") ||
-    normalized.includes("IMPRIME")
+    status === "PAYE" ||
+    status === "PAID" ||
+    status.includes("PAYE") ||
+    (montantTotal > 0 && montantPaye >= montantTotal) ||
+    (Boolean(fee?.paidAt) && montantPaye > 0)
   );
+}
+
+function uniq<T>(items: T[]) {
+  return Array.from(new Set(items.filter(Boolean)));
 }
 
 export async function GET(req: Request) {
@@ -46,6 +59,9 @@ export async function GET(req: Request) {
       normalize(searchParams.get("schoolYearName")) ||
       normalize(searchParams.get("anneeScolaire"));
 
+    // Important production:
+    // Raha tsy mandefa année scolaire ny page dia tsy manery activeYear,
+    // mba tsy ho vide raha activeYear ao Supabase tsy mifanaraka amin'ny données.
     const schoolYearName = requestedSchoolYearName || undefined;
 
     const site = normalize(searchParams.get("site"));
@@ -55,7 +71,13 @@ export async function GET(req: Request) {
 
     const frais = normalize(searchParams.get("frais"));
     const etat = normalize(searchParams.get("etat"));
-    const matricule = normalize(searchParams.get("matricule"));
+
+    // Ny page taloha mety mandefa "matricule", fa ampiasaina ho recherche générale:
+    // matricule, nom, prénoms, nom complet.
+    const search =
+      normalize(searchParams.get("search")) ||
+      normalize(searchParams.get("q")) ||
+      normalize(searchParams.get("matricule"));
 
     const students = await prisma.student.findMany({
       where: {
@@ -63,12 +85,13 @@ export async function GET(req: Request) {
         ...(site ? { site } : {}),
         ...(classe ? { classe } : {}),
         ...(section ? { section } : {}),
-        ...(matricule
+        ...(search
           ? {
-              matricule: {
-                contains: matricule,
-                mode: "insensitive",
-              },
+              OR: [
+                { matricule: { contains: search, mode: "insensitive" } },
+                { nom: { contains: search, mode: "insensitive" } },
+                { prenoms: { contains: search, mode: "insensitive" } },
+              ],
             }
           : {}),
       },
@@ -76,13 +99,17 @@ export async function GET(req: Request) {
     });
 
     const studentIds = students.map((s) => s.id);
-    const studentClasses = Array.from(new Set(students.map((s) => s.classe).filter(Boolean)));
+    const studentClasses = uniq(students.map((s) => s.classe));
 
     const trainingFees = await prisma.trainingFee.findMany({
       where: {
         ...(schoolYearName ? { schoolYearName } : {}),
         ...(site ? { site } : {}),
-        ...(classe ? { classe } : studentClasses.length ? { classe: { in: studentClasses } } : {}),
+        ...(classe
+          ? { classe }
+          : studentClasses.length
+          ? { classe: { in: studentClasses } }
+          : {}),
         ...(frais ? { libelle: frais } : {}),
       },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
@@ -99,20 +126,7 @@ export async function GET(req: Request) {
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     });
 
-    // Zava-dehibe: rehefa ao amin'ny FRAIS DE FORMATION no "marquer afaka imprimena",
-    // mety StudentPayment no voa-update fa tsy StudentFee. Noho izany dia jerena koa StudentPayment.
-    const studentPayments = await prisma.studentPayment.findMany({
-      where: {
-        studentId: { in: studentIds.length ? studentIds : [0] },
-        ...(schoolYearName ? { schoolYearName } : {}),
-        ...(trainingFeeIds.length ? { trainingFeeId: { in: trainingFeeIds } } : {}),
-      },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    });
-
-    const feeCodes = Array.from(
-      new Set(trainingFees.map((f) => f.code).filter(Boolean))
-    );
+    const feeCodes = uniq(trainingFees.map((f) => f.code));
 
     const rows = students.map((student) => {
       const availableFeesForStudentClass = trainingFees.filter(
@@ -120,7 +134,6 @@ export async function GET(req: Request) {
       );
 
       const feesForStudent = studentFees.filter((sf) => sf.studentId === student.id);
-      const paymentsForStudent = studentPayments.filter((sp) => sp.studentId === student.id);
 
       const status: Record<string, boolean> = {};
 
@@ -133,60 +146,40 @@ export async function GET(req: Request) {
           realTrainingFeesForCode.some((tf) => tf.id === sf.trainingFeeId)
         );
 
-        const relatedStudentPayments = paymentsForStudent.filter((sp) =>
-          realTrainingFeesForCode.some((tf) => tf.id === sp.trainingFeeId)
-        );
-
-        const greenByStudentFee = relatedStudentFees.some((sf) =>
-          isFeeGreen(sf.status, sf.reste, sf.paidAt)
-        );
-
-        const greenByStudentPayment = relatedStudentPayments.some((sp) =>
-          isFeeGreen(sp.status, sp.reste, null)
-        );
-
-        status[code] = greenByStudentFee || greenByStudentPayment;
+        // Vert uniquement raha tena voaloa ao amin'ny StudentFee.
+        status[code] = relatedStudentFees.some((sf) => isFeePaid(sf));
       });
 
-      const montantTotalFromFees = feesForStudent.reduce(
-        (sum, f) => sum + (f.montantTotal || 0),
+      const montantTotal = feesForStudent.reduce(
+        (sum, f) => sum + Number(f.montantTotal || 0),
         0
       );
 
-      const montantPayeFromFees = feesForStudent.reduce(
-        (sum, f) => sum + (f.montantPaye || 0),
+      const montantPaye = feesForStudent.reduce(
+        (sum, f) => sum + Number(f.montantPaye || 0),
         0
       );
 
-      const resteFromFees = feesForStudent.reduce((sum, f) => sum + (f.reste || 0), 0);
-
-      const montantTotalFromPayments = paymentsForStudent.reduce(
-        (sum, p) => sum + (p.montantTotal || 0),
+      const reste = feesForStudent.reduce(
+        (sum, f) => sum + Number(f.reste || 0),
         0
       );
-
-      const montantPayeFromPayments = paymentsForStudent.reduce(
-        (sum, p) => sum + (p.montantPaye || 0),
-        0
-      );
-
-      const resteFromPayments = paymentsForStudent.reduce((sum, p) => sum + (p.reste || 0), 0);
-
-      const montantTotal = montantTotalFromFees || montantTotalFromPayments;
-      const montantPaye = montantPayeFromFees || montantPayeFromPayments;
-      const reste = feesForStudent.length ? resteFromFees : resteFromPayments;
 
       let globalStatus = "NON_PAYE";
-      if (montantTotal > 0 && reste <= 0) globalStatus = "PAYE";
-      else if (montantPaye > 0) globalStatus = "PARTIEL";
+      if (montantTotal > 0 && montantPaye >= montantTotal) {
+        globalStatus = "PAYE";
+      }
 
       return {
         id: student.id,
         matricule: student.matricule,
         dateInscription: student.dateInscription,
         fullName: `${student.nom ?? ""} ${student.prenoms ?? ""}`.trim(),
+        nom: student.nom,
+        prenoms: student.prenoms,
         classe: student.classe,
         serie: student.section,
+        section: student.section,
         site: student.site,
         status,
         paidCount: feeCodes.filter((code) => status[code]).length,
@@ -197,6 +190,7 @@ export async function GET(req: Request) {
         globalStatus,
         fees: feesForStudent.map((fee) => ({
           id: fee.id,
+          trainingFeeId: fee.trainingFeeId,
           libelle: fee.libelle,
           code: fee.code,
           montantTotal: fee.montantTotal,
@@ -211,8 +205,6 @@ export async function GET(req: Request) {
     const filteredRows =
       etat === "PAYE"
         ? rows.filter((r) => r.globalStatus === "PAYE")
-        : etat === "PARTIEL"
-        ? rows.filter((r) => r.globalStatus === "PARTIEL")
         : etat === "NON_PAYE"
         ? rows.filter((r) => r.globalStatus === "NON_PAYE")
         : rows;
@@ -265,9 +257,9 @@ export async function GET(req: Request) {
       rows: filteredRows,
       filters: {
         schoolYears: allSchoolYears.map((y) => y.name),
-        sites: Array.from(new Set(siteStudentsForFilters.map((s) => s.site).filter(Boolean))),
-        classes: Array.from(new Set(classStudentsForFilters.map((s) => s.classe).filter(Boolean))),
-        series: Array.from(new Set(serieStudentsForFilters.map((s) => s.section).filter(Boolean))),
+        sites: uniq(siteStudentsForFilters.map((s) => s.site)),
+        classes: uniq(classStudentsForFilters.map((s) => s.classe)),
+        series: uniq(serieStudentsForFilters.map((s) => s.section)),
         trainingFees: filterTrainingFees.map((f) => ({
           id: f.id,
           libelle: f.libelle,
