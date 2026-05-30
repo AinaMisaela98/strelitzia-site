@@ -110,10 +110,11 @@ const [serie, setSerie] = useState("TOUT");
 const loadingStudentsRef = useRef(false);
 const loadingAcademicsRef = useRef(false);
 const initializedRef = useRef(false);
+const autoRefreshRef = useRef(0);
 
 async function loadSchoolYears() {
   try {
-    const res = await fetch("/api/school-years", {
+    const res = await fetch(`/api/school-years?_ts=${Date.now()}`, {
       cache: "no-store",
     });
 
@@ -144,7 +145,7 @@ async function loadAcademics(yearParam?: string) {
     if (!yearToUse) return;
 
     const res = await fetch(
-      `/api/academics?year=${encodeURIComponent(yearToUse)}`,
+      `/api/academics?year=${encodeURIComponent(yearToUse)}&_ts=${Date.now()}`,
       {
         cache: "no-store",
       }
@@ -178,7 +179,7 @@ async function loadStudents(yearParam?: string) {
     if (!yearToUse) return;
 
     const res = await fetch(
-      `/api/students?year=${encodeURIComponent(yearToUse)}`,
+      `/api/students?year=${encodeURIComponent(yearToUse)}&_ts=${Date.now()}`,
       {
         cache: "no-store",
       }
@@ -258,6 +259,56 @@ useEffect(() => {
   ]);
 }, [selectedYear]);
 
+useEffect(() => {
+  let mounted = true;
+
+  async function refreshWhenVisible() {
+    if (!mounted) return;
+    if (!initializedRef.current) return;
+
+    const now = Date.now();
+
+    if (now - autoRefreshRef.current < 800) return;
+    autoRefreshRef.current = now;
+
+    const yearToUse = selectedYear || (await loadSchoolYears());
+
+    if (!yearToUse) return;
+
+    await Promise.all([
+      loadStudents(yearToUse),
+      loadAcademics(yearToUse),
+    ]);
+  }
+
+  function handleVisibilityChange() {
+    if (document.visibilityState === "visible") {
+      refreshWhenVisible();
+    }
+  }
+
+  function handlePageShow() {
+    refreshWhenVisible();
+  }
+
+  function handlePopState() {
+    refreshWhenVisible();
+  }
+
+  window.addEventListener("focus", refreshWhenVisible);
+  window.addEventListener("pageshow", handlePageShow);
+  window.addEventListener("popstate", handlePopState);
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+
+  return () => {
+    mounted = false;
+    window.removeEventListener("focus", refreshWhenVisible);
+    window.removeEventListener("pageshow", handlePageShow);
+    window.removeEventListener("popstate", handlePopState);
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
+  };
+}, [selectedYear]);
+
  
 
   const allClasses = useMemo(() => {
@@ -329,7 +380,7 @@ useEffect(() => {
 
   function handleMenuClick(item: string) {
     if (item === "Liste des inscrits") {
-      window.location.href = "/user";
+      window.location.href = `/user?_ts=${Date.now()}`;
       return;
     }
 
@@ -356,6 +407,10 @@ useEffect(() => {
       window.location.href = "/user/academics";
       return;
     }
+    if (item === "État paiement des frais") {
+  window.location.href = "/user/fee-payment-status";
+  return;
+}
 
     alert(item);
   }

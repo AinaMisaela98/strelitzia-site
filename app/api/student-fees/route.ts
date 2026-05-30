@@ -11,19 +11,56 @@ async function getActiveYear() {
 }
 
 function amountToNumber(value: any) {
-  return Number(String(value || "").replace(/\s/g, "").replace(/,/g, "")) || 0;
+  return Number(String(value ?? "").replace(/\s/g, "").replace(/,/g, "")) || 0;
 }
 
-function getFeeValue(fee: any, names: string[], fallback: any = "") {
-  for (const name of names) {
-    if (fee?.[name] !== undefined && fee?.[name] !== null) {
-      return fee[name];
-    }
+function toUpperStatus(value: any) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function isPaidStatus(value: any) {
+  const status = toUpperStatus(value);
+  return status === "PAYE" || status === "PAYÉ" || status === "PAID";
+}
+
+function cleanText(value: any, fallback = "") {
+  const text = String(value ?? "").trim();
+  return text || fallback;
+}
+
+function getFeeCode(data: any) {
+  return cleanText(data?.code || data?.month || data?.mois || data?.libelle || data?.name, "FRAIS").toUpperCase();
+}
+
+function getFeeLabel(data: any) {
+  return cleanText(data?.libelle || data?.label || data?.name || data?.code, "Frais");
+}
+
+async function resolveSchoolYearName(bodyOrParams: any, studentId?: number) {
+  const explicitYear =
+    bodyOrParams?.schoolYearName ||
+    bodyOrParams?.anneeScolaire ||
+    bodyOrParams?.get?.("schoolYearName") ||
+    bodyOrParams?.get?.("anneeScolaire");
+
+  if (explicitYear) return String(explicitYear);
+
+  if (studentId) {
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      select: { anneeScolaire: true },
+    });
+
+    if (student?.anneeScolaire) return student.anneeScolaire;
   }
-  return fallback;
+
+  return getActiveYear();
 }
 
-/* GET: mampiseho frais an'ilay étudiant */
+/**
+ * GET /api/student-fees?studentId=1
+ * Mamerina ny frais efa assigné/payé amin'ilay étudiant.
+ */
 export async function GET(req: Request) {
   const user = await getAuthUser();
   if (!user) {
@@ -33,22 +70,19 @@ export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
     const studentId = Number(url.searchParams.get("studentId"));
-    const schoolYearName =
-      url.searchParams.get("schoolYearName") || (await getActiveYear());
 
     if (!studentId) {
       return NextResponse.json({ error: "Étudiant manquant" }, { status: 400 });
     }
+
+    const schoolYearName = await resolveSchoolYearName(url.searchParams, studentId);
 
     const data = await prisma.studentFee.findMany({
       where: {
         studentId,
         schoolYearName,
       },
-      orderBy: [
-        { trainingFeeId: "asc" },
-        { id: "asc" },
-      ],
+      orderBy: [{ trainingFeeId: "asc" }, { id: "asc" }],
     });
 
     return NextResponse.json(data);
@@ -61,7 +95,15 @@ export async function GET(req: Request) {
   }
 }
 
-/* POST: mampiditra frais sélectionnés amin'ilay étudiant */
+/**
+ * POST /api/student-fees
+ * Manampy na mandoa frais.
+ *
+ * BLOQUE DOUBLONS:
+ * - Tsy manao create raha efa misy StudentFee mitovy studentId + trainingFeeId + schoolYearName.
+ * - Raha efa misy dia update ilay existant.
+ * - Raha efa PAYE dia tsy averina mandoa duplicate intsony.
+ */
 export async function POST(req: Request) {
   const user = await getAuthUser();
   if (!user) {
@@ -70,53 +112,44 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-
     const studentId = Number(body.studentId);
-    const schoolYearName = body.schoolYearName || (await getActiveYear());
+
+    if (!studentId) {
+      return NextResponse.json({ error: "Étudiant manquant" }, { status: 400 });
+    }
+
+    const schoolYearName = await resolveSchoolYearName(body, studentId);
 
     const trainingFeeIds: number[] = Array.isArray(body.trainingFeeIds)
       ? body.trainingFeeIds.map((id: any) => Number(id)).filter(Boolean)
+      : body.trainingFeeId
+      ? [Number(body.trainingFeeId)].filter(Boolean)
       : [];
 
-    if (!studentId || trainingFeeIds.length === 0) {
-      return NextResponse.json(
-        { error: "Étudiant ou frais manquant" },
-        { status: 400 }
-      );
+    if (trainingFeeIds.length === 0) {
+      return NextResponse.json({ error: "Frais manquant" }, { status: 400 });
     }
 
-    const fees = await prisma.trainingFee.findMany({
+    // Esorina avy hatrany ny doublons ao amin'ny request: [1,1,2] => [1,2]
+    const uniqueTrainingFeeIds = Array.from(new Set(trainingFeeIds));
+
+    const trainingFees = await prisma.trainingFee.findMany({
       where: {
-        id: { in: trainingFeeIds },
+        id: { in: uniqueTrainingFeeIds },
       },
       orderBy: { id: "asc" },
     });
 
-    if (fees.length === 0) {
-      return NextResponse.json(
-        { error: "Aucun frais trouvé" },
-        { status: 400 }
-      );
+    if (trainingFees.length === 0) {
+      return NextResponse.json({ error: "Aucun frais réel trouvé" }, { status: 404 });
     }
 
-    const created = [];
+    const results: any[] = [];
 
-    for (const fee of fees as any[]) {
-      const trainingFeeId = Number(fee.id);
+    for (const trainingFee of trainingFees) {
+      const trainingFeeId = Number(trainingFee.id);
 
-      const libelle = String(
-        getFeeValue(fee, ["libelle", "intitule", "title", "name"], "Frais")
-      ).trim();
-
-      const code = String(getFeeValue(fee, ["code"], "-")).trim();
-
-      const montantTotal = amountToNumber(
-        getFeeValue(fee, ["montant", "amount", "tarif"], 0)
-      );
-
-      if (!trainingFeeId || !montantTotal) continue;
-
-      const item = await prisma.studentFee.upsert({
+      const existing = await prisma.studentFee.findUnique({
         where: {
           studentId_trainingFeeId_schoolYearName: {
             studentId,
@@ -124,34 +157,111 @@ export async function POST(req: Request) {
             schoolYearName,
           },
         },
-        update: {
-          libelle,
-          code,
-          montantTotal,
-          reste: montantTotal,
-        },
-        create: {
-          studentId,
-          trainingFeeId,
-          schoolYearName,
-          libelle,
-          code,
-          montantTotal,
-          montantPaye: 0,
-          reste: montantTotal,
-          status: "NON_PAYE",
-        },
       });
 
-      created.push(item);
+      const requestedTotal = amountToNumber(body.montantTotal);
+      const requestedPaid = amountToNumber(body.montantPaye);
+      const requestedReste =
+        body.reste !== undefined ? amountToNumber(body.reste) : undefined;
+
+      const montantTotal =
+        requestedTotal > 0 ? requestedTotal : Number(trainingFee.montant || 0);
+
+      const isPayment =
+        isPaidStatus(body.status) ||
+        requestedPaid > 0 ||
+        requestedReste === 0 ||
+        body.action === "PAY";
+
+      const montantPaye = isPayment
+        ? requestedPaid > 0
+          ? requestedPaid
+          : montantTotal
+        : 0;
+
+      const reste = isPayment
+        ? 0
+        : requestedReste !== undefined
+        ? requestedReste
+        : montantTotal - montantPaye;
+
+      const status = isPayment || reste <= 0 ? "PAYE" : "NON_PAYE";
+
+      const data = {
+        studentId,
+        trainingFeeId,
+        schoolYearName,
+        libelle: getFeeLabel({
+          libelle: body.libelle || trainingFee.libelle,
+          code: body.code || trainingFee.code,
+        }),
+        code: getFeeCode({
+          code: body.code || trainingFee.code,
+          libelle: body.libelle || trainingFee.libelle,
+        }),
+        montantTotal,
+        montantPaye,
+        reste,
+        status,
+        paidAt: status === "PAYE" ? new Date() : null,
+      };
+
+      if (existing) {
+        // Raha efa payé dia tsy mamorona duplicate, mamerina ilay izy fotsiny.
+        if (existing.status === "PAYE" || existing.reste <= 0 || existing.paidAt) {
+          results.push({
+            ...existing,
+            duplicatedBlocked: true,
+            message: "Ce frais est déjà payé pour cet étudiant.",
+          });
+          continue;
+        }
+
+        const updated = await prisma.studentFee.update({
+          where: { id: existing.id },
+          data: {
+            libelle: data.libelle,
+            code: data.code,
+            montantTotal: data.montantTotal,
+            montantPaye: data.montantPaye,
+            reste: data.reste,
+            status: data.status,
+            paidAt: data.paidAt,
+          },
+        });
+
+        results.push({
+          ...updated,
+          duplicatedBlocked: true,
+          updatedExisting: true,
+        });
+      } else {
+        const created = await prisma.studentFee.create({
+          data,
+        });
+
+        results.push({
+          ...created,
+          duplicatedBlocked: false,
+          created: true,
+        });
+      }
     }
 
-    return NextResponse.json({
-      success: true,
-      count: created.length,
-      data: created,
-    });
+    return NextResponse.json(results.length === 1 ? results[0] : results);
   } catch (error: any) {
+    // Sécurité fanampiny raha misy race condition dia tsy ampidirina doublon.
+    if (error?.code === "P2002") {
+      return NextResponse.json(
+        {
+          error: "Doublon bloqué",
+          message:
+            "Ce frais existe déjà pour cet étudiant dans cette année scolaire.",
+        },
+        { status: 409 }
+      );
+    }
+
     console.error("POST /api/student-fees", error);
     return NextResponse.json(
       { error: "Erreur serveur", message: error.message },
@@ -160,7 +270,10 @@ export async function POST(req: Request) {
   }
 }
 
-/* PATCH: PAY na CANCEL */
+/**
+ * PATCH /api/student-fees
+ * PAY / CANCEL amin'ny frais efa misy.
+ */
 export async function PATCH(req: Request) {
   const user = await getAuthUser();
   if (!user) {
@@ -169,12 +282,11 @@ export async function PATCH(req: Request) {
 
   try {
     const body = await req.json();
-
     const id = Number(body.id);
-    const action = String(body.action || "").toUpperCase();
+    const action = toUpperStatus(body.action);
 
-    if (!id || !["PAY", "CANCEL"].includes(action)) {
-      return NextResponse.json({ error: "Action invalide" }, { status: 400 });
+    if (!id) {
+      return NextResponse.json({ error: "Frais étudiant manquant" }, { status: 400 });
     }
 
     const fee = await prisma.studentFee.findUnique({
@@ -182,17 +294,25 @@ export async function PATCH(req: Request) {
     });
 
     if (!fee) {
-      return NextResponse.json(
-        { error: "Frais étudiant introuvable" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Frais introuvable" }, { status: 404 });
     }
 
     if (action === "PAY") {
+      if (fee.status === "PAYE" || fee.reste <= 0 || fee.paidAt) {
+        return NextResponse.json({
+          success: true,
+          duplicatedBlocked: true,
+          message: "Ce frais est déjà payé.",
+          data: fee,
+        });
+      }
+
+      const montantPaye = amountToNumber(body.montantPaye) || fee.montantTotal;
+
       const updated = await prisma.studentFee.update({
         where: { id },
         data: {
-          montantPaye: fee.montantTotal,
+          montantPaye,
           reste: 0,
           status: "PAYE",
           paidAt: new Date(),
@@ -205,53 +325,26 @@ export async function PATCH(req: Request) {
       });
     }
 
-    const updated = await prisma.studentFee.update({
-      where: { id },
-      data: {
-        montantPaye: 0,
-        reste: fee.montantTotal,
-        status: "NON_PAYE",
-        paidAt: null,
-      },
-    });
+    if (action === "CANCEL") {
+      const updated = await prisma.studentFee.update({
+        where: { id },
+        data: {
+          montantPaye: 0,
+          reste: fee.montantTotal,
+          status: "NON_PAYE",
+          paidAt: null,
+        },
+      });
 
-    return NextResponse.json({
-      success: true,
-      data: updated,
-    });
-  } catch (error: any) {
-    console.error("PATCH /api/student-fees", error);
-    return NextResponse.json(
-      { error: "Erreur serveur", message: error.message },
-      { status: 500 }
-    );
-  }
-}
-
-/* DELETE: mamafa frais iray amin'ilay étudiant raha diso sélection */
-export async function DELETE(req: Request) {
-  const user = await getAuthUser();
-  if (!user) {
-    return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
-  }
-
-  try {
-    const url = new URL(req.url);
-    const id = Number(url.searchParams.get("id"));
-
-    if (!id) {
-      return NextResponse.json({ error: "ID manquant" }, { status: 400 });
+      return NextResponse.json({
+        success: true,
+        data: updated,
+      });
     }
 
-    await prisma.studentFee.delete({
-      where: { id },
-    });
-
-    return NextResponse.json({
-      success: true,
-    });
+    return NextResponse.json({ error: "Action inconnue" }, { status: 400 });
   } catch (error: any) {
-    console.error("DELETE /api/student-fees", error);
+    console.error("PATCH /api/student-fees", error);
     return NextResponse.json(
       { error: "Erreur serveur", message: error.message },
       { status: 500 }

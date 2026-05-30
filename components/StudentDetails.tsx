@@ -169,9 +169,57 @@ async function loadStudentFees() {
   setLoadingFees(true);
 
   try {
+    const currentStudent = {
+      ...student,
+      ...form,
+    };
+
+    const schoolYearName = String(currentStudent.anneeScolaire || "").trim();
+    const classeName = String(
+      currentStudent.classe ||
+        currentStudent.className ||
+        currentStudent.classRoomName ||
+        ""
+    ).trim();
+
+    const classRoomId =
+      currentStudent.classRoomId ||
+      currentStudent.classId ||
+      currentStudent.classeId ||
+      "";
+
+    const trainingParams = new URLSearchParams();
+
+    if (currentStudent.id) {
+      trainingParams.set("studentId", String(currentStudent.id));
+    }
+
+    if (schoolYearName) {
+      trainingParams.set("schoolYearName", schoolYearName);
+      trainingParams.set("year", schoolYearName);
+    }
+
+    if (classeName) {
+      trainingParams.set("classe", classeName);
+      trainingParams.set("className", classeName);
+      trainingParams.set("classRoomName", classeName);
+    }
+
+    if (classRoomId) {
+      trainingParams.set("classRoomId", String(classRoomId));
+      trainingParams.set("classId", String(classRoomId));
+    }
+
     const [studentRes, trainingRes] = await Promise.allSettled([
-      fetch(`/api/student-fees?studentId=${student.id}`, { cache: "no-store" }),
-      fetch("/api/training-fees", { cache: "no-store" }),
+      fetch(
+        `/api/student-fees?studentId=${currentStudent.id}&schoolYearName=${encodeURIComponent(
+          schoolYearName
+        )}`,
+        { cache: "no-store" }
+      ),
+      fetch(`/api/training-fees?${trainingParams.toString()}`, {
+        cache: "no-store",
+      }),
     ]);
 
     let studentData: any[] = [];
@@ -179,13 +227,42 @@ async function loadStudentFees() {
 
     if (studentRes.status === "fulfilled" && studentRes.value.ok) {
       const json = await studentRes.value.json();
-      studentData = Array.isArray(json) ? json : [];
+      studentData = Array.isArray(json) ? json : json.data || [];
     }
 
     if (trainingRes.status === "fulfilled" && trainingRes.value.ok) {
       const json = await trainingRes.value.json();
-      trainingData = Array.isArray(json) ? json : [];
+      trainingData = Array.isArray(json) ? json : json.data || [];
     }
+
+    // Sécurité côté page: même si l'API renvoie tout, on garde uniquement
+    // les frais de l'année scolaire et de la classe actuelle de l'étudiant.
+    trainingData = trainingData.filter((fee: any) => {
+      const feeYear = String(
+        fee.schoolYearName || fee.year || fee.anneeScolaire || ""
+      ).trim();
+
+      const feeClasse = String(
+        fee.classe || fee.className || fee.classRoomName || ""
+      ).trim();
+
+      const feeClassRoomId =
+        fee.classRoomId || fee.classId || fee.classeId || "";
+
+      const sameYear = !schoolYearName || !feeYear || feeYear === schoolYearName;
+
+      const sameClassById =
+        classRoomId && feeClassRoomId
+          ? String(feeClassRoomId) === String(classRoomId)
+          : true;
+
+      const sameClassByName =
+        classeName && feeClasse
+          ? feeClasse.toLowerCase() === classeName.toLowerCase()
+          : true;
+
+      return sameYear && sameClassById && sameClassByName;
+    });
 
     const localPayments = getLocalPayments();
     const paidMap = new Map<string, any>();
@@ -196,9 +273,12 @@ async function loadStudentFees() {
       paidMap.set(getFeeCode(f), f);
     });
 
-    const visibleFees = trainingData.length > 0
-      ? trainingData.map((f, index) => normalizeTrainingFee(f, index, paidMap, localPayments))
-      : studentData.map((f, index) => normalizeStudentFee(f, index));
+    const visibleFees =
+      trainingData.length > 0
+        ? trainingData.map((f, index) =>
+            normalizeTrainingFee(f, index, paidMap, localPayments)
+          )
+        : studentData.map((f, index) => normalizeStudentFee(f, index));
 
     setFees(sortFees(visibleFees));
   } catch {
@@ -1180,7 +1260,7 @@ function printTicketMultiple(selectedFees: any[]) {
 
             return (
               <div
-                key={fee.id}
+               key={`${fee.id}-${fee.trainingFeeId || fee.sourceTrainingFeeId || ""}-${getFeeCode(fee)}`}
                 onClick={(e) => {
                   if (paid) {
                     selectPaidFeeForCancel(fee, canSelectMultiple(e));
@@ -1297,7 +1377,7 @@ function printTicketMultiple(selectedFees: any[]) {
                     </thead>
                     <tbody>
                       {editFeesRows.map((row, index) => (
-                        <tr key={row.id} className="bg-slate-50">
+                        <tr key={`${row.id}-${row.code}-${index}`} className="bg-slate-50">
                           <td className="border-r border-slate-300 px-2 py-2">{row.libelle}</td>
                           <td className="px-2 py-2">
                             <input
@@ -1420,7 +1500,7 @@ function printTicketMultiple(selectedFees: any[]) {
                     </thead>
                     <tbody>
                       {getSelectedFeesToPay().map((fee) => (
-                        <tr key={fee.id} className="bg-slate-50">
+                        <tr key={`${fee.id}-${fee.trainingFeeId || fee.sourceTrainingFeeId || ""}-${getFeeCode(fee)}`} className="bg-slate-50">
                           <td className="border-r border-slate-300 px-2 py-2">{getFeeLabel(fee)}</td>
                           <td className="px-2 py-2 text-right">{formatAmount(getFeeAmount(fee))}</td>
                         </tr>

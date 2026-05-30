@@ -44,6 +44,83 @@ function apiError(error: any) {
   };
 }
 
+function normalizeText(value: any) {
+  return String(value || "").trim();
+}
+
+function normalizeUpper(value: any) {
+  return normalizeText(value).toUpperCase();
+}
+
+async function resolveClassNameFromRequest(url: URL) {
+  const directClasse =
+    url.searchParams.get("classe") ||
+    url.searchParams.get("className") ||
+    url.searchParams.get("classRoomName") ||
+    "";
+
+  if (directClasse) return directClasse.trim();
+
+  const studentId = Number(url.searchParams.get("studentId") || 0);
+  if (studentId) {
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      select: { classe: true },
+    });
+
+    if (student?.classe) return student.classe;
+  }
+
+  const classRoomId = Number(
+    url.searchParams.get("classRoomId") ||
+      url.searchParams.get("classId") ||
+      url.searchParams.get("classeId") ||
+      0
+  );
+
+  if (classRoomId) {
+    const classe = await prisma.classRoom.findUnique({
+      where: { id: classRoomId },
+      select: { name: true },
+    });
+
+    if (classe?.name) return classe.name;
+  }
+
+  return "";
+}
+
+async function resolveClassRoomIdFromRequest(url: URL, classeName?: string) {
+  const directId = Number(
+    url.searchParams.get("classRoomId") ||
+      url.searchParams.get("classId") ||
+      url.searchParams.get("classeId") ||
+      0
+  );
+
+  if (directId) return directId;
+
+  if (classeName) {
+    const year =
+      url.searchParams.get("schoolYearName") ||
+      url.searchParams.get("year") ||
+      url.searchParams.get("anneeScolaire") ||
+      "";
+
+    const classe = await prisma.classRoom.findFirst({
+      where: {
+        name: classeName,
+        ...(year ? { schoolYearName: year } : {}),
+      },
+      select: { id: true },
+    });
+
+    if (classe?.id) return classe.id;
+  }
+
+  return 0;
+}
+
 function buildTrainingFeeData(fields: string[], input: any, row: any) {
   const data: any = {};
 
@@ -90,6 +167,16 @@ function buildTrainingFeeData(fields: string[], input: any, row: any) {
   return data;
 }
 
+/**
+ * GET /api/training-fees
+ *
+ * Filtre fiable par année + classe.
+ * Accepte:
+ * - schoolYearName / year / anneeScolaire
+ * - classRoomId / classId / classeId
+ * - classe / className / classRoomName
+ * - studentId: maka classe automatique avy amin'ilay étudiant
+ */
 export async function GET(req: Request) {
   const user = await getAuthUser();
 
@@ -109,17 +196,17 @@ export async function GET(req: Request) {
     ]);
     const classIdField = pickFirst(fields, ["classRoomId", "classId", "classeId"]);
     const classNameField = pickFirst(fields, ["classe", "className", "classRoomName"]);
+    const siteField = pickFirst(fields, ["site", "schoolSite"]);
 
     const year =
       url.searchParams.get("schoolYearName") ||
       url.searchParams.get("year") ||
+      url.searchParams.get("anneeScolaire") ||
       "";
 
-    const classRoomId = Number(
-      url.searchParams.get("classRoomId") ||
-        url.searchParams.get("classId") ||
-        0
-    );
+    const site = url.searchParams.get("site") || "";
+    const classeName = await resolveClassNameFromRequest(url);
+    const classRoomId = await resolveClassRoomIdFromRequest(url, classeName);
 
     const where: any = {};
 
@@ -127,24 +214,38 @@ export async function GET(req: Request) {
       where[schoolYearField] = year;
     }
 
+    if (siteField && site) {
+      where[siteField] = site;
+    }
+
+    /**
+     * IMPORTANT:
+     * Raha misy champ ID classe ao amin'ny schema vaovao dia ampiasaina.
+     * Raha schema taloha no misy classe String fotsiny dia ampiasaina className.
+     * Izany no manakana ny frais Grade 1 tsy hifangaro amin'ny Grade 2.
+     */
     if (classIdField && classRoomId) {
       where[classIdField] = classRoomId;
-    } else if (classNameField && classRoomId) {
-      const classe = await prisma.classRoom.findUnique({
-        where: { id: classRoomId },
-      });
-
-      if (classe) {
-        where[classNameField] = classe.name;
-      }
+    } else if (classNameField && classeName) {
+      where[classNameField] = classeName;
     }
 
     const data = await prisma.trainingFee.findMany({
       where,
-      orderBy: has(fields, "id") ? { id: "desc" } : undefined,
+      orderBy: has(fields, "id") ? { id: "asc" } : undefined,
     });
 
-    return NextResponse.json(data);
+    /**
+     * Sécurité fanampiny:
+     * Raha schema misy classe String ary nisy données taloha tsy mitovy casse/espace,
+     * dia ataontsika filtre côté code ihany koa.
+     */
+    const filtered =
+      classNameField && classeName
+        ? data.filter((item: any) => normalizeUpper(item[classNameField]) === normalizeUpper(classeName))
+        : data;
+
+    return NextResponse.json(filtered);
   } catch (error: any) {
     console.error("GET /api/training-fees", error);
     return NextResponse.json(apiError(error), { status: 500 });
@@ -235,6 +336,7 @@ export async function POST(req: Request) {
       schoolYearName:
         body.schoolYearName ||
         body.year ||
+        body.anneeScolaire ||
         (classe as any).schoolYearName ||
         (await getActiveYear()),
       site: body.site || "Strelitzia School",
@@ -326,7 +428,11 @@ export async function POST(req: Request) {
       deleteWhere[schoolYearField] = input.schoolYearName;
     }
 
-    // Recréation propre du même modèle dans la même classe.
+    /**
+     * Recréation propre UNIQUEMENT amin'ilay:
+     * même année + même classe + même modèle.
+     * Tsy mikitika Grade hafa.
+     */
     await prisma.trainingFee.deleteMany({
       where: deleteWhere,
     });
@@ -372,9 +478,17 @@ export async function PATCH(req: Request) {
 
     const data: any = {};
 
-    if (libelleField) data[libelleField] = String(body.libelle || "").trim();
-    if (codeField) data[codeField] = String(body.code || "").trim();
-    if (montantField) data[montantField] = amountToNumber(body.montant);
+    if (libelleField && body.libelle !== undefined) {
+      data[libelleField] = String(body.libelle || "").trim();
+    }
+
+    if (codeField && body.code !== undefined) {
+      data[codeField] = String(body.code || "").trim();
+    }
+
+    if (montantField && body.montant !== undefined) {
+      data[montantField] = amountToNumber(body.montant);
+    }
 
     if (!Object.keys(data).length) {
       return NextResponse.json(
@@ -436,21 +550,28 @@ export async function DELETE(req: Request) {
       "className",
       "classRoomName",
     ]);
+    const modelField = pickFirst(fields, [
+      "feeModelId",
+      "modelId",
+      "modeleFraisId",
+    ]);
 
     const schoolYearName =
       url.searchParams.get("schoolYearName") ||
       url.searchParams.get("year") ||
+      url.searchParams.get("anneeScolaire") ||
       (await getActiveYear());
 
-    const classRoomId = Number(
-      url.searchParams.get("classRoomId") ||
-        url.searchParams.get("classId") ||
+    const classeName = await resolveClassNameFromRequest(url);
+    const classRoomId = await resolveClassRoomIdFromRequest(url, classeName);
+    const feeModelId = Number(
+      url.searchParams.get("feeModelId") ||
+        url.searchParams.get("modelId") ||
+        url.searchParams.get("modeleFraisId") ||
         0
     );
 
-    const classeNameFromUrl = url.searchParams.get("classe") || "";
-
-    if (!classRoomId && !classeNameFromUrl) {
+    if (!classRoomId && !classeName) {
       return NextResponse.json(
         { error: "ID frais ou classe manquant" },
         { status: 400 }
@@ -461,23 +582,8 @@ export async function DELETE(req: Request) {
 
     if (classIdField && classRoomId) {
       where[classIdField] = classRoomId;
-    } else if (classNameField) {
-      if (classeNameFromUrl) {
-        where[classNameField] = classeNameFromUrl;
-      } else {
-        const classe = await prisma.classRoom.findUnique({
-          where: { id: classRoomId },
-        });
-
-        if (!classe) {
-          return NextResponse.json(
-            { error: "Classe introuvable", classRoomId },
-            { status: 400 }
-          );
-        }
-
-        where[classNameField] = classe.name;
-      }
+    } else if (classNameField && classeName) {
+      where[classNameField] = classeName;
     } else {
       return NextResponse.json(
         { error: "Champ classe introuvable dans TrainingFee", fields },
@@ -487,6 +593,10 @@ export async function DELETE(req: Request) {
 
     if (schoolYearField) {
       where[schoolYearField] = schoolYearName;
+    }
+
+    if (modelField && feeModelId) {
+      where[modelField] = feeModelId;
     }
 
     const deleted = await prisma.trainingFee.deleteMany({ where });
