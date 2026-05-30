@@ -321,6 +321,111 @@ export default function FeeModelsPage() {
     }
   }
 
+  async function duplicateModel(model: FeeModel) {
+    if (isSaving) return;
+
+    try {
+      setIsSaving(true);
+      setMessage("");
+
+      const sourceRes = await fetch(`/api/fee-models/${model.id}`);
+      const source = await safeJson(sourceRes);
+
+      if (!sourceRes.ok) {
+        setMessage(source.message || "Erreur ouverture du modèle à dupliquer.");
+        return;
+      }
+
+      const createRes = await fetch("/api/fee-models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: `Copie - ${source.title}`,
+          classe: source.classe || "GENERAL",
+          schoolYearName: source.schoolYearName,
+        }),
+      });
+
+      const duplicatedModel = await safeJson(createRes);
+
+      if (!createRes.ok) {
+        setMessage(duplicatedModel.message || "Erreur duplication modèle.");
+        return;
+      }
+
+      const duplicatedSpecialColumns = loadPersistedSpecialColumns(source);
+
+      for (const tariff of sortedTariffs(source)) {
+        const tariffRes = await fetch("/api/fee-tariffs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            feeModelId: duplicatedModel.id,
+            libelle: tariff.libelle,
+            code: tariff.code,
+            montant: tariff.montant,
+          }),
+        });
+
+        const duplicatedTariff = await safeJson(tariffRes);
+
+        if (!tariffRes.ok) {
+          setMessage(duplicatedTariff.message || "Erreur duplication tarif.");
+          return;
+        }
+
+        for (const special of tariff.specials || []) {
+          const specialRes = await fetch("/api/fee-special-tariffs", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              feeTariffId: duplicatedTariff.id,
+              name: special.name,
+              amount: special.amount,
+            }),
+          });
+
+          const duplicatedSpecial = await safeJson(specialRes);
+
+          if (!specialRes.ok) {
+            setMessage(duplicatedSpecial.message || "Erreur duplication tarif spécial.");
+            return;
+          }
+        }
+      }
+
+      persistSpecialColumns(duplicatedModel.id, duplicatedSpecialColumns);
+
+      const fullDuplicatedRes = await fetch(`/api/fee-models/${duplicatedModel.id}`);
+      const fullDuplicated = await safeJson(fullDuplicatedRes);
+
+      if (!fullDuplicatedRes.ok) {
+        setMessage(fullDuplicated.message || "Modèle dupliqué, mais ouverture impossible.");
+        await loadModels();
+        return;
+      }
+
+      setSelectedModel(fullDuplicated);
+      setSavedTariffInputs(buildSavedTariffInputs(fullDuplicated));
+      setTitle(fullDuplicated.title);
+      setClasse(fullDuplicated.classe || "GENERAL");
+      setSchoolYearName(fullDuplicated.schoolYearName);
+      setSpecialColumns(duplicatedSpecialColumns);
+      setCellSpecialInputs({});
+      setDraftRows([]);
+      setCreateOpen(false);
+      setEditOpen(true);
+
+      await loadModels();
+      showSuccess("Modèle dupliqué. Modifiez la copie puis enregistrez.");
+    } catch (error: any) {
+      console.error("Erreur duplication modèle:", error);
+      setMessage(error?.message || "Erreur duplication modèle.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   async function refreshSelectedModel() {
     if (!selectedModel) return;
 
@@ -810,6 +915,16 @@ export default function FeeModelsPage() {
                           title="Modifier"
                         >
                           ✎
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => duplicateModel(model)}
+                          disabled={isSaving}
+                          className="rounded border px-2 py-1 disabled:cursor-not-allowed disabled:opacity-50"
+                          title="Dupliquer"
+                        >
+                          ⧉
                         </button>
 
                         <button
