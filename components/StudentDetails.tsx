@@ -37,51 +37,82 @@ const [editFeesRows, setEditFeesRows] = useState<any[]>([]);
 const [treasuries, setTreasuries] = useState<any[]>([]);
 const [loadingTreasuries, setLoadingTreasuries] = useState(false);
 
-const feeOrder = ["DI", "FG", "UNIF", "SEPT", "OCT", "NOV", "DEC", "JAN", "FEV", "FÉV", "MAR", "AVR", "MAI", "JUIN"];
-
-function sortTreasuriesWithPrincipalFirst(list: any[]) {
-  return [...list]
-    .filter((item: any) => item?.active !== false)
-    .sort((a: any, b: any) => {
-      const principalDiff = Number(Boolean(b?.isPrincipal)) - Number(Boolean(a?.isPrincipal));
-      if (principalDiff !== 0) return principalDiff;
-      return String(a?.name || "").localeCompare(String(b?.name || ""), "fr", {
-        sensitivity: "base",
-      });
-    });
+// Ordre professionnel: on garde l’ordre réel de création venant de la base.
+// Si un champ ordre/position existe plus tard dans l’API, il sera prioritaire.
+function normalizeText(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
 }
 
-function getDefaultTreasury(list = treasuries) {
-  const activeList = sortTreasuriesWithPrincipalFirst(list);
-  return activeList.find((item: any) => item?.isPrincipal) || activeList[0] || null;
+function getFeeCreationOrder(fee: any, fallbackIndex = 0) {
+  const explicitOrder = Number(
+    fee?.ordre ?? fee?.order ?? fee?.position ?? fee?.rank ?? fee?.sortOrder
+  );
+
+  if (Number.isFinite(explicitOrder) && explicitOrder > 0) return explicitOrder;
+
+  const createdAt = fee?.createdAt ? new Date(fee.createdAt).getTime() : NaN;
+  if (Number.isFinite(createdAt)) return createdAt;
+
+  const numericId = Number(fee?.id ?? fee?.trainingFeeId ?? fee?.sourceTrainingFeeId);
+  if (Number.isFinite(numericId) && numericId > 0) return numericId;
+
+  return fallbackIndex;
 }
 
-function applyDefaultTreasury(list = treasuries) {
-  const treasury = getDefaultTreasury(list);
-  if (!treasury) return;
+function getFeeUniqueKey(fee: any) {
+  const trainingFeeId = fee?.trainingFeeId || fee?.sourceTrainingFeeId || fee?.trainingId || "";
+  const code = getFeeCode(fee);
+  const label = getFeeLabel(fee);
+  return trainingFeeId ? `TF-${trainingFeeId}` : `${code}-${normalizeText(label)}`;
+}
 
-  setPaymentForm((p) => ({
-    ...p,
-    treasuryId: p.treasuryId || String(treasury.id),
-    tresorerie: p.tresorerie || treasury.name || "",
-  }));
+function isSameClassFee(fee: any, classeName: string, classRoomId: string | number) {
+  const feeClasse = String(
+    fee?.classe || fee?.className || fee?.classRoomName || fee?.class || ""
+  ).trim();
+
+  const feeClassRoomId = fee?.classRoomId || fee?.classId || fee?.classeId || "";
+
+  if (classRoomId) {
+    if (feeClassRoomId) return String(feeClassRoomId) === String(classRoomId);
+    if (classeName && feeClasse) return normalizeText(feeClasse) === normalizeText(classeName);
+    return false;
+  }
+
+  if (classeName) {
+    return Boolean(feeClasse) && normalizeText(feeClasse) === normalizeText(classeName);
+  }
+
+  return true;
+}
+
+function uniqueFees(list: any[]) {
+  const map = new Map<string, any>();
+
+  for (const fee of list) {
+    const key = getFeeUniqueKey(fee);
+    const existing = map.get(key);
+
+    // Raha misy doublon dia tazonina ilay efa PAYE, sinon ilay voalohany no tazonina
+    // mba tsy hikorontana ny filaharana avy amin'ny création.
+    if (!existing || (!isFeePaid(existing) && isFeePaid(fee))) {
+      map.set(key, fee);
+    }
+  }
+
+  return Array.from(map.values());
 }
 
 useEffect(() => {
   async function loadTreasuries() {
     try {
       setLoadingTreasuries(true);
-
-      const schoolYearName = String(form.anneeScolaire || student.anneeScolaire || "2025-2026").trim();
-      const params = new URLSearchParams();
-      if (schoolYearName) {
-        params.set("schoolYearName", schoolYearName);
-        params.set("year", schoolYearName);
-      }
-
-      const res = await fetch(`/api/treasuries?${params.toString()}`, {
-        cache: "no-store",
-      });
+      const res = await fetch("/api/treasuries", { cache: "no-store" });
       const data = await res.json();
 
       if (!res.ok) {
@@ -94,9 +125,7 @@ useEffect(() => {
           ? data.treasuries
           : [];
 
-      const sortedList = sortTreasuriesWithPrincipalFirst(list);
-      setTreasuries(sortedList);
-      applyDefaultTreasury(sortedList);
+      setTreasuries(list.filter((item: any) => item?.active !== false));
     } catch {
       setTreasuries([]);
     } finally {
@@ -105,7 +134,7 @@ useEffect(() => {
   }
 
   loadTreasuries();
-}, [form.anneeScolaire, student?.anneeScolaire]);
+}, []);
 
 function getSelectedTreasury() {
   const id = Number(paymentForm.treasuryId || 0);
@@ -207,12 +236,19 @@ function isFeePaid(fee: any) {
 
 function sortFees(list: any[]) {
   return [...list].sort((a, b) => {
-    const ca = getFeeCode(a);
-    const cb = getFeeCode(b);
-    const ia = feeOrder.indexOf(ca);
-    const ib = feeOrder.indexOf(cb);
-    if (ia !== -1 || ib !== -1) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
-    return ca.localeCompare(cb);
+    const orderA = getFeeCreationOrder(a, a.__sourceIndex || 0);
+    const orderB = getFeeCreationOrder(b, b.__sourceIndex || 0);
+
+    if (orderA !== orderB) return orderA - orderB;
+
+    const idA = Number(a.trainingFeeId || a.sourceTrainingFeeId || a.id || 0);
+    const idB = Number(b.trainingFeeId || b.sourceTrainingFeeId || b.id || 0);
+    if (idA !== idB) return idA - idB;
+
+    return getFeeCode(a).localeCompare(getFeeCode(b), "fr", {
+      numeric: true,
+      sensitivity: "base",
+    });
   });
 }
 
@@ -230,6 +266,11 @@ function normalizeTrainingFee(f: any, index: number, paidMap: Map<string, any>, 
     studentFeeId: paidInfo?.id || null,
     trainingFeeId: f.id,
     sourceTrainingFeeId: f.id,
+    __sourceIndex: index,
+    createdAt: f.createdAt,
+    ordre: f.ordre ?? f.order ?? f.position ?? f.rank ?? f.sortOrder,
+    classe: f.classe || f.className || f.classRoomName || "",
+    schoolYearName: f.schoolYearName || f.year || f.anneeScolaire || "",
     code: f.code || f.libelle || code,
     libelle: f.libelle || f.code || code,
     montantTotal: Number(localEdit?.montant ?? f.montant ?? f.montantTotal ?? f.amount ?? 0),
@@ -247,6 +288,11 @@ function normalizeStudentFee(f: any, index: number) {
     ...f,
     id: f.id ?? `student-fee-${index}`,
     studentFeeId: f.id,
+    __sourceIndex: index,
+    createdAt: f.createdAt,
+    ordre: f.ordre ?? f.order ?? f.position ?? f.rank ?? f.sortOrder,
+    classe: f.classe || f.className || f.classRoomName || "",
+    schoolYearName: f.schoolYearName || f.year || f.anneeScolaire || "",
     code: f.code || f.libelle || f.month || f.mois || `Frais ${index + 1}`,
     libelle: f.libelle || f.label || f.name || f.code || `Frais ${index + 1}`,
     montantTotal: getFeeAmount(f),
@@ -331,34 +377,21 @@ async function loadStudentFees() {
       trainingData = Array.isArray(json) ? json : json.data || [];
     }
 
-    // Sécurité côté page: même si l'API renvoie tout, on garde uniquement
-    // les frais de l'année scolaire et de la classe actuelle de l'étudiant.
-    trainingData = trainingData.filter((fee: any) => {
-      const feeYear = String(
-        fee.schoolYearName || fee.year || fee.anneeScolaire || ""
-      ).trim();
+    // Sécurité stricte côté page: on garde uniquement les frais de
+    // l'année scolaire ET de la classe actuelle de l'étudiant.
+    // Un frais sans classe ne s'affiche pas si l'étudiant a une classe.
+    trainingData = trainingData
+      .map((fee: any, index: number) => ({ ...fee, __sourceIndex: index }))
+      .filter((fee: any) => {
+        const feeYear = String(
+          fee.schoolYearName || fee.year || fee.anneeScolaire || ""
+        ).trim();
 
-      const feeClasse = String(
-        fee.classe || fee.className || fee.classRoomName || ""
-      ).trim();
+        const sameYear = !schoolYearName || !feeYear || feeYear === schoolYearName;
+        const sameClass = isSameClassFee(fee, classeName, classRoomId);
 
-      const feeClassRoomId =
-        fee.classRoomId || fee.classId || fee.classeId || "";
-
-      const sameYear = !schoolYearName || !feeYear || feeYear === schoolYearName;
-
-      const sameClassById =
-        classRoomId && feeClassRoomId
-          ? String(feeClassRoomId) === String(classRoomId)
-          : true;
-
-      const sameClassByName =
-        classeName && feeClasse
-          ? feeClasse.toLowerCase() === classeName.toLowerCase()
-          : true;
-
-      return sameYear && sameClassById && sameClassByName;
-    });
+        return sameYear && sameClass;
+      });
 
     const localPayments = getLocalPayments();
     const paidMap = new Map<string, any>();
@@ -372,11 +405,23 @@ async function loadStudentFees() {
     const visibleFees =
       trainingData.length > 0
         ? trainingData.map((f, index) =>
-            normalizeTrainingFee(f, index, paidMap, localPayments)
+            normalizeTrainingFee(f, Number(f.__sourceIndex ?? index), paidMap, localPayments)
           )
-        : studentData.map((f, index) => normalizeStudentFee(f, index));
+        : studentData
+            .map((f, index) => ({ ...f, __sourceIndex: index }))
+            .filter((fee: any) => {
+              const feeYear = String(
+                fee.schoolYearName || fee.year || fee.anneeScolaire || ""
+              ).trim();
 
-    setFees(sortFees(visibleFees));
+              const sameYear = !schoolYearName || !feeYear || feeYear === schoolYearName;
+              const sameClass = isSameClassFee(fee, classeName, classRoomId);
+
+              return sameYear && sameClass;
+            })
+            .map((f, index) => normalizeStudentFee(f, Number(f.__sourceIndex ?? index)));
+
+    setFees(sortFees(uniqueFees(visibleFees)));
   } catch {
     setFees([]);
   } finally {
@@ -483,18 +528,14 @@ function saveEditedFees() {
 function openPaymentModal() {
   const selectedFees = getSelectedFeesToPay();
   if (selectedFees.length === 0) return;
-
-  const defaultTreasury = getDefaultTreasury();
-
   setPaymentForm({
     datePaiement: new Date().toISOString().slice(0, 10),
-    treasuryId: defaultTreasury ? String(defaultTreasury.id) : "",
-    tresorerie: defaultTreasury?.name || "",
+    treasuryId: "",
+    tresorerie: "",
     modePaiement: "Espèce",
     reference: buildPaymentReference(),
     commentaire: "",
   });
-
   setShowPaymentModal(true);
 }
 
@@ -1570,7 +1611,7 @@ function printTicketMultiple(selectedFees: any[]) {
                       </option>
                       {treasuries.map((treasury: any) => (
                         <option key={treasury.id} value={String(treasury.id)}>
-                          {treasury.isPrincipal ? "⭐ " : ""}{treasury.name}
+                          {treasury.name}
                         </option>
                       ))}
                     </select>
