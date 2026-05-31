@@ -108,11 +108,44 @@ function uniqueFees(list: any[]) {
   return Array.from(map.values());
 }
 
+function sortTreasuriesActivePrincipalFirst(list: any[]) {
+  return [...list]
+    .filter((item: any) => item?.active !== false)
+    .sort((a: any, b: any) => {
+      const principalDiff = Number(Boolean(b?.isPrincipal)) - Number(Boolean(a?.isPrincipal));
+      if (principalDiff !== 0) return principalDiff;
+
+      const idA = Number(a?.id || 0);
+      const idB = Number(b?.id || 0);
+      if (idA !== idB) return idA - idB;
+
+      return String(a?.name || "").localeCompare(String(b?.name || ""), "fr", {
+        numeric: true,
+        sensitivity: "base",
+      });
+    });
+}
+
+function getDefaultTreasury(list = treasuries) {
+  const activeTreasuries = sortTreasuriesActivePrincipalFirst(list);
+  return activeTreasuries.find((item: any) => item?.isPrincipal === true) || activeTreasuries[0] || null;
+}
+
 useEffect(() => {
   async function loadTreasuries() {
     try {
       setLoadingTreasuries(true);
-      const res = await fetch("/api/treasuries", { cache: "no-store" });
+
+      const schoolYearName = String(form.anneeScolaire || student.anneeScolaire || "2025-2026").trim();
+      const params = new URLSearchParams();
+      if (schoolYearName) {
+        params.set("schoolYearName", schoolYearName);
+        params.set("year", schoolYearName);
+      }
+
+      const res = await fetch(`/api/treasuries?${params.toString()}`, {
+        cache: "no-store",
+      });
       const data = await res.json();
 
       if (!res.ok) {
@@ -125,7 +158,17 @@ useEffect(() => {
           ? data.treasuries
           : [];
 
-      setTreasuries(list.filter((item: any) => item?.active !== false));
+      const activeTreasuries = sortTreasuriesActivePrincipalFirst(list);
+      setTreasuries(activeTreasuries);
+
+      const defaultTreasury = getDefaultTreasury(activeTreasuries);
+      if (defaultTreasury) {
+        setPaymentForm((prev) => ({
+          ...prev,
+          treasuryId: prev.treasuryId || String(defaultTreasury.id),
+          tresorerie: prev.tresorerie || defaultTreasury.name || "",
+        }));
+      }
     } catch {
       setTreasuries([]);
     } finally {
@@ -134,7 +177,7 @@ useEffect(() => {
   }
 
   loadTreasuries();
-}, []);
+}, [form.anneeScolaire, student?.anneeScolaire]);
 
 function getSelectedTreasury() {
   const id = Number(paymentForm.treasuryId || 0);
@@ -528,10 +571,13 @@ function saveEditedFees() {
 function openPaymentModal() {
   const selectedFees = getSelectedFeesToPay();
   if (selectedFees.length === 0) return;
+
+  const defaultTreasury = getDefaultTreasury();
+
   setPaymentForm({
     datePaiement: new Date().toISOString().slice(0, 10),
-    treasuryId: "",
-    tresorerie: "",
+    treasuryId: defaultTreasury ? String(defaultTreasury.id) : "",
+    tresorerie: defaultTreasury?.name || "",
     modePaiement: "Espèce",
     reference: buildPaymentReference(),
     commentaire: "",
@@ -1611,7 +1657,7 @@ function printTicketMultiple(selectedFees: any[]) {
                       </option>
                       {treasuries.map((treasury: any) => (
                         <option key={treasury.id} value={String(treasury.id)}>
-                          {treasury.name}
+                          {treasury.isPrincipal ? "⭐ " : ""}{treasury.name}
                         </option>
                       ))}
                     </select>
