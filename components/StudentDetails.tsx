@@ -724,6 +724,16 @@ async function paySelectedFees() {
 }
 
 async function cancelOnePayment(fee: any) {
+  const unpaidFee = {
+    ...fee,
+    status: "NON_PAYE",
+    paid: false,
+    montantPaye: 0,
+    reste: getFeeAmount(fee),
+    paidAt: null,
+    localOnly: false,
+  };
+
   let cancelled = false;
 
   if (fee.studentFeeId && !fee.localOnly && !String(fee.studentFeeId).startsWith("training-")) {
@@ -733,21 +743,26 @@ async function cancelOnePayment(fee: any) {
       body: JSON.stringify({
         id: fee.studentFeeId,
         action: "CANCEL",
+        studentId: student.id,
+        trainingFeeId: fee.trainingFeeId || fee.sourceTrainingFeeId,
+        schoolYearName: form.anneeScolaire || student.anneeScolaire || fee.schoolYearName || "2025-2026",
+        treasuryId: fee.treasuryId,
+        treasuryName: fee.treasuryName || fee.tresorerie,
+        tresorerie: fee.tresorerie || fee.treasuryName,
+        reference: fee.reference,
       }),
     });
-    cancelled = res.ok;
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data?.error || data?.message || "Erreur annulation paiement");
+      return false;
+    }
+
+    cancelled = true;
   }
 
   removeLocalPayment(getPaymentKey(fee));
-
-  const unpaidFee = {
-    ...fee,
-    status: "NON_PAYE",
-    paid: false,
-    montantPaye: 0,
-    reste: getFeeAmount(fee),
-    localOnly: false,
-  };
 
   setFees((prev) =>
     prev.map((item) =>
@@ -779,6 +794,7 @@ async function cancelPayment() {
 
     setSelectedPaidFee(null);
     setSelectedPaidFeeIds([]);
+    setSelectedFeeIdsToPay([]);
 
     if (shouldReload) await loadStudentFees();
   } finally {

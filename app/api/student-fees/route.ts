@@ -219,6 +219,107 @@ async function createTreasuryMovementOnce({
   });
 }
 
+
+async function findPaymentForFee(studentFee: any) {
+  return prisma.studentPayment.findFirst({
+    where: {
+      studentId: Number(studentFee.studentId || 0),
+      trainingFeeId: Number(studentFee.trainingFeeId || 0),
+      schoolYearName: String(studentFee.schoolYearName || ""),
+    },
+    orderBy: { id: "desc" },
+  });
+}
+
+async function findOriginalPaymentMovement(studentFee: any, payment?: any) {
+  const studentId = Number(studentFee.studentId || 0);
+  const trainingFeeId = Number(studentFee.trainingFeeId || 0);
+  const studentFeeId = Number(studentFee.id || 0);
+  const schoolYearName = String(studentFee.schoolYearName || "");
+
+  return prisma.treasuryMovement.findFirst({
+    where: {
+      movementType: "ENTREE",
+      category: "PAIEMENT_FRAIS",
+      schoolYearName,
+      OR: [
+        ...(studentFeeId ? [{ studentFeeId }] : []),
+        ...(studentId && trainingFeeId
+          ? [{ studentId, trainingFeeId }]
+          : []),
+        ...(payment?.treasuryId && studentId && trainingFeeId
+          ? [{ treasuryId: Number(payment.treasuryId), studentId, trainingFeeId }]
+          : []),
+      ],
+    },
+    orderBy: { id: "desc" },
+  });
+}
+
+async function createCancellationMovementOnce({
+  user,
+  studentFee,
+  payment,
+  originalMovement,
+  amount,
+}: {
+  user: any;
+  studentFee: any;
+  payment?: any;
+  originalMovement?: any;
+  amount: number;
+}) {
+  const studentId = Number(studentFee.studentId || 0);
+  const trainingFeeId = Number(studentFee.trainingFeeId || 0);
+  const studentFeeId = Number(studentFee.id || 0);
+  const schoolYearName = String(studentFee.schoolYearName || "");
+  const treasuryId = Number(
+    originalMovement?.treasuryId || payment?.treasuryId || 0
+  );
+
+  if (!treasuryId || amount <= 0) return null;
+
+  const treasury = await prisma.treasury.findFirst({
+    where: {
+      id: treasuryId,
+      schoolYearName,
+    },
+  });
+
+  if (!treasury) return null;
+
+  const reference = `CANCEL-FEE-${studentFeeId}-${schoolYearName}`;
+
+  const existingCancel = await prisma.treasuryMovement.findFirst({
+    where: {
+      treasuryId,
+      movementType: "SORTIE",
+      category: "ANNULATION_PAIEMENT_FRAIS",
+      reference,
+      studentFeeId,
+      schoolYearName,
+    },
+  });
+
+  if (existingCancel) return existingCancel;
+
+  return prisma.treasuryMovement.create({
+    data: {
+      treasuryId,
+      movementType: "SORTIE",
+      category: "ANNULATION_PAIEMENT_FRAIS",
+      amount,
+      description: `Annulation paiement frais ${studentFee.code} - ${studentFee.libelle}`,
+      reference,
+      studentId: studentId || null,
+      trainingFeeId: trainingFeeId || null,
+      studentFeeId: studentFeeId || null,
+      schoolYearName,
+      createdBy: user?.email || user?.name || null,
+    },
+  });
+}
+
 export async function GET(req: Request) {
   const user = await getAuthUser();
   if (!user) {
@@ -532,7 +633,14 @@ export async function PATCH(req: Request) {
     }
 
     if (action === "CANCEL") {
-      const paidAmount = Number(existingFee.montantPaye || 0);
+      const payment = await findPaymentForFee(existingFee);
+      const originalMovement = await findOriginalPaymentMovement(existingFee, payment);
+
+      const paidAmount = Math.max(
+        Number(existingFee.montantPaye || 0),
+        Number(payment?.montantPaye || 0),
+        Number(originalMovement?.amount || 0)
+      );
 
       const updatedFee = await prisma.studentFee.update({
         where: { id },
@@ -544,16 +652,10 @@ export async function PATCH(req: Request) {
         },
       });
 
-      const payment = await prisma.studentPayment.findFirst({
-        where: {
-          studentId: existingFee.studentId,
-          trainingFeeId: existingFee.trainingFeeId,
-          schoolYearName: existingFee.schoolYearName,
-        },
-      });
+      let updatedPayment = null;
 
       if (payment) {
-        await prisma.studentPayment.update({
+        updatedPayment = await prisma.studentPayment.update({
           where: { id: payment.id },
           data: {
             montantPaye: 0,
@@ -563,29 +665,19 @@ export async function PATCH(req: Request) {
         });
       }
 
-      let movement = null;
-
-      if (paidAmount > 0 && (body.treasuryId || body.tresorerie || body.treasuryName)) {
-        movement = await createTreasuryMovementOnce({
-          body: {
-            ...body,
-            studentId: existingFee.studentId,
-            trainingFeeId: existingFee.trainingFeeId,
-            schoolYearName: existingFee.schoolYearName,
-            reference: cleanText(body.reference) || `CANCEL-${existingFee.id}-${Date.now()}`,
-          },
-          user,
-          studentFee: existingFee,
-          amount: paidAmount,
-          movementType: "SORTIE",
-          description: `Annulation paiement frais ${existingFee.code} - ${existingFee.libelle}`,
-        });
-      }
+      const movement = await createCancellationMovementOnce({
+        user,
+        studentFee: existingFee,
+        payment,
+        originalMovement,
+        amount: paidAmount,
+      });
 
       return NextResponse.json({
         success: true,
+        cancelled: true,
         data: updatedFee,
-        payment,
+        payment: updatedPayment,
         movement,
       });
     }
