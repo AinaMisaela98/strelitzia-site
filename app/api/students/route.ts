@@ -25,6 +25,22 @@ async function getActiveSchoolYearName(): Promise<string> {
   return activeYear?.name || "2025-2026";
 }
 
+async function resolveSchoolYearNameFromUrl(url: URL): Promise<string> {
+  const schoolYearName = cleanString(url.searchParams.get("schoolYearName"));
+  const anneeScolaire = cleanString(url.searchParams.get("anneeScolaire"));
+  const year = cleanString(url.searchParams.get("year"));
+
+  return schoolYearName || anneeScolaire || year || (await getActiveSchoolYearName());
+}
+
+async function resolveSchoolYearNameFromBody(body: any): Promise<string> {
+  const schoolYearName = cleanString(body?.schoolYearName);
+  const anneeScolaire = cleanString(body?.anneeScolaire);
+  const year = cleanString(body?.year);
+
+  return schoolYearName || anneeScolaire || year || (await getActiveSchoolYearName());
+}
+
 const studentSelect = {
   id: true,
   matricule: true,
@@ -40,6 +56,25 @@ const studentSelect = {
   contact: true,
   dateNaissance: true,
   lieuNaissance: true,
+  adresse: true,
+  signeParticulier: true,
+  maladieAllergie: true,
+  email: true,
+  pereNom: true,
+  pereTel: true,
+  mereNom: true,
+  mereTel: true,
+  parentAdresse: true,
+  tuteurNom: true,
+  tuteurLien: true,
+  tuteurTel: true,
+  tuteurAdresse: true,
+  niveau: true,
+  fraisInscription: true,
+  fraisScolarite: true,
+  activite: true,
+  remarque: true,
+  createdAt: true,
 } as const;
 
 export async function GET(req: Request) {
@@ -51,22 +86,47 @@ export async function GET(req: Request) {
     }
 
     const url = new URL(req.url);
-    const year = cleanString(url.searchParams.get("year"));
-    const selectedYear = year || (await getActiveSchoolYearName());
+    const selectedYear = await resolveSchoolYearNameFromUrl(url);
 
-    const students = await prisma.student.findMany({
-      where: {
-        anneeScolaire: selectedYear,
-      },
-      select: studentSelect,
-      orderBy: {
-        id: "desc",
-      },
-      take: 500,
-    });
+    const q = cleanString(url.searchParams.get("q"));
+    const classe = cleanString(url.searchParams.get("classe"));
+    const section = cleanString(url.searchParams.get("section"));
+    const takeParam = Number(url.searchParams.get("take") || 500);
+    const take = Number.isFinite(takeParam) ? Math.min(Math.max(takeParam, 1), 1000) : 500;
+
+    const where: any = {
+      anneeScolaire: selectedYear,
+    };
+
+    if (classe) where.classe = classe;
+    if (section) where.section = section;
+
+    if (q) {
+      where.OR = [
+        { matricule: { contains: q, mode: "insensitive" } },
+        { nom: { contains: q, mode: "insensitive" } },
+        { prenoms: { contains: q, mode: "insensitive" } },
+        { contact: { contains: q, mode: "insensitive" } },
+      ];
+    }
+
+    const [students, total] = await Promise.all([
+      prisma.student.findMany({
+        where,
+        select: studentSelect,
+        orderBy: { id: "desc" },
+        take,
+      }),
+      prisma.student.count({ where }),
+    ]);
 
     return NextResponse.json(
-      { students },
+      {
+        students,
+        total,
+        schoolYearName: selectedYear,
+        anneeScolaire: selectedYear,
+      },
       {
         status: 200,
         headers: {
@@ -117,14 +177,13 @@ export async function POST(req: Request) {
       );
     }
 
-    const activeYearName =
-      cleanString(body.anneeScolaire) || (await getActiveSchoolYearName());
+    const selectedYear = await resolveSchoolYearNameFromBody(body);
 
     const student = await prisma.student.create({
       data: {
         matricule,
         site: cleanString(body.site) || "Strelitzia School",
-        anneeScolaire: activeYearName,
+        anneeScolaire: selectedYear,
         dateInscription: cleanDate(body.dateInscription) || new Date(),
 
         photoUrl: cleanString(body.photoUrl),
@@ -166,7 +225,11 @@ export async function POST(req: Request) {
     });
 
     return NextResponse.json(
-      { student },
+      {
+        student,
+        schoolYearName: selectedYear,
+        anneeScolaire: selectedYear,
+      },
       {
         status: 201,
         headers: {
@@ -179,7 +242,7 @@ export async function POST(req: Request) {
 
     if (error?.code === "P2002") {
       return NextResponse.json(
-        { error: "Ce matricule existe déjà" },
+        { error: "Ce matricule existe déjà pour cette année scolaire." },
         { status: 400 }
       );
     }

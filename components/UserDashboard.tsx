@@ -72,6 +72,16 @@ const menus = [
     title: "Académique",
     items: ["Années scolaires", "Niveaux / Classes / Séries"],
   },
+  
+  {
+    title: "Liste Trésorerie",
+    items: [
+      "Trésorerie",
+      "Mouvements de Trésorerie",
+            
+    ],
+  },
+
   {
     title: "Activité extras",
     items: ["Favoris", "Forfait activité extras", "Inscription activité extras"],
@@ -396,7 +406,16 @@ useEffect(() => {
       window.location.href = "/user/fee-models";
       return;
     }
+     
+      if (item === "Trésorerie") {
+  window.location.href = "/user/treasuries";
+  return;
+}
 
+if (item === "Mouvements de Trésorerie") {
+  window.location.href = "/user/treasury-movements";
+  return;
+}
 
     if (item === "Années scolaires") {
       window.location.href = "/user/school-years";

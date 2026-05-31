@@ -2,6 +2,47 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthUser } from "@/lib/auth";
 
+function cleanText(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function toNumber(value: unknown) {
+  const raw = String(value ?? "")
+    .replace(/\s/g, "")
+    .replace(/[^\d.-]/g, "");
+
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function safeDate(value: unknown) {
+  const raw = cleanText(value);
+  if (!raw) return new Date();
+
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? new Date() : d;
+}
+
+function getYearFromBody(body: any) {
+  return cleanText(
+    body?.schoolYearName ||
+      body?.anneeScolaire ||
+      body?.annéeScolaire ||
+      body?.year ||
+      body?.schoolYear
+  );
+}
+
+function getYearFromUrl(url: URL) {
+  return cleanText(
+    url.searchParams.get("schoolYearName") ||
+      url.searchParams.get("anneeScolaire") ||
+      url.searchParams.get("annéeScolaire") ||
+      url.searchParams.get("year") ||
+      url.searchParams.get("schoolYear")
+  );
+}
+
 async function getActiveYear() {
   const year = await prisma.schoolYear.findFirst({
     where: { active: true },
@@ -10,57 +51,174 @@ async function getActiveYear() {
   return year?.name || "2025-2026";
 }
 
-function amountToNumber(value: any) {
-  return Number(String(value ?? "").replace(/\s/g, "").replace(/,/g, "")) || 0;
+async function resolveSchoolYearName(value?: string) {
+  return cleanText(value) || (await getActiveYear());
 }
 
-function toUpperStatus(value: any) {
-  return String(value || "").trim().toUpperCase();
-}
+async function findTreasury(body: any, schoolYearName: string) {
+  const treasuryId = Number(body.treasuryId || body.tresorerieId || 0);
+  const treasuryName = cleanText(
+    body.treasuryName || body.tresorerie || body.treasury || body.caisse
+  );
 
-function isPaidStatus(value: any) {
-  const status = toUpperStatus(value);
-  return status === "PAYE" || status === "PAYÉ" || status === "PAID";
-}
+  if (!schoolYearName) return null;
 
-function cleanText(value: any, fallback = "") {
-  const text = String(value ?? "").trim();
-  return text || fallback;
-}
-
-function getFeeCode(data: any) {
-  return cleanText(data?.code || data?.month || data?.mois || data?.libelle || data?.name, "FRAIS").toUpperCase();
-}
-
-function getFeeLabel(data: any) {
-  return cleanText(data?.libelle || data?.label || data?.name || data?.code, "Frais");
-}
-
-async function resolveSchoolYearName(bodyOrParams: any, studentId?: number) {
-  const explicitYear =
-    bodyOrParams?.schoolYearName ||
-    bodyOrParams?.anneeScolaire ||
-    bodyOrParams?.get?.("schoolYearName") ||
-    bodyOrParams?.get?.("anneeScolaire");
-
-  if (explicitYear) return String(explicitYear);
-
-  if (studentId) {
-    const student = await prisma.student.findUnique({
-      where: { id: studentId },
-      select: { anneeScolaire: true },
+  if (treasuryId) {
+    const treasury = await prisma.treasury.findFirst({
+      where: {
+        id: treasuryId,
+        active: true,
+        schoolYearName,
+      },
     });
 
-    if (student?.anneeScolaire) return student.anneeScolaire;
+    if (treasury) return treasury;
   }
 
-  return getActiveYear();
+  if (treasuryName) {
+    const treasury = await prisma.treasury.findFirst({
+      where: {
+        name: treasuryName,
+        active: true,
+        schoolYearName,
+      },
+    });
+
+    if (treasury) return treasury;
+  }
+
+  return null;
 }
 
-/**
- * GET /api/student-fees?studentId=1
- * Mamerina ny frais efa assigné/payé amin'ilay étudiant.
- */
+function buildPaymentReference(body: any, studentId: number, trainingFeeId: number) {
+  return (
+    cleanText(body.reference) ||
+    `PAY-${studentId}-${trainingFeeId}-${Date.now()}`
+  );
+}
+
+async function upsertStudentPayment({
+  studentId,
+  trainingFeeId,
+  schoolYearName,
+  montantTotal,
+  montantPaye,
+  reste,
+  status,
+  treasuryId,
+  treasuryName,
+}: {
+  studentId: number;
+  trainingFeeId: number;
+  schoolYearName: string;
+  montantTotal: number;
+  montantPaye: number;
+  reste: number;
+  status: string;
+  treasuryId?: number | null;
+  treasuryName?: string | null;
+}) {
+  const existing = await prisma.studentPayment.findFirst({
+    where: {
+      studentId,
+      trainingFeeId,
+      schoolYearName,
+    },
+  });
+
+  if (existing) {
+    return prisma.studentPayment.update({
+      where: { id: existing.id },
+      data: {
+        montantTotal,
+        montantPaye,
+        reste,
+        status,
+        treasuryId: treasuryId || existing.treasuryId || null,
+        treasuryName: treasuryName || existing.treasuryName || null,
+      },
+    });
+  }
+
+  return prisma.studentPayment.create({
+    data: {
+      studentId,
+      trainingFeeId,
+      schoolYearName,
+      montantTotal,
+      montantPaye,
+      reste,
+      status,
+      treasuryId: treasuryId || null,
+      treasuryName: treasuryName || null,
+    },
+  });
+}
+
+async function createTreasuryMovementOnce({
+  body,
+  user,
+  studentFee,
+  amount,
+  movementType,
+  description,
+}: {
+  body: any;
+  user: any;
+  studentFee: any;
+  amount: number;
+  movementType: "ENTREE" | "SORTIE";
+  description: string;
+}) {
+  const schoolYearName = await resolveSchoolYearName(
+    cleanText(studentFee.schoolYearName || getYearFromBody(body))
+  );
+
+  const treasury = await findTreasury(body, schoolYearName);
+
+  if (!treasury) {
+    throw new Error("Trésorerie obligatoire ou introuvable pour cette année scolaire");
+  }
+
+  const studentId = Number(studentFee.studentId || body.studentId || 0);
+  const trainingFeeId = Number(studentFee.trainingFeeId || body.trainingFeeId || 0);
+  const studentFeeId = Number(studentFee.id || body.studentFeeId || 0);
+  const reference = buildPaymentReference(body, studentId, trainingFeeId);
+
+  const existing = await prisma.treasuryMovement.findFirst({
+    where: {
+      treasuryId: treasury.id,
+      movementType,
+      reference,
+      schoolYearName,
+      ...(studentId ? { studentId } : {}),
+      ...(trainingFeeId ? { trainingFeeId } : {}),
+      ...(studentFeeId ? { studentFeeId } : {}),
+    },
+  });
+
+  if (existing) return existing;
+
+  return prisma.treasuryMovement.create({
+    data: {
+      treasuryId: treasury.id,
+      movementType,
+      category:
+        movementType === "ENTREE"
+          ? "PAIEMENT_FRAIS"
+          : "ANNULATION_PAIEMENT_FRAIS",
+      amount,
+      description,
+      reference,
+      studentId: studentId || null,
+      trainingFeeId: trainingFeeId || null,
+      studentFeeId: studentFeeId || null,
+      schoolYearName,
+      createdBy: user?.email || user?.name || null,
+    },
+  });
+}
+
 export async function GET(req: Request) {
   const user = await getAuthUser();
   if (!user) {
@@ -69,41 +227,32 @@ export async function GET(req: Request) {
 
   try {
     const url = new URL(req.url);
-    const studentId = Number(url.searchParams.get("studentId"));
+    const studentId = Number(url.searchParams.get("studentId") || 0);
+    const trainingFeeId = Number(url.searchParams.get("trainingFeeId") || 0);
+    const schoolYearName = await resolveSchoolYearName(getYearFromUrl(url));
 
-    if (!studentId) {
-      return NextResponse.json({ error: "Étudiant manquant" }, { status: 400 });
-    }
-
-    const schoolYearName = await resolveSchoolYearName(url.searchParams, studentId);
-
-    const data = await prisma.studentFee.findMany({
+    const fees = await prisma.studentFee.findMany({
       where: {
-        studentId,
         schoolYearName,
+        ...(studentId ? { studentId } : {}),
+        ...(trainingFeeId ? { trainingFeeId } : {}),
       },
-      orderBy: [{ trainingFeeId: "asc" }, { id: "asc" }],
+      orderBy: { id: "asc" },
     });
 
-    return NextResponse.json(data);
+    return NextResponse.json(fees);
   } catch (error: any) {
-    console.error("GET /api/student-fees", error);
+    console.error("STUDENT_FEES_GET_ERROR", error);
     return NextResponse.json(
-      { error: "Erreur serveur", message: error.message },
+      {
+        error: "Erreur serveur student-fees",
+        message: error?.message || String(error),
+      },
       { status: 500 }
     );
   }
 }
 
-/**
- * POST /api/student-fees
- * Manampy na mandoa frais.
- *
- * BLOQUE DOUBLONS:
- * - Tsy manao create raha efa misy StudentFee mitovy studentId + trainingFeeId + schoolYearName.
- * - Raha efa misy dia update ilay existant.
- * - Raha efa PAYE dia tsy averina mandoa duplicate intsony.
- */
 export async function POST(req: Request) {
   const user = await getAuthUser();
   if (!user) {
@@ -111,169 +260,168 @@ export async function POST(req: Request) {
   }
 
   try {
-    const body = await req.json();
-    const studentId = Number(body.studentId);
+    const body = await req.json().catch(() => ({}));
+
+    const studentId = Number(body.studentId || 0);
+    const trainingFeeId = Number(body.trainingFeeId || body.sourceTrainingFeeId || 0);
+    const schoolYearName = await resolveSchoolYearName(getYearFromBody(body));
+
+    const libelle = cleanText(
+      body.libelle || body.label || body.name || body.code || "Frais"
+    );
+    const code = cleanText(body.code || libelle).toUpperCase();
+
+    const montantTotal = toNumber(body.montantTotal || body.total || body.amount || body.montant);
+    const montantPayeInput = toNumber(
+      body.montantPaye || body.amount || body.montantTotal || body.montant
+    );
 
     if (!studentId) {
-      return NextResponse.json({ error: "Étudiant manquant" }, { status: 400 });
+      return NextResponse.json({ error: "Étudiant obligatoire" }, { status: 400 });
     }
 
-    const schoolYearName = await resolveSchoolYearName(body, studentId);
-
-    const trainingFeeIds: number[] = Array.isArray(body.trainingFeeIds)
-      ? body.trainingFeeIds.map((id: any) => Number(id)).filter(Boolean)
-      : body.trainingFeeId
-      ? [Number(body.trainingFeeId)].filter(Boolean)
-      : [];
-
-    if (trainingFeeIds.length === 0) {
-      return NextResponse.json({ error: "Frais manquant" }, { status: 400 });
+    if (!trainingFeeId) {
+      return NextResponse.json({ error: "Frais obligatoire" }, { status: 400 });
     }
 
-    // Esorina avy hatrany ny doublons ao amin'ny request: [1,1,2] => [1,2]
-    const uniqueTrainingFeeIds = Array.from(new Set(trainingFeeIds));
+    if (!schoolYearName) {
+      return NextResponse.json({ error: "Année scolaire obligatoire" }, { status: 400 });
+    }
 
-    const trainingFees = await prisma.trainingFee.findMany({
+    if (!montantTotal || montantTotal <= 0) {
+      return NextResponse.json({ error: "Montant total invalide" }, { status: 400 });
+    }
+
+    if (!montantPayeInput || montantPayeInput <= 0) {
+      return NextResponse.json({ error: "Montant payé invalide" }, { status: 400 });
+    }
+
+    const student = await prisma.student.findFirst({
       where: {
-        id: { in: uniqueTrainingFeeIds },
+        id: studentId,
+        anneeScolaire: schoolYearName,
       },
-      orderBy: { id: "asc" },
     });
 
-    if (trainingFees.length === 0) {
-      return NextResponse.json({ error: "Aucun frais réel trouvé" }, { status: 404 });
-    }
-
-    const results: any[] = [];
-
-    for (const trainingFee of trainingFees) {
-      const trainingFeeId = Number(trainingFee.id);
-
-      const existing = await prisma.studentFee.findUnique({
-        where: {
-          studentId_trainingFeeId_schoolYearName: {
-            studentId,
-            trainingFeeId,
-            schoolYearName,
-          },
-        },
-      });
-
-      const requestedTotal = amountToNumber(body.montantTotal);
-      const requestedPaid = amountToNumber(body.montantPaye);
-      const requestedReste =
-        body.reste !== undefined ? amountToNumber(body.reste) : undefined;
-
-      const montantTotal =
-        requestedTotal > 0 ? requestedTotal : Number(trainingFee.montant || 0);
-
-      const isPayment =
-        isPaidStatus(body.status) ||
-        requestedPaid > 0 ||
-        requestedReste === 0 ||
-        body.action === "PAY";
-
-      const montantPaye = isPayment
-        ? requestedPaid > 0
-          ? requestedPaid
-          : montantTotal
-        : 0;
-
-      const reste = isPayment
-        ? 0
-        : requestedReste !== undefined
-        ? requestedReste
-        : montantTotal - montantPaye;
-
-      const status = isPayment || reste <= 0 ? "PAYE" : "NON_PAYE";
-
-      const data = {
-        studentId,
-        trainingFeeId,
-        schoolYearName,
-        libelle: getFeeLabel({
-          libelle: body.libelle || trainingFee.libelle,
-          code: body.code || trainingFee.code,
-        }),
-        code: getFeeCode({
-          code: body.code || trainingFee.code,
-          libelle: body.libelle || trainingFee.libelle,
-        }),
-        montantTotal,
-        montantPaye,
-        reste,
-        status,
-        paidAt: status === "PAYE" ? new Date() : null,
-      };
-
-      if (existing) {
-        // Raha efa payé dia tsy mamorona duplicate, mamerina ilay izy fotsiny.
-        if (existing.status === "PAYE" || existing.reste <= 0 || existing.paidAt) {
-          results.push({
-            ...existing,
-            duplicatedBlocked: true,
-            message: "Ce frais est déjà payé pour cet étudiant.",
-          });
-          continue;
-        }
-
-        const updated = await prisma.studentFee.update({
-          where: { id: existing.id },
-          data: {
-            libelle: data.libelle,
-            code: data.code,
-            montantTotal: data.montantTotal,
-            montantPaye: data.montantPaye,
-            reste: data.reste,
-            status: data.status,
-            paidAt: data.paidAt,
-          },
-        });
-
-        results.push({
-          ...updated,
-          duplicatedBlocked: true,
-          updatedExisting: true,
-        });
-      } else {
-        const created = await prisma.studentFee.create({
-          data,
-        });
-
-        results.push({
-          ...created,
-          duplicatedBlocked: false,
-          created: true,
-        });
-      }
-    }
-
-    return NextResponse.json(results.length === 1 ? results[0] : results);
-  } catch (error: any) {
-    // Sécurité fanampiny raha misy race condition dia tsy ampidirina doublon.
-    if (error?.code === "P2002") {
+    if (!student) {
       return NextResponse.json(
-        {
-          error: "Doublon bloqué",
-          message:
-            "Ce frais existe déjà pour cet étudiant dans cette année scolaire.",
-        },
-        { status: 409 }
+        { error: "Étudiant introuvable pour cette année scolaire" },
+        { status: 404 }
       );
     }
 
-    console.error("POST /api/student-fees", error);
+    const trainingFee = await prisma.trainingFee.findFirst({
+      where: {
+        id: trainingFeeId,
+        schoolYearName,
+      },
+    });
+
+    if (!trainingFee) {
+      return NextResponse.json(
+        { error: "Frais de formation introuvable pour cette année scolaire" },
+        { status: 404 }
+      );
+    }
+
+    const treasury = await findTreasury(body, schoolYearName);
+
+    if (!treasury) {
+      return NextResponse.json(
+        { error: "Veuillez sélectionner une trésorerie valide pour cette année scolaire avant de payer." },
+        { status: 400 }
+      );
+    }
+
+    const existingFee = await prisma.studentFee.findFirst({
+      where: {
+        studentId,
+        trainingFeeId,
+        schoolYearName,
+      },
+    });
+
+    const previousPaid = Number(existingFee?.montantPaye || 0);
+    const totalPaid = Math.min(montantTotal, previousPaid + montantPayeInput);
+    const reste = Math.max(0, montantTotal - totalPaid);
+    const status = reste <= 0 ? "PAYE" : totalPaid > 0 ? "PARTIEL" : "NON_PAYE";
+
+    const studentFee = existingFee
+      ? await prisma.studentFee.update({
+          where: { id: existingFee.id },
+          data: {
+            libelle,
+            code,
+            montantTotal,
+            montantPaye: totalPaid,
+            reste,
+            status,
+            paidAt: status === "PAYE" ? safeDate(body.datePaiement) : existingFee.paidAt,
+          },
+        })
+      : await prisma.studentFee.create({
+          data: {
+            studentId,
+            trainingFeeId,
+            schoolYearName,
+            libelle,
+            code,
+            montantTotal,
+            montantPaye: totalPaid,
+            reste,
+            status,
+            paidAt: status === "PAYE" ? safeDate(body.datePaiement) : null,
+          },
+        });
+
+    const payment = await upsertStudentPayment({
+      studentId,
+      trainingFeeId,
+      schoolYearName,
+      montantTotal,
+      montantPaye: totalPaid,
+      reste,
+      status,
+      treasuryId: treasury.id,
+      treasuryName: treasury.name,
+    });
+
+    const movement = await createTreasuryMovementOnce({
+      body: {
+        ...body,
+        studentId,
+        trainingFeeId,
+        schoolYearName,
+        treasuryId: treasury.id,
+        treasuryName: treasury.name,
+        tresorerie: treasury.name,
+        reference: buildPaymentReference(body, studentId, trainingFeeId),
+      },
+      user,
+      studentFee,
+      amount: montantPayeInput,
+      movementType: "ENTREE",
+      description: `Paiement frais ${code} - ${libelle}`,
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: studentFee,
+      payment,
+      movement,
+    });
+  } catch (error: any) {
+    console.error("STUDENT_FEES_POST_ERROR", error);
     return NextResponse.json(
-      { error: "Erreur serveur", message: error.message },
+      {
+        error: "Erreur serveur pendant le paiement",
+        message: error?.message || String(error),
+      },
       { status: 500 }
     );
   }
 }
 
-/**
- * PATCH /api/student-fees
- * PAY / CANCEL amin'ny frais efa misy.
- */
 export async function PATCH(req: Request) {
   const user = await getAuthUser();
   if (!user) {
@@ -281,72 +429,175 @@ export async function PATCH(req: Request) {
   }
 
   try {
-    const body = await req.json();
-    const id = Number(body.id);
-    const action = toUpperStatus(body.action);
+    const body = await req.json().catch(() => ({}));
+    const id = Number(body.id || 0);
+    const action = cleanText(body.action).toUpperCase();
+    const requestedSchoolYearName = getYearFromBody(body);
 
     if (!id) {
-      return NextResponse.json({ error: "Frais étudiant manquant" }, { status: 400 });
+      return NextResponse.json({ error: "ID frais obligatoire" }, { status: 400 });
     }
 
-    const fee = await prisma.studentFee.findUnique({
+    const existingFee = await prisma.studentFee.findUnique({
       where: { id },
     });
 
-    if (!fee) {
+    if (!existingFee) {
       return NextResponse.json({ error: "Frais introuvable" }, { status: 404 });
     }
 
+    if (requestedSchoolYearName && requestedSchoolYearName !== existingFee.schoolYearName) {
+      return NextResponse.json(
+        { error: "Ce frais n'appartient pas à l'année scolaire sélectionnée" },
+        { status: 400 }
+      );
+    }
+
     if (action === "PAY") {
-      if (fee.status === "PAYE" || fee.reste <= 0 || fee.paidAt) {
-        return NextResponse.json({
-          success: true,
-          duplicatedBlocked: true,
-          message: "Ce frais est déjà payé.",
-          data: fee,
-        });
+      const montantPayeInput = toNumber(
+        body.montantPaye || existingFee.reste || existingFee.montantTotal
+      );
+
+      if (montantPayeInput <= 0) {
+        return NextResponse.json({ error: "Montant invalide" }, { status: 400 });
       }
 
-      const montantPaye = amountToNumber(body.montantPaye) || fee.montantTotal;
+      const treasury = await findTreasury(body, existingFee.schoolYearName);
 
-      const updated = await prisma.studentFee.update({
+      if (!treasury) {
+        return NextResponse.json(
+          { error: "Veuillez sélectionner une trésorerie valide pour cette année scolaire avant de payer." },
+          { status: 400 }
+        );
+      }
+
+      const totalPaid = Math.min(
+        Number(existingFee.montantTotal || 0),
+        Number(existingFee.montantPaye || 0) + montantPayeInput
+      );
+
+      const reste = Math.max(0, Number(existingFee.montantTotal || 0) - totalPaid);
+      const status = reste <= 0 ? "PAYE" : totalPaid > 0 ? "PARTIEL" : "NON_PAYE";
+
+      const updatedFee = await prisma.studentFee.update({
         where: { id },
         data: {
-          montantPaye,
-          reste: 0,
-          status: "PAYE",
-          paidAt: new Date(),
+          montantPaye: totalPaid,
+          reste,
+          status,
+          paidAt: status === "PAYE" ? safeDate(body.datePaiement) : existingFee.paidAt,
         },
+      });
+
+      const payment = await upsertStudentPayment({
+        studentId: existingFee.studentId,
+        trainingFeeId: existingFee.trainingFeeId,
+        schoolYearName: existingFee.schoolYearName,
+        montantTotal: existingFee.montantTotal,
+        montantPaye: totalPaid,
+        reste,
+        status,
+        treasuryId: treasury.id,
+        treasuryName: treasury.name,
+      });
+
+      const movement = await createTreasuryMovementOnce({
+        body: {
+          ...body,
+          studentId: existingFee.studentId,
+          trainingFeeId: existingFee.trainingFeeId,
+          schoolYearName: existingFee.schoolYearName,
+          treasuryId: treasury.id,
+          treasuryName: treasury.name,
+          tresorerie: treasury.name,
+          reference: buildPaymentReference(
+            body,
+            existingFee.studentId,
+            existingFee.trainingFeeId
+          ),
+        },
+        user,
+        studentFee: updatedFee,
+        amount: montantPayeInput,
+        movementType: "ENTREE",
+        description: `Paiement frais ${existingFee.code} - ${existingFee.libelle}`,
       });
 
       return NextResponse.json({
         success: true,
-        data: updated,
+        data: updatedFee,
+        payment,
+        movement,
       });
     }
 
     if (action === "CANCEL") {
-      const updated = await prisma.studentFee.update({
+      const paidAmount = Number(existingFee.montantPaye || 0);
+
+      const updatedFee = await prisma.studentFee.update({
         where: { id },
         data: {
           montantPaye: 0,
-          reste: fee.montantTotal,
+          reste: existingFee.montantTotal,
           status: "NON_PAYE",
           paidAt: null,
         },
       });
 
+      const payment = await prisma.studentPayment.findFirst({
+        where: {
+          studentId: existingFee.studentId,
+          trainingFeeId: existingFee.trainingFeeId,
+          schoolYearName: existingFee.schoolYearName,
+        },
+      });
+
+      if (payment) {
+        await prisma.studentPayment.update({
+          where: { id: payment.id },
+          data: {
+            montantPaye: 0,
+            reste: existingFee.montantTotal,
+            status: "NON_PAYE",
+          },
+        });
+      }
+
+      let movement = null;
+
+      if (paidAmount > 0 && (body.treasuryId || body.tresorerie || body.treasuryName)) {
+        movement = await createTreasuryMovementOnce({
+          body: {
+            ...body,
+            studentId: existingFee.studentId,
+            trainingFeeId: existingFee.trainingFeeId,
+            schoolYearName: existingFee.schoolYearName,
+            reference: cleanText(body.reference) || `CANCEL-${existingFee.id}-${Date.now()}`,
+          },
+          user,
+          studentFee: existingFee,
+          amount: paidAmount,
+          movementType: "SORTIE",
+          description: `Annulation paiement frais ${existingFee.code} - ${existingFee.libelle}`,
+        });
+      }
+
       return NextResponse.json({
         success: true,
-        data: updated,
+        data: updatedFee,
+        payment,
+        movement,
       });
     }
 
-    return NextResponse.json({ error: "Action inconnue" }, { status: 400 });
+    return NextResponse.json({ error: "Action invalide" }, { status: 400 });
   } catch (error: any) {
-    console.error("PATCH /api/student-fees", error);
+    console.error("STUDENT_FEES_PATCH_ERROR", error);
     return NextResponse.json(
-      { error: "Erreur serveur", message: error.message },
+      {
+        error: "Erreur serveur pendant la modification paiement",
+        message: error?.message || String(error),
+      },
       { status: 500 }
     );
   }

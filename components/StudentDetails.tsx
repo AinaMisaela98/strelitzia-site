@@ -26,6 +26,7 @@ const [selectedFeeIdsToPay, setSelectedFeeIdsToPay] = useState<Array<number | st
 const [showPaymentModal, setShowPaymentModal] = useState(false);
 const [paymentForm, setPaymentForm] = useState({
   datePaiement: new Date().toISOString().slice(0, 10),
+  treasuryId: "",
   tresorerie: "",
   modePaiement: "Espèce",
   reference: "",
@@ -33,8 +34,103 @@ const [paymentForm, setPaymentForm] = useState({
 });
 const [showEditFeesModal, setShowEditFeesModal] = useState(false);
 const [editFeesRows, setEditFeesRows] = useState<any[]>([]);
+const [treasuries, setTreasuries] = useState<any[]>([]);
+const [loadingTreasuries, setLoadingTreasuries] = useState(false);
 
 const feeOrder = ["DI", "FG", "UNIF", "SEPT", "OCT", "NOV", "DEC", "JAN", "FEV", "FÉV", "MAR", "AVR", "MAI", "JUIN"];
+
+function sortTreasuriesWithPrincipalFirst(list: any[]) {
+  return [...list]
+    .filter((item: any) => item?.active !== false)
+    .sort((a: any, b: any) => {
+      const principalDiff = Number(Boolean(b?.isPrincipal)) - Number(Boolean(a?.isPrincipal));
+      if (principalDiff !== 0) return principalDiff;
+      return String(a?.name || "").localeCompare(String(b?.name || ""), "fr", {
+        sensitivity: "base",
+      });
+    });
+}
+
+function getDefaultTreasury(list = treasuries) {
+  const activeList = sortTreasuriesWithPrincipalFirst(list);
+  return activeList.find((item: any) => item?.isPrincipal) || activeList[0] || null;
+}
+
+function applyDefaultTreasury(list = treasuries) {
+  const treasury = getDefaultTreasury(list);
+  if (!treasury) return;
+
+  setPaymentForm((p) => ({
+    ...p,
+    treasuryId: p.treasuryId || String(treasury.id),
+    tresorerie: p.tresorerie || treasury.name || "",
+  }));
+}
+
+useEffect(() => {
+  async function loadTreasuries() {
+    try {
+      setLoadingTreasuries(true);
+
+      const schoolYearName = String(form.anneeScolaire || student.anneeScolaire || "2025-2026").trim();
+      const params = new URLSearchParams();
+      if (schoolYearName) {
+        params.set("schoolYearName", schoolYearName);
+        params.set("year", schoolYearName);
+      }
+
+      const res = await fetch(`/api/treasuries?${params.toString()}`, {
+        cache: "no-store",
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.error || "Erreur chargement trésoreries");
+      }
+
+      const list = Array.isArray(data)
+        ? data
+        : Array.isArray(data.treasuries)
+          ? data.treasuries
+          : [];
+
+      const sortedList = sortTreasuriesWithPrincipalFirst(list);
+      setTreasuries(sortedList);
+      applyDefaultTreasury(sortedList);
+    } catch {
+      setTreasuries([]);
+    } finally {
+      setLoadingTreasuries(false);
+    }
+  }
+
+  loadTreasuries();
+}, [form.anneeScolaire, student?.anneeScolaire]);
+
+function getSelectedTreasury() {
+  const id = Number(paymentForm.treasuryId || 0);
+  const byId = treasuries.find((item: any) => Number(item.id) === id);
+  if (byId) return byId;
+
+  const byName = treasuries.find(
+    (item: any) =>
+      String(item.name || "").trim().toLowerCase() ===
+      String(paymentForm.tresorerie || "").trim().toLowerCase()
+  );
+
+  return byName || null;
+}
+
+function buildTreasuryPayload() {
+  const treasury = getSelectedTreasury();
+
+  return {
+    treasuryId: treasury?.id || Number(paymentForm.treasuryId || 0) || undefined,
+    treasuryName: treasury?.name || paymentForm.tresorerie || "",
+    tresorerie: treasury?.name || paymentForm.tresorerie || "",
+  };
+}
+
 
 function getFeeCode(fee: any) {
   return String(fee.code || fee.month || fee.mois || fee.libelle || fee.name || "-")
@@ -387,13 +483,18 @@ function saveEditedFees() {
 function openPaymentModal() {
   const selectedFees = getSelectedFeesToPay();
   if (selectedFees.length === 0) return;
+
+  const defaultTreasury = getDefaultTreasury();
+
   setPaymentForm({
     datePaiement: new Date().toISOString().slice(0, 10),
-    tresorerie: "",
+    treasuryId: defaultTreasury ? String(defaultTreasury.id) : "",
+    tresorerie: defaultTreasury?.name || "",
     modePaiement: "Espèce",
     reference: buildPaymentReference(),
     commentaire: "",
   });
+
   setShowPaymentModal(true);
 }
 
@@ -410,6 +511,7 @@ async function payOneFee(fee: any) {
   setActionId(fee.id);
 
   const paymentReference = paymentForm.reference || buildPaymentReference();
+  const treasuryPayload = buildTreasuryPayload();
 
   const paidFee = {
     ...fee,
@@ -419,7 +521,9 @@ async function payOneFee(fee: any) {
     montantTotal: getFeeAmount(fee),
     reste: 0,
     paidAt: paymentForm.datePaiement || new Date().toISOString(),
-    tresorerie: paymentForm.tresorerie,
+    treasuryId: treasuryPayload.treasuryId,
+    treasuryName: treasuryPayload.treasuryName,
+    tresorerie: treasuryPayload.tresorerie,
     modePaiement: paymentForm.modePaiement,
     reference: paymentReference,
     commentaire: paymentForm.commentaire,
@@ -436,6 +540,11 @@ async function payOneFee(fee: any) {
           id: fee.studentFeeId,
           action: "PAY",
           montantPaye: getFeeAmount(fee),
+          datePaiement: paymentForm.datePaiement,
+          modePaiement: paymentForm.modePaiement,
+          reference: paymentReference,
+          commentaire: paymentForm.commentaire,
+          ...treasuryPayload,
         }),
       });
       saved = res.ok;
@@ -457,6 +566,8 @@ async function payOneFee(fee: any) {
           modePaiement: paymentForm.modePaiement,
           reference: paymentReference,
           commentaire: paymentForm.commentaire,
+          schoolYearName: form.anneeScolaire || student.anneeScolaire || "2025-2026",
+          ...treasuryPayload,
         }),
       });
       saved = res.ok;
@@ -488,12 +599,13 @@ async function paySelectedFees() {
   const selectedFees = getSelectedFeesToPay();
   if (selectedFees.length === 0) return;
 
-  if (!paymentForm.tresorerie) {
+  if (!paymentForm.treasuryId && !paymentForm.tresorerie) {
     alert("Veuillez sélectionner une trésorerie avant de valider le paiement.");
     return;
   }
 
   const paymentReference = paymentForm.reference || buildPaymentReference();
+  const treasuryPayload = buildTreasuryPayload();
   if (!paymentForm.reference) {
     setPaymentForm((p) => ({ ...p, reference: paymentReference }));
   }
@@ -510,7 +622,9 @@ async function paySelectedFees() {
     montantTotal: getFeeAmount(fee),
     reste: 0,
     paidAt: paymentForm.datePaiement || new Date().toISOString(),
-    tresorerie: paymentForm.tresorerie,
+    treasuryId: treasuryPayload.treasuryId,
+    treasuryName: treasuryPayload.treasuryName,
+    tresorerie: treasuryPayload.tresorerie,
     modePaiement: paymentForm.modePaiement,
     reference: paymentReference,
     commentaire: paymentForm.commentaire,
@@ -1441,16 +1555,31 @@ function printTicketMultiple(selectedFees: any[]) {
                   <label className="block">
                     <span className="mb-1 block text-slate-600">Trésorerie</span>
                     <select
-                      value={paymentForm.tresorerie}
-                      onChange={(e) => setPaymentForm((p) => ({ ...p, tresorerie: e.target.value }))}
+                      value={paymentForm.treasuryId}
+                      onChange={(e) => {
+                        const treasury = treasuries.find((item: any) => String(item.id) === e.target.value);
+                        setPaymentForm((p) => ({
+                          ...p,
+                          treasuryId: e.target.value,
+                          tresorerie: treasury?.name || "",
+                        }));
+                      }}
                       className="w-full border border-slate-300 px-3 py-2 outline-none focus:border-blue-500"
                     >
-                      <option value="">Choisissez la trésorerie</option>
-                      <option value="Caisse principale">Caisse principale</option>
-                      <option value="Caisse école">Caisse école</option>
-                      <option value="Banque">Banque</option>
-                      <option value="Mobile money">Mobile money</option>
+                      <option value="">
+                        {loadingTreasuries ? "Chargement..." : "Choisissez la trésorerie"}
+                      </option>
+                      {treasuries.map((treasury: any) => (
+                        <option key={treasury.id} value={String(treasury.id)}>
+                          {treasury.isPrincipal ? "⭐ " : ""}{treasury.name}
+                        </option>
+                      ))}
                     </select>
+                    {!loadingTreasuries && treasuries.length === 0 && (
+                      <span className="mt-1 block text-[10px] font-semibold text-red-500">
+                        Aucune trésorerie active. Créez-en une dans la page Trésorerie.
+                      </span>
+                    )}
                   </label>
 
                   <label className="block">
@@ -1525,7 +1654,7 @@ function printTicketMultiple(selectedFees: any[]) {
                   </button>
                   <button
                     type="button"
-                    disabled={actionId !== null || !paymentForm.tresorerie}
+                    disabled={actionId !== null || (!paymentForm.treasuryId && !paymentForm.tresorerie)}
                     onClick={paySelectedFees}
                     className="rounded-[2px] bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                   >

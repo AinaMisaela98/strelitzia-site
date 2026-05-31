@@ -54,9 +54,13 @@ model Permission {
 
 model Student {
   id               Int      @id @default(autoincrement())
-  matricule        String  
+  matricule        String
   site             String   @default("Strelitzia School")
+
+  // Année scolaire de l'étudiant.
+  // IMPORTANT: pour Student, ton ancien code utilise déjà "anneeScolaire".
   anneeScolaire    String   @default("2025-2026")
+
   dateInscription  DateTime
 
   photoUrl         String?
@@ -94,20 +98,21 @@ model Student {
 
   createdAt        DateTime @default(now())
 
+  @@unique([matricule, anneeScolaire])
   @@index([anneeScolaire])
   @@index([classe])
   @@index([section])
   @@index([anneeScolaire, classe, section])
+  @@index([anneeScolaire, createdAt])
   @@index([createdAt])
   @@index([nom])
   @@index([matricule])
-  @@unique([matricule, anneeScolaire])
 }
 
 model Level {
   id             Int         @id @default(autoincrement())
   name           String
-  schoolYearName String
+  schoolYearName String      @default("2025-2026")
   createdAt      DateTime    @default(now())
 
   classes        ClassRoom[]
@@ -121,7 +126,7 @@ model ClassRoom {
   id             Int      @id @default(autoincrement())
   name           String
   levelId        Int
-  schoolYearName String
+  schoolYearName String   @default("2025-2026")
   createdAt      DateTime @default(now())
 
   level          Level    @relation(fields: [levelId], references: [id], onDelete: Cascade)
@@ -130,6 +135,7 @@ model ClassRoom {
   @@unique([name, levelId, schoolYearName])
   @@index([levelId])
   @@index([schoolYearName])
+  @@index([schoolYearName, name])
   @@index([name])
 }
 
@@ -137,7 +143,7 @@ model Serie {
   id             Int       @id @default(autoincrement())
   name           String
   classRoomId    Int
-  schoolYearName String
+  schoolYearName String    @default("2025-2026")
   createdAt      DateTime  @default(now())
 
   classRoom      ClassRoom @relation(fields: [classRoomId], references: [id], onDelete: Cascade)
@@ -145,6 +151,7 @@ model Serie {
   @@unique([name, classRoomId, schoolYearName])
   @@index([classRoomId])
   @@index([schoolYearName])
+  @@index([schoolYearName, name])
   @@index([name])
 }
 
@@ -152,14 +159,15 @@ model FeeModel {
   id             Int      @id @default(autoincrement())
   title          String
   classe         String
-  schoolYearName String
+  schoolYearName String   @default("2025-2026")
   createdAt      DateTime @default(now())
 
   tariffs        FeeTariff[]
 
+  @@unique([title, classe, schoolYearName])
   @@index([schoolYearName])
   @@index([classe])
-  @@unique([title, classe, schoolYearName])
+  @@index([schoolYearName, classe])
 }
 
 model FeeTariff {
@@ -189,9 +197,10 @@ model FeeSpecialTariff {
   @@index([feeTariffId])
   @@index([name])
 }
+
 model TrainingFee {
   id             Int      @id @default(autoincrement())
-  schoolYearName String
+  schoolYearName String   @default("2025-2026")
   site           String   @default("Strelitzia School")
   levelId        Int?
   classe         String
@@ -205,26 +214,15 @@ model TrainingFee {
   @@index([classe])
   @@index([code])
   @@index([feeModelId])
-}
-
-model StudentPayment {
-  id             Int      @id @default(autoincrement())
-  studentId      Int
-  trainingFeeId  Int
-  schoolYearName String
-  montantTotal   Int
-  montantPaye    Int
-  reste          Int
-  status         String   @default("PARTIEL")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  @@index([schoolYearName, classe])
+  @@index([schoolYearName, classe, code])
 }
 
 model StudentFee {
   id             Int      @id @default(autoincrement())
   studentId      Int
   trainingFeeId  Int
-  schoolYearName String
+  schoolYearName String   @default("2025-2026")
   libelle        String
   code           String
   montantTotal   Int
@@ -236,4 +234,86 @@ model StudentFee {
   updatedAt      DateTime @updatedAt
 
   @@unique([studentId, trainingFeeId, schoolYearName])
+  @@index([studentId])
+  @@index([trainingFeeId])
+  @@index([schoolYearName])
+  @@index([schoolYearName, studentId])
+  @@index([schoolYearName, status])
+}
+
+model StudentPayment {
+  id             Int      @id @default(autoincrement())
+  studentId      Int
+  trainingFeeId  Int
+  schoolYearName String   @default("2025-2026")
+  montantTotal   Int
+  montantPaye    Int
+  reste          Int
+  status         String   @default("PARTIEL")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([studentId])
+  @@index([trainingFeeId])
+  @@index([schoolYearName])
+  @@index([schoolYearName, studentId])
+  @@index([schoolYearName, status])
+  @@index([createdAt])
+}
+
+model Treasury {
+  id             Int      @id @default(autoincrement())
+  name           String
+  type           String   @default("CAISSE")
+  active         Boolean  @default(true)
+
+  // Tsy optional intsony: caisse/trésorerie tsirairay dia an'ny année scolaire iray.
+  schoolYearName String   @default("2025-2026")
+  isPrincipal    Boolean  @default(false)
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  movements      TreasuryMovement[]
+
+  // Anarana mitovy azo averina amin'ny année hafa.
+  @@unique([name, schoolYearName])
+  @@index([active])
+  @@index([type])
+  @@index([schoolYearName])
+  @@index([schoolYearName, active])
+  @@index([schoolYearName, isPrincipal])
+}
+
+model TreasuryMovement {
+  id             Int      @id @default(autoincrement())
+  treasuryId     Int
+  movementType   String
+  category       String
+  amount         Int
+  description    String?
+  reference      String?
+  studentId      Int?
+  trainingFeeId  Int?
+  studentFeeId   Int?
+
+  // Tsy optional intsony: mouvement rehetra dia an'ny année scolaire iray.
+  schoolYearName String   @default("2025-2026")
+
+  createdBy      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  treasury       Treasury @relation(fields: [treasuryId], references: [id], onDelete: Cascade)
+
+  @@index([treasuryId])
+  @@index([movementType])
+  @@index([category])
+  @@index([createdAt])
+  @@index([schoolYearName])
+  @@index([studentId])
+  @@index([schoolYearName, treasuryId])
+  @@index([schoolYearName, movementType])
+  @@index([schoolYearName, category])
+  @@index([schoolYearName, createdAt])
 }
