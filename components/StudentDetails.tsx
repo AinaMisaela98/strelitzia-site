@@ -562,7 +562,6 @@ async function payOneFee(fee: any) {
           reste: 0,
           status: "PAYE",
           datePaiement: paymentForm.datePaiement,
-          tresorerie: paymentForm.tresorerie,
           modePaiement: paymentForm.modePaiement,
           reference: paymentReference,
           commentaire: paymentForm.commentaire,
