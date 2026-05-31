@@ -71,6 +71,21 @@ function todayInput() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+function toInputDate(value?: string | null) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function getSummaryDateLabel(from: string, to: string) {
+  if (from && to && from === to) return formatDateFR(from);
+  if (from && to) return `${formatDateFR(from)} au ${formatDateFR(to)}`;
+  if (from) return `Depuis ${formatDateFR(from)}`;
+  if (to) return `Jusqu'au ${formatDateFR(to)}`;
+  return "Toutes les dates";
+}
+
 function formatDateFR(value?: string | null) {
   if (!value) return "-";
   const d = new Date(value);
@@ -210,8 +225,8 @@ export default function TreasuryMovementsPage() {
   const [formMotif, setFormMotif] = useState("");
   const [formDescription, setFormDescription] = useState("");
 
-  const [filterFrom, setFilterFrom] = useState("");
-  const [filterTo, setFilterTo] = useState("");
+  const [filterFrom, setFilterFrom] = useState(todayInput());
+  const [filterTo, setFilterTo] = useState(todayInput());
   const [filterMatricule, setFilterMatricule] = useState("");
   const [filterClasse, setFilterClasse] = useState("");
   const [filterTreasury, setFilterTreasury] = useState("");
@@ -327,7 +342,7 @@ export default function TreasuryMovementsPage() {
   const realBalanceByTreasury = useMemo(() => {
     const map = new Map<number, { name: string; debit: number; credit: number; solde: number }>();
 
-    for (const m of movements) {
+    for (const m of filteredMovements) {
       const key = Number(m.treasuryId || 0);
       const current = map.get(key) || {
         name: m.treasury?.name || `Trésorerie ${key || "-"}`,
@@ -343,7 +358,7 @@ export default function TreasuryMovementsPage() {
     }
 
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [movements]);
+  }, [filteredMovements]);
 
   const realGlobalSolde = realBalanceByTreasury.reduce((sum, item) => sum + item.solde, 0);
 
@@ -408,7 +423,11 @@ export default function TreasuryMovementsPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(getErrorMessage(data, "Erreur enregistrement mouvement"));
 
+      const movementDate = formDate || todayInput();
+
       setShowNewModal(false);
+      setFilterFrom(movementDate);
+      setFilterTo(movementDate);
       setFormDate(todayInput());
       setFormTreasuryId("");
       setFormType("");
@@ -439,8 +458,9 @@ export default function TreasuryMovementsPage() {
   }
 
   function resetFilters() {
-    setFilterFrom("");
-    setFilterTo("");
+    const today = todayInput();
+    setFilterFrom(today);
+    setFilterTo(today);
     setFilterMatricule("");
     setFilterClasse("");
     setFilterTreasury("");
@@ -560,21 +580,21 @@ export default function TreasuryMovementsPage() {
 
         <div className="rounded-[6px] border border-slate-200 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b bg-slate-800 px-3 py-2 text-white">
-            <div className="font-bold">Résumé général</div>
-            <div className="text-[10px] text-slate-200">Solde réel calculé par trésorerie</div>
+            <div className="font-bold">Résumé journalier</div>
+            <div className="text-[10px] text-slate-200">Solde réel calculé selon la date filtrée</div>
           </div>
 
           <div className="grid grid-cols-1 gap-2 p-3 md:grid-cols-3">
             <div className="rounded-[6px] border border-emerald-200 bg-emerald-50 p-3 shadow-sm">
-              <div className="text-[10px] uppercase tracking-wide text-emerald-700">Total Crédit</div>
+              <div className="text-[10px] uppercase tracking-wide text-emerald-700">Total Crédit du jour</div>
               <div className="mt-1 text-[18px] font-black text-emerald-700">{money(totalCredit)}</div>
             </div>
             <div className="rounded-[6px] border border-red-200 bg-red-50 p-3 shadow-sm">
-              <div className="text-[10px] uppercase tracking-wide text-red-700">Total Débit</div>
+              <div className="text-[10px] uppercase tracking-wide text-red-700">Total Débit du jour</div>
               <div className="mt-1 text-[18px] font-black text-red-700">{money(totalDebit)}</div>
             </div>
             <div className="rounded-[6px] border border-slate-200 bg-slate-900 p-3 text-white shadow-sm">
-              <div className="text-[10px] uppercase tracking-wide text-slate-300">Solde réel global</div>
+              <div className="text-[10px] uppercase tracking-wide text-slate-300">Solde réel global du jour</div>
               <div className={realGlobalSolde >= 0 ? "mt-1 text-[18px] font-black text-white" : "mt-1 text-[18px] font-black text-red-200"}>
                 {money(realGlobalSolde)}
               </div>
@@ -583,6 +603,8 @@ export default function TreasuryMovementsPage() {
 
           <div className="border-t px-3 py-2">
             <div className="grid grid-cols-[150px_1fr] gap-y-1 text-[11px]">
+              <span className="text-slate-500">Date du résumé</span>
+              <span className="font-semibold text-slate-800">{getSummaryDateLabel(filterFrom, filterTo)}</span>
               <span className="text-slate-500">Trésorerie filtrée</span>
               <span className="font-semibold text-blue-700">
                 {filterTreasury
