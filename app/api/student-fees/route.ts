@@ -93,7 +93,18 @@ async function findTreasury(body: any, schoolYearName: string) {
 function buildPaymentReference(body: any, studentId: number, trainingFeeId: number) {
   return (
     cleanText(body.reference) ||
+    cleanText(body.idempotencyKey) ||
     `PAY-${studentId}-${trainingFeeId}-${Date.now()}`
+  );
+}
+
+function getRequestIdempotencyKey(req: Request, body: any) {
+  return cleanText(
+    req.headers.get("Idempotency-Key") ||
+      body.idempotencyKey ||
+      body.idempotency ||
+      body.uniqueKey ||
+      ""
   );
 }
 
@@ -105,8 +116,6 @@ async function upsertStudentPayment({
   montantPaye,
   reste,
   status,
-  treasuryId,
-  treasuryName,
 }: {
   studentId: number;
   trainingFeeId: number;
@@ -115,8 +124,6 @@ async function upsertStudentPayment({
   montantPaye: number;
   reste: number;
   status: string;
-  treasuryId?: number | null;
-  treasuryName?: string | null;
 }) {
   const existing = await prisma.studentPayment.findFirst({
     where: {
@@ -126,6 +133,10 @@ async function upsertStudentPayment({
     },
   });
 
+  // IMPORTANT:
+  // Aza asiana treasuryId / treasuryName eto.
+  // Tsy ao amin'ny model StudentPayment ireo champs ireo amin'ny schema-nao.
+  // Ny trésorerie dia ao amin'ny TreasuryMovement ihany.
   if (existing) {
     return prisma.studentPayment.update({
       where: { id: existing.id },
@@ -134,8 +145,6 @@ async function upsertStudentPayment({
         montantPaye,
         reste,
         status,
-        treasuryId: treasuryId || existing.treasuryId || null,
-        treasuryName: treasuryName || existing.treasuryName || null,
       },
     });
   }
@@ -149,8 +158,6 @@ async function upsertStudentPayment({
       montantPaye,
       reste,
       status,
-      treasuryId: treasuryId || null,
-      treasuryName: treasuryName || null,
     },
   });
 }
@@ -162,6 +169,7 @@ async function createTreasuryMovementOnce({
   amount,
   movementType,
   description,
+  idempotencyKey,
 }: {
   body: any;
   user: any;
@@ -169,6 +177,7 @@ async function createTreasuryMovementOnce({
   amount: number;
   movementType: "ENTREE" | "SORTIE";
   description: string;
+  idempotencyKey?: string;
 }) {
   const schoolYearName = await resolveSchoolYearName(
     cleanText(studentFee.schoolYearName || getYearFromBody(body))
@@ -184,14 +193,28 @@ async function createTreasuryMovementOnce({
   const trainingFeeId = Number(studentFee.trainingFeeId || body.trainingFeeId || 0);
   const studentFeeId = Number(studentFee.id || body.studentFeeId || 0);
   const baseReference = buildPaymentReference(body, studentId, trainingFeeId);
-  const uniqueReference = `${baseReference}-${movementType}-${Date.now()}`;
+  const stableReference = cleanText(idempotencyKey) || `${baseReference}-${movementType}`;
 
-  // Important:
-  // On crée TOUJOURS un nouveau mouvement.
-  // Paiement -> ENTREE
-  // Annulation -> SORTIE
-  // Paiement après annulation -> nouvelle ENTREE
-  // Aucun findFirst / aucun overwrite, pour garder l'historique complet.
+  // Sécurité connexion/retry: raha miverina ilay request mitovy dia tsy manao doublon.
+  const existingMovement = await prisma.treasuryMovement.findFirst({
+    where: {
+      treasuryId: treasury.id,
+      movementType,
+      category:
+        movementType === "ENTREE"
+          ? "PAIEMENT_FRAIS"
+          : "ANNULATION_PAIEMENT_FRAIS",
+      reference: stableReference,
+      studentId: studentId || undefined,
+      trainingFeeId: trainingFeeId || undefined,
+      studentFeeId: studentFeeId || undefined,
+      schoolYearName,
+    },
+    orderBy: { id: "desc" },
+  });
+
+  if (existingMovement) return existingMovement;
+
   return prisma.treasuryMovement.create({
     data: {
       treasuryId: treasury.id,
@@ -202,12 +225,13 @@ async function createTreasuryMovementOnce({
           : "ANNULATION_PAIEMENT_FRAIS",
       amount,
       description,
-      reference: uniqueReference,
+      reference: stableReference,
       studentId: studentId || null,
       trainingFeeId: trainingFeeId || null,
       studentFeeId: studentFeeId || null,
       schoolYearName,
       createdBy: user?.email || user?.name || null,
+      createdAt: safeDate(body.createdAt || body.date || body.datePaiement || body.paymentDate),
     },
   });
 }
@@ -223,7 +247,7 @@ async function findPaymentForFee(studentFee: any) {
   });
 }
 
-async function findOriginalPaymentMovement(studentFee: any, payment?: any) {
+async function findOriginalPaymentMovement(studentFee: any) {
   const studentId = Number(studentFee.studentId || 0);
   const trainingFeeId = Number(studentFee.trainingFeeId || 0);
   const studentFeeId = Number(studentFee.id || 0);
@@ -236,12 +260,7 @@ async function findOriginalPaymentMovement(studentFee: any, payment?: any) {
       schoolYearName,
       OR: [
         ...(studentFeeId ? [{ studentFeeId }] : []),
-        ...(studentId && trainingFeeId
-          ? [{ studentId, trainingFeeId }]
-          : []),
-        ...(payment?.treasuryId && studentId && trainingFeeId
-          ? [{ treasuryId: Number(payment.treasuryId), studentId, trainingFeeId }]
-          : []),
+        ...(studentId && trainingFeeId ? [{ studentId, trainingFeeId }] : []),
       ],
     },
     orderBy: { id: "desc" },
@@ -251,13 +270,11 @@ async function findOriginalPaymentMovement(studentFee: any, payment?: any) {
 async function createCancellationMovementOnce({
   user,
   studentFee,
-  payment,
   originalMovement,
   amount,
 }: {
   user: any;
   studentFee: any;
-  payment?: any;
   originalMovement?: any;
   amount: number;
 }) {
@@ -265,11 +282,10 @@ async function createCancellationMovementOnce({
   const trainingFeeId = Number(studentFee.trainingFeeId || 0);
   const studentFeeId = Number(studentFee.id || 0);
   const schoolYearName = String(studentFee.schoolYearName || "");
-  const treasuryId = Number(
-    originalMovement?.treasuryId || payment?.treasuryId || 0
-  );
+  const treasuryId = Number(originalMovement?.treasuryId || 0);
+  const originalMovementId = Number(originalMovement?.id || 0);
 
-  if (!treasuryId || amount <= 0) return null;
+  if (!treasuryId || !originalMovementId || amount <= 0) return null;
 
   const treasury = await prisma.treasury.findFirst({
     where: {
@@ -280,12 +296,27 @@ async function createCancellationMovementOnce({
 
   if (!treasury) return null;
 
-  const reference = `CANCEL-FEE-${studentFeeId}-${schoolYearName}-${Date.now()}`;
+  // Référence stable: ilay paiement ENTREE iray ihany = annulation SORTIE iray ihany.
+  // Raha manao re-paiement avy eo dia ENTREE vaovao manana id vaovao,
+  // ka mahazo annulation vaovao ara-dalàna indray izy.
+  const reference = `CANCEL-FEE-${studentFeeId}-${schoolYearName}-MOVE-${originalMovementId}`;
 
-  // Important:
-  // On crée TOUJOURS une nouvelle sortie d'annulation.
-  // Cela permet l'historique complet:
-  // ENTREE -> SORTIE -> ENTREE -> SORTIE...
+  const alreadyCancelled = await prisma.treasuryMovement.findFirst({
+    where: {
+      treasuryId,
+      movementType: "SORTIE",
+      category: "ANNULATION_PAIEMENT_FRAIS",
+      reference,
+      studentId: studentId || undefined,
+      trainingFeeId: trainingFeeId || undefined,
+      studentFeeId: studentFeeId || undefined,
+      schoolYearName,
+    },
+    orderBy: { id: "desc" },
+  });
+
+  if (alreadyCancelled) return alreadyCancelled;
+
   return prisma.treasuryMovement.create({
     data: {
       treasuryId,
@@ -345,6 +376,7 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json().catch(() => ({}));
+    const idempotencyKey = getRequestIdempotencyKey(req, body);
 
     const studentId = Number(body.studentId || 0);
     const trainingFeeId = Number(body.trainingFeeId || body.sourceTrainingFeeId || 0);
@@ -412,7 +444,10 @@ export async function POST(req: Request) {
 
     if (!treasury) {
       return NextResponse.json(
-        { error: "Veuillez sélectionner une trésorerie valide pour cette année scolaire avant de payer." },
+        {
+          error:
+            "Veuillez sélectionner une trésorerie valide pour cette année scolaire avant de payer.",
+        },
         { status: 400 }
       );
     }
@@ -440,7 +475,7 @@ export async function POST(req: Request) {
             montantPaye: totalPaid,
             reste,
             status,
-            paidAt: status === "PAYE" ? safeDate(body.datePaiement) : existingFee.paidAt,
+            paidAt: status === "PAYE" ? safeDate(body.datePaiement || body.paymentDate || body.date) : existingFee.paidAt,
           },
         })
       : await prisma.studentFee.create({
@@ -454,7 +489,7 @@ export async function POST(req: Request) {
             montantPaye: totalPaid,
             reste,
             status,
-            paidAt: status === "PAYE" ? safeDate(body.datePaiement) : null,
+            paidAt: status === "PAYE" ? safeDate(body.datePaiement || body.paymentDate || body.date) : null,
           },
         });
 
@@ -466,9 +501,9 @@ export async function POST(req: Request) {
       montantPaye: totalPaid,
       reste,
       status,
-      treasuryId: treasury.id,
-      treasuryName: treasury.name,
     });
+
+    const paymentReference = buildPaymentReference(body, studentId, trainingFeeId);
 
     const movement = await createTreasuryMovementOnce({
       body: {
@@ -479,13 +514,14 @@ export async function POST(req: Request) {
         treasuryId: treasury.id,
         treasuryName: treasury.name,
         tresorerie: treasury.name,
-        reference: buildPaymentReference(body, studentId, trainingFeeId),
+        reference: paymentReference,
       },
       user,
       studentFee,
       amount: montantPayeInput,
       movementType: "ENTREE",
       description: `Paiement frais ${code} - ${libelle}`,
+      idempotencyKey: idempotencyKey || `${paymentReference}-ENTREE`,
     });
 
     return NextResponse.json({
@@ -538,6 +574,7 @@ export async function PATCH(req: Request) {
     }
 
     if (action === "PAY") {
+      const idempotencyKey = getRequestIdempotencyKey(req, body);
       const montantPayeInput = toNumber(
         body.montantPaye || existingFee.reste || existingFee.montantTotal
       );
@@ -550,7 +587,10 @@ export async function PATCH(req: Request) {
 
       if (!treasury) {
         return NextResponse.json(
-          { error: "Veuillez sélectionner une trésorerie valide pour cette année scolaire avant de payer." },
+          {
+            error:
+              "Veuillez sélectionner une trésorerie valide pour cette année scolaire avant de payer.",
+          },
           { status: 400 }
         );
       }
@@ -569,7 +609,7 @@ export async function PATCH(req: Request) {
           montantPaye: totalPaid,
           reste,
           status,
-          paidAt: status === "PAYE" ? safeDate(body.datePaiement) : existingFee.paidAt,
+          paidAt: status === "PAYE" ? safeDate(body.datePaiement || body.paymentDate || body.date) : existingFee.paidAt,
         },
       });
 
@@ -581,9 +621,13 @@ export async function PATCH(req: Request) {
         montantPaye: totalPaid,
         reste,
         status,
-        treasuryId: treasury.id,
-        treasuryName: treasury.name,
       });
+
+      const paymentReference = buildPaymentReference(
+        body,
+        existingFee.studentId,
+        existingFee.trainingFeeId
+      );
 
       const movement = await createTreasuryMovementOnce({
         body: {
@@ -594,17 +638,14 @@ export async function PATCH(req: Request) {
           treasuryId: treasury.id,
           treasuryName: treasury.name,
           tresorerie: treasury.name,
-          reference: buildPaymentReference(
-            body,
-            existingFee.studentId,
-            existingFee.trainingFeeId
-          ),
+          reference: paymentReference,
         },
         user,
         studentFee: updatedFee,
         amount: montantPayeInput,
         movementType: "ENTREE",
         description: `Paiement frais ${existingFee.code} - ${existingFee.libelle}`,
+        idempotencyKey: idempotencyKey || `${paymentReference}-ENTREE`,
       });
 
       return NextResponse.json({
@@ -617,13 +658,22 @@ export async function PATCH(req: Request) {
 
     if (action === "CANCEL") {
       const payment = await findPaymentForFee(existingFee);
-      const originalMovement = await findOriginalPaymentMovement(existingFee, payment);
+      const originalMovement = await findOriginalPaymentMovement(existingFee);
 
       const paidAmount = Math.max(
         Number(existingFee.montantPaye || 0),
         Number(payment?.montantPaye || 0),
         Number(originalMovement?.amount || 0)
       );
+
+      // Na miverina fanindroany aza ny request dia tsy mamorona annulation double:
+      // createCancellationMovementOnce no manao contrôle référence stable.
+      const movement = await createCancellationMovementOnce({
+        user,
+        studentFee: existingFee,
+        originalMovement,
+        amount: paidAmount,
+      });
 
       const updatedFee = await prisma.studentFee.update({
         where: { id },
@@ -647,14 +697,6 @@ export async function PATCH(req: Request) {
           },
         });
       }
-
-      const movement = await createCancellationMovementOnce({
-        user,
-        studentFee: existingFee,
-        payment,
-        originalMovement,
-        amount: paidAmount,
-      });
 
       return NextResponse.json({
         success: true,
