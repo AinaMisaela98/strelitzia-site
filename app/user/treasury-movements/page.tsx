@@ -85,6 +85,14 @@ function todayInput() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+function currentInsertionDateTime() {
+  // Heure normale locale du navigateur: date + heure + minute + seconde + milliseconde.
+  // Io no ampiasaina amin'ny ordre d'insertion, fa tsy ilay date opérationnelle fidian'ny utilisateur.
+  const now = new Date();
+  const day = todayInput();
+  return `${day}T${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}.${String(now.getMilliseconds()).padStart(3, "0")}`;
+}
+
 function toInputDate(value?: string | null) {
   if (!value) return "";
   const d = new Date(value);
@@ -272,43 +280,30 @@ function getMovementRealAmount(m: Partial<Movement>) {
 }
 
 
-function parseInsertionTimestamp(value: any) {
-  const raw = String(value || "").trim();
-  if (!raw) return 0;
-
-  const parsed = new Date(raw).getTime();
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 function getMovementInsertionTime(m: Partial<Movement>) {
-  const item: any = m || {};
-
-  // Ordre d'affichage = heure réelle d'insertion, pas seulement la date du paiement.
-  // Izay mouvement voasoratra farany (frais, annulation, mouvement manuel, débit/crédit)
-  // no miseho ambony indrindra.
+  // Ordre logique global: izay action voasoratra FARANY no ambony,
+  // na mouvement manuel, na paiement frais, na annulation, debit na credit.
+  // Tsy ampiasaina intsony ny "date" paiement ho tri principal satria mety daty taloha izy.
   const candidates = [
-    item.insertedAt,
-    item.insertionTime,
-    item.createdAt,
-    item.updatedAt,
-    item.dateInsertion,
-    item.created_at,
-    item.inserted_at,
+    (m as any).insertedAt,
+    (m as any).insertionDateTime,
+    (m as any).dateInsertionTime,
+    (m as any).createdAt,
+    (m as any).created_at,
+    (m as any).updatedAt,
   ];
 
   for (const value of candidates) {
-    const timestamp = parseInsertionTimestamp(value);
-    if (timestamp > 0) return timestamp;
+    const timestamp = new Date(String(value || "")).getTime();
+    if (Number.isFinite(timestamp)) return timestamp;
   }
 
-  // Fallback local: raha misy timestamp tafiditra ao amin'ny id generated.
-  const idText = String(item.id || "");
+  const idText = String(m.id || "");
   const numericParts = idText.match(/\d{10,}/g) || [];
   const lastNumeric = numericParts.length ? Number(numericParts[numericParts.length - 1]) : NaN;
   if (Number.isFinite(lastNumeric)) return lastNumeric;
 
-  // Date simple ihany no fallback farany, satria tsy ampy heure exacte izy.
-  return parseInsertionTimestamp(item.date || item.movementDate || item.paymentDate || item.datePaiement);
+  return 0;
 }
 
 function getStableMovementType(m: Partial<Movement>) {
@@ -576,7 +571,8 @@ export default function TreasuryMovementsPage() {
 
     return movements
       .filter((m) => {
-        const created = new Date(m.createdAt);
+        const insertionTimestamp = getMovementInsertionTime(m);
+        const created = insertionTimestamp > 0 ? new Date(insertionTimestamp) : new Date(m.createdAt);
         const paymentMode = getPaymentModeFromDescription(m.description);
         const studentName = getStudentName(m);
         const studentMatricule = getStudentMatricule(m);
@@ -681,23 +677,23 @@ export default function TreasuryMovementsPage() {
 
     [...movements]
       .sort((a, b) => {
-        const dayA = getMovementDayKey(a.createdAt);
-        const dayB = getMovementDayKey(b.createdAt);
+        const dayA = getMovementDayKey(new Date(getMovementInsertionTime(a) || Date.now()).toISOString());
+        const dayB = getMovementDayKey(new Date(getMovementInsertionTime(b) || Date.now()).toISOString());
         if (dayA !== dayB) return dayA.localeCompare(dayB);
 
         const treasuryA = Number(a.treasuryId || 0);
         const treasuryB = Number(b.treasuryId || 0);
         if (treasuryA !== treasuryB) return treasuryA - treasuryB;
 
-        const da = new Date(a.createdAt).getTime();
-        const db = new Date(b.createdAt).getTime();
+        const da = getMovementInsertionTime(a);
+        const db = getMovementInsertionTime(b);
         if (da !== db) return da - db;
 
         return String(a.id || "").localeCompare(String(b.id || ""), "fr", { numeric: true });
       })
       .forEach((m) => {
         const treasuryKey = Number(m.treasuryId || 0);
-        const dayKey = getMovementDayKey(m.createdAt);
+        const dayKey = getMovementDayKey(new Date(getMovementInsertionTime(m) || Date.now()).toISOString());
         const runningKey = `${treasuryKey}-${dayKey}`;
         const previous = runningByTreasuryAndDay.get(runningKey) || 0;
         const amount = getMovementRealAmount(m);
@@ -729,9 +725,10 @@ export default function TreasuryMovementsPage() {
       const selectedType: "CREDIT" | "DEBIT" = formType === "DEBIT" ? "DEBIT" : "CREDIT";
       const category = formMotif || (selectedType === "CREDIT" ? "ENTREE_MANUELLE" : "DEPENSE");
       const movementLabel = formDescription || getMovementLabel({ category, movementType: selectedType });
-      const insertionDate = formDate || todayInput();
-      const now = new Date();
-      const insertionDateTime = `${insertionDate}T${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}.${String(now.getMilliseconds()).padStart(3, "0")}`;
+      const movementDate = formDate || todayInput();
+      // Date d'insertion réelle: c'est l'heure exacte de l'enregistrement.
+      // Elle sert au tri global avec TOUS les mouvements.
+      const insertionDateTime = currentInsertionDateTime();
 
       const stableReference =
         String(formReference || "").trim() ||
@@ -740,7 +737,7 @@ export default function TreasuryMovementsPage() {
           schoolYearName,
           treasuryId,
           selectedType,
-          insertionDate,
+          movementDate,
           amount,
           category,
           movementLabel,
@@ -754,7 +751,7 @@ export default function TreasuryMovementsPage() {
         treasuryId,
         selectedType,
         amount,
-        insertionDate,
+        movementDate,
         stableReference,
       ]
         .map((item) => String(item ?? "").trim())
@@ -784,12 +781,20 @@ export default function TreasuryMovementsPage() {
         reference: stableReference,
         idempotencyKey,
         schoolYearName,
-        date: insertionDate,
-        movementDate: insertionDate,
-        dateInsertion: insertionDate,
+        // "date" garde la date métier choisie dans le formulaire.
+        date: movementDate,
+        datePaiement: movementDate,
+        movementDate,
+
+        // "createdAt/insertedAt" garde l'ordre réel d'insertion.
+        dateInsertion: todayInput(),
+        createdAt: insertionDateTime,
         insertedAt: insertionDateTime,
         insertionTime: insertionDateTime,
-        createdAt: insertionDateTime,
+        actionAt: insertionDateTime,
+        movementOrderAt: insertionDateTime,
+        sortAt: insertionDateTime,
+        updatedAt: insertionDateTime,
       };
 
       const res = await fetch("/api/treasury-movements", {
@@ -806,10 +811,10 @@ export default function TreasuryMovementsPage() {
 
 
       setShowNewModal(false);
-      // Affichage filtré par date d'insertion: rehefa mamorona mouvement vaovao
-      // dia aseho avy hatrany ilay andro nampidirana azy ihany.
-      setFilterFrom(formDate || todayInput());
-      setFilterTo(formDate || todayInput());
+      // Affichage filtré par vraie date/heure d'insertion:
+      // rehefa mamorona mouvement vaovao dia aseho avy hatrany amin'ny Aujourd'hui.
+      setFilterFrom(todayInput());
+      setFilterTo(todayInput());
       setFormDate(todayInput());
       setFormTreasuryId(mainActiveTreasury?.id ? String(mainActiveTreasury.id) : "");
       setFormType("");
@@ -933,19 +938,19 @@ export default function TreasuryMovementsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-white p-3 text-[12px] text-slate-900 md:p-4">
+    <main className="min-h-screen max-w-full overflow-x-hidden bg-white p-2 text-[12px] text-slate-900 md:p-4">
       <div className="space-y-3">
         <div className="flex flex-col gap-2 border-b border-slate-300 pb-2 md:flex-row md:items-center md:justify-between">
           <h1 className="text-[18px] font-normal text-slate-800">
             Historique du Trésorerie ({filteredMovements.length})
           </h1>
 
-          <div className="flex flex-wrap items-center gap-1">
+          <div className="grid grid-cols-2 gap-1 sm:flex sm:flex-wrap sm:items-center">
             <button
               type="button"
               onClick={loadData}
               disabled={loading}
-              className="h-[30px] rounded-[3px] bg-cyan-600 px-3 text-[12px] font-semibold text-white hover:bg-cyan-700 disabled:opacity-60"
+              className="h-[30px] w-full rounded-[3px] bg-cyan-600 px-2 text-[11px] sm:w-auto sm:px-3 sm:text-[12px] font-semibold text-white hover:bg-cyan-700 disabled:opacity-60"
             >
               ⟳ {loading ? "Chargement" : "Actualiser"}
             </button>
@@ -953,7 +958,7 @@ export default function TreasuryMovementsPage() {
             <select
               value={site}
               onChange={(e) => setSite(e.target.value)}
-              className="h-[30px] rounded-[3px] border border-slate-800 bg-slate-800 px-2 text-[12px] font-semibold text-white"
+              className="h-[30px] w-full rounded-[3px] border border-slate-800 bg-slate-800 px-2 text-[11px] sm:w-auto sm:text-[12px] font-semibold text-white"
             >
               <option value={SITE_NAME}>Sites : Strelitzia School</option>
             </select>
@@ -961,7 +966,7 @@ export default function TreasuryMovementsPage() {
             <select
               value={schoolYearName}
               onChange={(e) => setSchoolYearName(e.target.value)}
-              className="h-[30px] rounded-[3px] border border-slate-800 bg-slate-800 px-2 text-[12px] font-semibold text-white"
+              className="h-[30px] w-full rounded-[3px] border border-slate-800 bg-slate-800 px-2 text-[11px] sm:w-auto sm:text-[12px] font-semibold text-white"
             >
               <option value="2025-2026">Année scolaire : 2025-2026</option>
               <option value="2026-2027">Année scolaire : 2026-2027</option>
@@ -970,7 +975,7 @@ export default function TreasuryMovementsPage() {
             <button
               type="button"
               onClick={exportCsv}
-              className="h-[30px] rounded-[3px] bg-blue-600 px-3 text-[12px] font-semibold text-white hover:bg-blue-700"
+              className="h-[30px] w-full rounded-[3px] bg-blue-600 px-2 text-[11px] sm:w-auto sm:px-3 sm:text-[12px] font-semibold text-white hover:bg-blue-700"
             >
               Export Excel
             </button>
@@ -981,7 +986,7 @@ export default function TreasuryMovementsPage() {
                 setFormTreasuryId((current) => current || (mainActiveTreasury?.id ? String(mainActiveTreasury.id) : ""));
                 setShowNewModal(true);
               }}
-              className="h-[30px] rounded-[3px] border border-slate-800 bg-white px-3 text-[12px] font-semibold text-slate-800 hover:bg-slate-100"
+              className="h-[30px] w-full rounded-[3px] border border-slate-800 bg-white px-2 text-[11px] sm:w-auto sm:px-3 sm:text-[12px] font-semibold text-slate-800 hover:bg-slate-100"
             >
               ⊕ Nouveau Mouvement
             </button>
@@ -1065,12 +1070,12 @@ export default function TreasuryMovementsPage() {
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex w-full items-center gap-2 md:w-auto">
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="rechercher élève, frais, matricule, classe..."
-              className="h-[30px] w-full max-w-[320px] border border-slate-300 px-2 outline-none focus:border-cyan-600"
+              className="h-[34px] min-w-0 flex-1 border border-slate-300 px-2 outline-none focus:border-cyan-600 md:h-[30px] md:max-w-[320px]"
             />
             <button
               type="button"
@@ -1196,7 +1201,7 @@ export default function TreasuryMovementsPage() {
                       <td className="border px-2 py-1 align-top">
                         <div className="max-w-[110px] truncate" title={m.createdBy || ""}>{m.createdBy || "-"}</div>
                       </td>
-                      <td className="border px-2 py-1 align-top whitespace-nowrap">{formatDateTimeFR(m.createdAt)}</td>
+                      <td className="border px-2 py-1 align-top whitespace-nowrap">{formatDateTimeFR((m as any).insertedAt || (m as any).insertionTime || (m as any).actionAt || m.createdAt)}</td>
                       <td className="border px-2 py-1 align-top text-center">
                         <button
                           type="button"
@@ -1225,14 +1230,14 @@ export default function TreasuryMovementsPage() {
             const balance = balanceByMovement.get(getMovementStorageKey(m)) || { before: 0, debit: 0, credit: 0, after: 0 };
 
             return (
-              <div key={`mobile-${m.id}`} className="rounded-[6px] border border-slate-200 bg-white p-3 shadow-sm">
+              <div key={`mobile-${m.id}`} className="w-full max-w-full overflow-hidden rounded-[6px] border border-slate-200 bg-white p-2 shadow-sm sm:p-3">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="truncate text-[12px] font-bold text-slate-900">
+                    <p className="break-words text-[12px] font-bold text-slate-900">
                       {isPaymentFee ? feeLabel : getMovementLabel(m)}
                     </p>
                     <p className="text-[10px] text-slate-500">
-                      {formatDateFR(m.createdAt)} • {m.reference || `N° ${m.id}`} • {m.treasury?.name || "-"}
+                      {formatDateTimeFR((m as any).insertedAt || (m as any).insertionTime || m.createdAt)} • {m.reference || `N° ${m.id}`} • {m.treasury?.name || "-"}
                     </p>
                   </div>
                   <span
@@ -1246,13 +1251,13 @@ export default function TreasuryMovementsPage() {
                   </span>
                 </div>
 
-                <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                <div className="mt-2 grid grid-cols-1 gap-2 text-[11px] min-[380px]:grid-cols-2">
                   <div>
                     <span className="text-slate-500">Élève</span>
                     <p className="font-semibold text-blue-700">{studentName}</p>
                     <p className="text-[10px] text-slate-500">{matricule} • {studentClass}</p>
                   </div>
-                  <div className="text-right">
+                  <div className="text-left min-[380px]:text-right">
                     <span className="text-slate-500">Montant</span>
                     <p className={isCreditMovement(m) ? "font-black text-emerald-700" : "font-black text-red-700"}>
                       {money(getMovementRealAmount(m))}
@@ -1276,14 +1281,14 @@ export default function TreasuryMovementsPage() {
         </div>      </div>
 
       {showNewModal && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/55 px-3 pt-[90px]">
-          <div className="w-full max-w-[640px] overflow-hidden rounded-[3px] bg-white shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/55 px-2 py-4 md:px-3 md:pt-[90px]">
+          <div className="w-full max-w-[640px] overflow-hidden rounded-[8px] bg-white shadow-2xl md:rounded-[3px]">
             <div className="flex h-[50px] items-center justify-between bg-slate-800 px-4 text-white">
               <h2 className="text-[16px] font-bold">Nouveau Mouvement</h2>
               <button type="button" onClick={() => setShowNewModal(false)} className="text-slate-300 hover:text-white">×</button>
             </div>
 
-            <form onSubmit={saveMovement} className="p-4">
+            <form onSubmit={saveMovement} className="max-h-[calc(100dvh-110px)] overflow-y-auto p-3 md:p-4">
               <div className="grid grid-cols-1 gap-x-6 gap-y-3 md:grid-cols-2">
                 <label className="space-y-1">
                   <span>Date</span>
@@ -1337,8 +1342,8 @@ export default function TreasuryMovementsPage() {
                   <input value={formDescription} onChange={(e) => setFormDescription(e.target.value)} className="h-[26px] w-full border px-2" />
                 </label>
               </div>
-              <div className="mt-4 border-t pt-3 text-right">
-                <button type="button" onClick={() => setShowNewModal(false)} className="mr-2 rounded-[3px] bg-slate-600 px-4 py-2 text-white">Fermer</button>
+              <div className="mt-4 flex flex-col-reverse gap-2 border-t pt-3 text-right sm:flex-row sm:justify-end">
+                <button type="button" onClick={() => setShowNewModal(false)} className="rounded-[3px] bg-slate-600 px-4 py-2 text-white">Fermer</button>
                 <button disabled={saving} className="rounded-[3px] bg-blue-600 px-4 py-2 text-white disabled:opacity-60">
                   {saving ? "Enregistrement..." : "Enregistrer"}
                 </button>
@@ -1408,8 +1413,8 @@ export default function TreasuryMovementsPage() {
                   </select>
                 </label>
               </div>
-              <div className="mt-4 border-t pt-3 text-right">
-                <button type="button" onClick={() => setShowFilterModal(false)} className="mr-2 rounded-[3px] bg-slate-600 px-4 py-2 text-white">Fermer</button>
+              <div className="mt-4 flex flex-col-reverse gap-2 border-t pt-3 text-right sm:flex-row sm:justify-end">
+                <button type="button" onClick={() => setShowFilterModal(false)} className="rounded-[3px] bg-slate-600 px-4 py-2 text-white">Fermer</button>
                 <button type="button" onClick={resetFilters} className="mr-2 rounded-[3px] bg-orange-500 px-4 py-2 text-white">Réinitialiser</button>
                 <button type="button" onClick={() => setShowFilterModal(false)} className="rounded-[3px] bg-blue-600 px-4 py-2 text-white">Filtrer</button>
               </div>
