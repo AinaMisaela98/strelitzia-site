@@ -7,11 +7,24 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum Role {
-  ADMIN
-  DIRECTEUR
-  SECRETAIRE
+model UserRole {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  label       String
+  description String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       User[]
+  permissions Permission[]
+
+  @@index([active])
+  @@index([name])
+
+  @@map("UserRole")
 }
+
 
 enum Sexe {
   Masculin
@@ -33,23 +46,33 @@ model User {
   name      String
   email     String   @unique
   password  String
-  role      Role     @default(SECRETAIRE)
+  // Ancien champ gardé pour compatibilité avec le code actuel (login/sidebar/reçus).
+  role      String   @default("SECRETAIRE")
+
+  // Nouveau rôle personnalisable créé par l’admin.
+  roleId    Int?
+  roleRef   UserRole? @relation(fields: [roleId], references: [id], onDelete: SetNull)
+
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
 
   @@index([email])
   @@index([active])
   @@index([role])
+  @@index([roleId])
 }
 
 model Permission {
   id      Int     @id @default(autoincrement())
-  role    Role
+  roleId  Int
   action  String
   allowed Boolean @default(false)
 
-  @@unique([role, action])
-  @@index([role])
+  role    UserRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, action])
+  @@index([roleId])
+  @@index([action])
 }
 
 model Student {

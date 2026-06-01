@@ -8,10 +8,19 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-enum Role {
-  ADMIN
-  DIRECTEUR
-  SECRETAIRE
+model UserRole {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  label       String
+  description String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       User[]
+  permissions Permission[]
+
+  @@map("UserRole")
 }
 
 enum Sexe {
@@ -34,23 +43,36 @@ model User {
   name      String
   email     String   @unique
   password  String
-  role      Role     @default(SECRETAIRE)
+
+  // Champ ancien conservé pour ne pas casser le login, la sidebar et les reçus.
+  // Il garde ADMIN / DIRECTEUR / SECRETAIRE ou le nom du rôle personnalisé.
+  role      String   @default("SECRETAIRE")
+
+  // Nouveau rôle personnalisable créé par l'ADMIN.
+  // Table réelle en production: "UserRole" pour éviter le conflit avec l'ancien enum PostgreSQL "Role".
+  roleId    Int?
+  roleRef   UserRole? @relation(fields: [roleId], references: [id], onDelete: SetNull)
+
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
 
   @@index([email])
   @@index([active])
   @@index([role])
+  @@index([roleId])
 }
 
 model Permission {
   id      Int     @id @default(autoincrement())
-  role    Role
+  roleId  Int
   action  String
   allowed Boolean @default(false)
 
-  @@unique([role, action])
-  @@index([role])
+  role    UserRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, action])
+  @@index([roleId])
+  @@index([action])
 }
 
 model Student {
