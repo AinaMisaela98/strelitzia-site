@@ -7,6 +7,10 @@ type Treasury = {
   name: string;
   type?: string | null;
   active?: boolean | null;
+  principal?: boolean | null;
+  isPrincipal?: boolean | null;
+  isDefault?: boolean | null;
+  default?: boolean | null;
 };
 
 type Movement = {
@@ -425,6 +429,23 @@ export default function TreasuryMovementsPage() {
   const [filterCategory, setFilterCategory] = useState("");
   const [filterPaymentMode, setFilterPaymentMode] = useState("");
 
+  const activeTreasuries = useMemo(() => treasuries.filter((t) => t.active !== false), [treasuries]);
+
+  const mainActiveTreasury = useMemo(() => {
+    return (
+      activeTreasuries.find((t) => t.principal === true || t.isPrincipal === true || t.isDefault === true || t.default === true) ||
+      activeTreasuries[0] ||
+      treasuries[0] ||
+      null
+    );
+  }, [activeTreasuries, treasuries]);
+
+  useEffect(() => {
+    if (!formTreasuryId && mainActiveTreasury?.id) {
+      setFormTreasuryId(String(mainActiveTreasury.id));
+    }
+  }, [formTreasuryId, mainActiveTreasury]);
+
   async function loadData() {
     setLoading(true);
     try {
@@ -442,7 +463,16 @@ export default function TreasuryMovementsPage() {
       if (!treasuryRes.ok) throw new Error(getErrorMessage(treasuryJson, "Erreur chargement trésoreries"));
       if (!movementRes.ok) throw new Error(getErrorMessage(movementJson, "Erreur chargement mouvements"));
 
-      setTreasuries(Array.isArray(treasuryJson.treasuries) ? treasuryJson.treasuries : []);
+      const loadedTreasuries = Array.isArray(treasuryJson.treasuries) ? treasuryJson.treasuries : [];
+      setTreasuries(loadedTreasuries);
+
+      const activeMain =
+        loadedTreasuries.find((t: Treasury) => t.active !== false && (t.principal === true || t.isPrincipal === true || t.isDefault === true || t.default === true)) ||
+        loadedTreasuries.find((t: Treasury) => t.active !== false) ||
+        loadedTreasuries[0];
+      if (activeMain?.id && !formTreasuryId) {
+        setFormTreasuryId(String(activeMain.id));
+      }
       const apiMovements = Array.isArray(movementJson.movements) ? movementJson.movements : [];
       let localMovements: Movement[] = [];
       try {
@@ -488,7 +518,14 @@ export default function TreasuryMovementsPage() {
         }
       }
 
-      setMovements(Array.from(unique.values()));
+      setMovements(
+        Array.from(unique.values()).sort((a, b) => {
+          const db = getMovementInsertionTime(b);
+          const da = getMovementInsertionTime(a);
+          if (db !== da) return db - da;
+          return String(b.id || "").localeCompare(String(a.id || ""), "fr", { numeric: true });
+        })
+      );
     } catch (error) {
       console.error("TREASURY_MOVEMENTS_LOAD_ERROR", error);
       alert(error instanceof Error ? error.message : "Erreur chargement mouvements");
@@ -746,7 +783,7 @@ export default function TreasuryMovementsPage() {
       setFilterFrom(formDate || todayInput());
       setFilterTo(formDate || todayInput());
       setFormDate(todayInput());
-      setFormTreasuryId("");
+      setFormTreasuryId(mainActiveTreasury?.id ? String(mainActiveTreasury.id) : "");
       setFormType("");
       setFormAmount("");
       setFormReference(`TR-${Date.now()}`);
@@ -912,7 +949,10 @@ export default function TreasuryMovementsPage() {
 
             <button
               type="button"
-              onClick={() => setShowNewModal(true)}
+              onClick={() => {
+                setFormTreasuryId((current) => current || (mainActiveTreasury?.id ? String(mainActiveTreasury.id) : ""));
+                setShowNewModal(true);
+              }}
               className="h-[30px] rounded-[3px] border border-slate-800 bg-white px-3 text-[12px] font-semibold text-slate-800 hover:bg-slate-100"
             >
               ⊕ Nouveau Mouvement
@@ -1232,9 +1272,11 @@ export default function TreasuryMovementsPage() {
                 <label className="space-y-1">
                   <span>Trésorerie</span>
                   <select value={formTreasuryId} onChange={(e) => setFormTreasuryId(e.target.value)} className="h-[26px] w-full border px-2">
-                    <option value="">Choisissez une trésorerie</option>
-                    {treasuries.filter((t) => t.active !== false).map((t) => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
+                    {!mainActiveTreasury && <option value="">Choisissez une trésorerie</option>}
+                    {activeTreasuries.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}{String(t.id) === String(mainActiveTreasury?.id) ? " (principale)" : ""}
+                      </option>
                     ))}
                   </select>
                 </label>
