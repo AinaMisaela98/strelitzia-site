@@ -219,9 +219,12 @@ function normalizeDateOnly(value: any) {
   return parsed.toISOString().slice(0, 10);
 }
 
-function buildInsertionDateTime(dateOnly: string) {
+function buildInsertionDateTime(_dateOnly?: string) {
+  // Filaharana logique ao amin'ny Trésorerie mouvements:
+  // izay action natao farany (paiement na annulation) no ambony indrindra,
+  // na inona na inona date paiement nosafidiana.
   const now = new Date();
-  return `${dateOnly}T${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}.${String(now.getMilliseconds()).padStart(3, "0")}`;
+  return now.toISOString();
 }
 
 function getSelectedPaymentDate() {
@@ -328,6 +331,10 @@ async function createFeeTreasuryMovement(fee: any, operation: "CREDIT" | "DEBIT"
       dateInsertion: movementDate,
       insertedAt: insertionDateTime,
       createdAt: insertionDateTime,
+      actionAt: insertionDateTime,
+      updatedAt: insertionDateTime,
+      movementOrderAt: insertionDateTime,
+      sortAt: insertionDateTime,
       // Champs volontairement redondants pour que la page Trésorerie l'affiche correctement.
       // Pour annulation: operation = DEBIT sur tous les champs.
       type: operation,
@@ -819,6 +826,11 @@ async function payOneFee(fee: any) {
           paymentDate,
           movementDate: paymentDate,
           dateInsertion: paymentDate,
+          insertedAt: buildInsertionDateTime(paymentDate),
+          createdAt: buildInsertionDateTime(paymentDate),
+          actionAt: buildInsertionDateTime(paymentDate),
+          movementOrderAt: buildInsertionDateTime(paymentDate),
+          sortAt: buildInsertionDateTime(paymentDate),
           modePaiement: paymentForm.modePaiement,
           reference: paymentReference,
           commentaire: paymentForm.commentaire,
@@ -845,6 +857,11 @@ async function payOneFee(fee: any) {
           paymentDate,
           movementDate: paymentDate,
           dateInsertion: paymentDate,
+          insertedAt: buildInsertionDateTime(paymentDate),
+          createdAt: buildInsertionDateTime(paymentDate),
+          actionAt: buildInsertionDateTime(paymentDate),
+          movementOrderAt: buildInsertionDateTime(paymentDate),
+          sortAt: buildInsertionDateTime(paymentDate),
           modePaiement: paymentForm.modePaiement,
           reference: paymentReference,
           commentaire: paymentForm.commentaire,
@@ -1004,6 +1021,11 @@ async function cancelOnePayment(fee: any) {
         paymentDate: cancelDate,
         movementDate: cancelDate,
         dateInsertion: cancelDate,
+        insertedAt: buildInsertionDateTime(cancelDate),
+        createdAt: buildInsertionDateTime(cancelDate),
+        actionAt: buildInsertionDateTime(cancelDate),
+        movementOrderAt: buildInsertionDateTime(cancelDate),
+        sortAt: buildInsertionDateTime(cancelDate),
         studentId: student.id,
         trainingFeeId: fee.trainingFeeId || fee.sourceTrainingFeeId,
         schoolYearName: form.anneeScolaire || student.anneeScolaire || fee.schoolYearName || "2025-2026",
