@@ -939,6 +939,44 @@ export default function TreasuryMovementsPage() {
 
   return (
     <main className="min-h-screen max-w-full overflow-x-hidden bg-white p-2 text-[12px] text-slate-900 md:p-4">
+      <style>{`
+        .movement-table-scroll {
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: thin;
+          scrollbar-color: #64748b #e2e8f0;
+        }
+
+        .movement-table-scroll::-webkit-scrollbar {
+          height: 8px;
+          width: 8px;
+        }
+
+        .movement-table-scroll::-webkit-scrollbar-track {
+          background: #e2e8f0;
+          border-radius: 999px;
+        }
+
+        .movement-table-scroll::-webkit-scrollbar-thumb {
+          background: #64748b;
+          border-radius: 999px;
+        }
+
+        @media screen and (max-width: 768px) {
+          .movement-table-scroll {
+            max-height: calc(100dvh - 320px) !important;
+            border-radius: 10px !important;
+          }
+
+          .movement-table-scroll table {
+            min-width: 1380px !important;
+          }
+
+          .movement-table-scroll th,
+          .movement-table-scroll td {
+            line-height: 1.15 !important;
+          }
+        }
+      `}</style>
       <div className="space-y-3">
         <div className="flex flex-col gap-2 border-b border-slate-300 pb-2 md:flex-row md:items-center md:justify-between">
           <h1 className="text-[18px] font-normal text-slate-800">
@@ -1088,9 +1126,9 @@ export default function TreasuryMovementsPage() {
           </div>
         </div>
 
-        <div className="hidden overflow-x-auto rounded-[4px] border border-slate-300 bg-white md:block">
-          <table className="w-full min-w-[1580px] border-collapse text-[10.5px]">
-            <thead>
+        <div className="movement-table-scroll block max-h-[70vh] w-full overflow-auto rounded-[6px] border border-slate-300 bg-white shadow-sm md:max-h-none">
+          <table className="w-full min-w-[1580px] border-collapse text-[9.5px] md:text-[10.5px]">
+            <thead className="sticky top-0 z-20">
               <tr className="bg-slate-800 text-left text-white">
                 {[
                   "A-S",
@@ -1111,7 +1149,7 @@ export default function TreasuryMovementsPage() {
                   "Date Enregistrement",
                   "Actions",
                 ].map((h) => (
-                  <th key={h} className="border border-slate-600 px-2 py-[6px] font-bold whitespace-nowrap">
+                  <th key={h} className="border border-slate-600 px-2 py-[5px] font-semibold whitespace-nowrap md:py-[6px]">
                     {h}
                   </th>
                 ))}
@@ -1137,20 +1175,20 @@ export default function TreasuryMovementsPage() {
 
                   return (
                     <tr key={m.id} className="hover:bg-cyan-50">
-                      <td className="border px-2 py-1 align-top whitespace-nowrap">{m.schoolYearName || schoolYearName}</td>
-                      <td className="border px-2 py-1 align-top whitespace-nowrap">{formatDateFR(m.createdAt)}</td>
-                      <td className="border px-2 py-1 align-top">
+                      <td className="border px-1.5 py-[3px] align-top md:px-2 md:py-1 whitespace-nowrap">{m.schoolYearName || schoolYearName}</td>
+                      <td className="border px-1.5 py-[3px] align-top md:px-2 md:py-1 whitespace-nowrap">{formatDateFR(m.createdAt)}</td>
+                      <td className="border px-1.5 py-[3px] align-top md:px-2 md:py-1">
                         <div className="max-w-[120px] truncate font-semibold text-slate-700" title={m.reference || ""}>
                           {m.reference || "-"}
                         </div>
                       </td>
-                      <td className="border px-2 py-1 align-top">
+                      <td className="border px-1.5 py-[3px] align-top md:px-2 md:py-1">
                         <div className="max-w-[130px] truncate font-bold text-cyan-700" title={m.treasury?.name || ""}>
                           {m.treasury?.name || "-"}
                         </div>
                       </td>
-                      <td className="border px-2 py-1 align-top text-center font-semibold text-slate-800">{matricule}</td>
-                      <td className="border px-2 py-1 align-top">
+                      <td className="border px-1.5 py-[3px] align-top md:px-2 md:py-1 text-center font-semibold text-slate-800">{matricule}</td>
+                      <td className="border px-1.5 py-[3px] align-top md:px-2 md:py-1">
                         <div className="max-w-[230px] truncate font-semibold text-slate-900" title={feeLabel}>
                           {feeLabel}
                         </div>
@@ -1160,7 +1198,7 @@ export default function TreasuryMovementsPage() {
                           </div>
                         )}
                       </td>
-                      <td className="border px-2 py-1 align-top">
+                      <td className="border px-1.5 py-[3px] align-top md:px-2 md:py-1">
                         <div className="max-w-[190px] truncate font-bold text-blue-700" title={studentName}>
                           {studentName}
                         </div>
@@ -1168,7 +1206,7 @@ export default function TreasuryMovementsPage() {
                           {matricule !== "-" ? `${matricule} • ` : ""}{studentClass}
                         </div>
                       </td>
-                      <td className="border px-2 py-1 align-top text-center">
+                      <td className="border px-1.5 py-[3px] align-top md:px-2 md:py-1 text-center">
                         <span
                           className={
                             isCreditMovement(m)
@@ -1179,30 +1217,30 @@ export default function TreasuryMovementsPage() {
                           {getMovementTypeLabel(getStableMovementType(m))}
                         </span>
                       </td>
-                      <td className="border px-2 py-1 align-top whitespace-nowrap">{feeCode}</td>
-                      <td className="border px-2 py-1 align-top whitespace-nowrap">{modePaiement}</td>
-                      <td className="border px-2 py-1 align-top text-right whitespace-nowrap">{money(balance.before)}</td>
-                      <td className="border px-2 py-1 align-top text-right font-bold text-red-700 whitespace-nowrap">
+                      <td className="border px-1.5 py-[3px] align-top md:px-2 md:py-1 whitespace-nowrap">{feeCode}</td>
+                      <td className="border px-1.5 py-[3px] align-top md:px-2 md:py-1 whitespace-nowrap">{modePaiement}</td>
+                      <td className="border px-1.5 py-[3px] align-top md:px-2 md:py-1 text-right whitespace-nowrap">{money(balance.before)}</td>
+                      <td className="border px-1.5 py-[3px] align-top md:px-2 md:py-1 text-right font-bold text-red-700 whitespace-nowrap">
                         {balance.debit ? money(balance.debit) : "-"}
                       </td>
-                      <td className="border px-2 py-1 align-top text-right font-bold text-emerald-700 whitespace-nowrap">
+                      <td className="border px-1.5 py-[3px] align-top md:px-2 md:py-1 text-right font-bold text-emerald-700 whitespace-nowrap">
                         {balance.credit ? money(balance.credit) : "-"}
                       </td>
                       <td
                         className={
                           balance.after >= 0
-                            ? "border px-2 py-1 align-top text-right font-bold text-blue-700 whitespace-nowrap"
-                            : "border px-2 py-1 align-top text-right font-black text-red-700 bg-red-50 whitespace-nowrap"
+                            ? "border px-1.5 py-[3px] align-top md:px-2 md:py-1 text-right font-bold text-blue-700 whitespace-nowrap"
+                            : "border px-1.5 py-[3px] align-top md:px-2 md:py-1 text-right font-black text-red-700 bg-red-50 whitespace-nowrap"
                         }
                       >
                         {money(balance.after)}
                         {balance.after < 0 && <div className="text-[8px] font-bold text-red-600">⚠ moins</div>}
                       </td>
-                      <td className="border px-2 py-1 align-top">
+                      <td className="border px-1.5 py-[3px] align-top md:px-2 md:py-1">
                         <div className="max-w-[110px] truncate" title={m.createdBy || ""}>{m.createdBy || "-"}</div>
                       </td>
-                      <td className="border px-2 py-1 align-top whitespace-nowrap">{formatDateTimeFR((m as any).insertedAt || (m as any).insertionTime || (m as any).actionAt || m.createdAt)}</td>
-                      <td className="border px-2 py-1 align-top text-center">
+                      <td className="border px-1.5 py-[3px] align-top md:px-2 md:py-1 whitespace-nowrap">{formatDateTimeFR((m as any).insertedAt || (m as any).insertionTime || (m as any).actionAt || m.createdAt)}</td>
+                      <td className="border px-1.5 py-[3px] align-top md:px-2 md:py-1 text-center">
                         <button
                           type="button"
                           onClick={() => deleteMovement(m.id)}
@@ -1219,7 +1257,7 @@ export default function TreasuryMovementsPage() {
           </table>
         </div>
 
-        <div className="grid gap-2 md:hidden">
+        <div className="hidden">
           {filteredMovements.map((m) => {
             const studentName = getStudentName(m);
             const matricule = getStudentMatricule(m);
