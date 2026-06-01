@@ -85,12 +85,6 @@ function todayInput() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function currentInsertionDateTime() {
-  const now = new Date();
-  const day = todayInput();
-  return `${day}T${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}.${String(now.getMilliseconds()).padStart(3, "0")}`;
-}
-
 function toInputDate(value?: string | null) {
   if (!value) return "";
   const d = new Date(value);
@@ -278,30 +272,43 @@ function getMovementRealAmount(m: Partial<Movement>) {
 }
 
 
+function parseInsertionTimestamp(value: any) {
+  const raw = String(value || "").trim();
+  if (!raw) return 0;
+
+  const parsed = new Date(raw).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function getMovementInsertionTime(m: Partial<Movement>) {
-  // Ordre logique global: izay action voasoratra FARANY no ambony,
-  // na mouvement manuel, na paiement frais, na annulation, debit na credit.
-  // Tsy ampiasaina intsony ny "date" paiement ho tri principal satria mety daty taloha izy.
+  const item: any = m || {};
+
+  // Ordre d'affichage = heure réelle d'insertion, pas seulement la date du paiement.
+  // Izay mouvement voasoratra farany (frais, annulation, mouvement manuel, débit/crédit)
+  // no miseho ambony indrindra.
   const candidates = [
-    (m as any).insertedAt,
-    (m as any).insertionDateTime,
-    (m as any).dateInsertionTime,
-    (m as any).createdAt,
-    (m as any).created_at,
-    (m as any).updatedAt,
+    item.insertedAt,
+    item.insertionTime,
+    item.createdAt,
+    item.updatedAt,
+    item.dateInsertion,
+    item.created_at,
+    item.inserted_at,
   ];
 
   for (const value of candidates) {
-    const timestamp = new Date(String(value || "")).getTime();
-    if (Number.isFinite(timestamp)) return timestamp;
+    const timestamp = parseInsertionTimestamp(value);
+    if (timestamp > 0) return timestamp;
   }
 
-  const idText = String(m.id || "");
+  // Fallback local: raha misy timestamp tafiditra ao amin'ny id generated.
+  const idText = String(item.id || "");
   const numericParts = idText.match(/\d{10,}/g) || [];
   const lastNumeric = numericParts.length ? Number(numericParts[numericParts.length - 1]) : NaN;
   if (Number.isFinite(lastNumeric)) return lastNumeric;
 
-  return 0;
+  // Date simple ihany no fallback farany, satria tsy ampy heure exacte izy.
+  return parseInsertionTimestamp(item.date || item.movementDate || item.paymentDate || item.datePaiement);
 }
 
 function getStableMovementType(m: Partial<Movement>) {
@@ -682,8 +689,8 @@ export default function TreasuryMovementsPage() {
         const treasuryB = Number(b.treasuryId || 0);
         if (treasuryA !== treasuryB) return treasuryA - treasuryB;
 
-        const da = getMovementInsertionTime(a);
-        const db = getMovementInsertionTime(b);
+        const da = new Date(a.createdAt).getTime();
+        const db = new Date(b.createdAt).getTime();
         if (da !== db) return da - db;
 
         return String(a.id || "").localeCompare(String(b.id || ""), "fr", { numeric: true });
@@ -722,10 +729,9 @@ export default function TreasuryMovementsPage() {
       const selectedType: "CREDIT" | "DEBIT" = formType === "DEBIT" ? "DEBIT" : "CREDIT";
       const category = formMotif || (selectedType === "CREDIT" ? "ENTREE_MANUELLE" : "DEPENSE");
       const movementLabel = formDescription || getMovementLabel({ category, movementType: selectedType });
-      const movementDate = formDate || todayInput();
-      // Date d'insertion réelle: c'est l'heure exacte de l'enregistrement.
-      // Elle sert au tri global avec TOUS les mouvements.
-      const insertionDateTime = currentInsertionDateTime();
+      const insertionDate = formDate || todayInput();
+      const now = new Date();
+      const insertionDateTime = `${insertionDate}T${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}.${String(now.getMilliseconds()).padStart(3, "0")}`;
 
       const stableReference =
         String(formReference || "").trim() ||
@@ -734,7 +740,7 @@ export default function TreasuryMovementsPage() {
           schoolYearName,
           treasuryId,
           selectedType,
-          movementDate,
+          insertionDate,
           amount,
           category,
           movementLabel,
@@ -748,7 +754,7 @@ export default function TreasuryMovementsPage() {
         treasuryId,
         selectedType,
         amount,
-        movementDate,
+        insertionDate,
         stableReference,
       ]
         .map((item) => String(item ?? "").trim())
@@ -778,15 +784,12 @@ export default function TreasuryMovementsPage() {
         reference: stableReference,
         idempotencyKey,
         schoolYearName,
-        // "date" garde la date métier choisie dans le formulaire.
-        date: movementDate,
-        datePaiement: movementDate,
-        movementDate,
-
-        // "createdAt/insertedAt" garde l'ordre réel d'insertion.
-        createdAt: insertionDateTime,
+        date: insertionDate,
+        movementDate: insertionDate,
+        dateInsertion: insertionDate,
         insertedAt: insertionDateTime,
-        insertionDateTime,
+        insertionTime: insertionDateTime,
+        createdAt: insertionDateTime,
       };
 
       const res = await fetch("/api/treasury-movements", {
@@ -805,8 +808,8 @@ export default function TreasuryMovementsPage() {
       setShowNewModal(false);
       // Affichage filtré par date d'insertion: rehefa mamorona mouvement vaovao
       // dia aseho avy hatrany ilay andro nampidirana azy ihany.
-      setFilterFrom(todayInput());
-      setFilterTo(todayInput());
+      setFilterFrom(formDate || todayInput());
+      setFilterTo(formDate || todayInput());
       setFormDate(todayInput());
       setFormTreasuryId(mainActiveTreasury?.id ? String(mainActiveTreasury.id) : "");
       setFormType("");
