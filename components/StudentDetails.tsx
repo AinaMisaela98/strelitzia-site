@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 
 export default function StudentDetails({ user, student }: any) {
   const [tab, setTab] = useState("PDF");
@@ -36,6 +36,9 @@ const [showEditFeesModal, setShowEditFeesModal] = useState(false);
 const [editFeesRows, setEditFeesRows] = useState<any[]>([]);
 const [treasuries, setTreasuries] = useState<any[]>([]);
 const [loadingTreasuries, setLoadingTreasuries] = useState(false);
+const paymentInProgressRef = useRef(false);
+const cancelInProgressRef = useRef(false);
+const movementKeysInProgressRef = useRef<Set<string>>(new Set());
 
 // Ordre professionnel: on garde l’ordre réel de création venant de la base.
 // Si un champ ordre/position existe plus tard dans l’API, il sera prioritaire.
@@ -194,15 +197,196 @@ function getSelectedTreasury() {
 }
 
 function buildTreasuryPayload() {
-  const treasury = getSelectedTreasury();
+  const treasury = getSelectedTreasury() || getDefaultTreasury();
+  const fallbackName = paymentForm.tresorerie || treasury?.name || "Caisse principale";
 
   return {
     treasuryId: treasury?.id || Number(paymentForm.treasuryId || 0) || undefined,
-    treasuryName: treasury?.name || paymentForm.tresorerie || "",
-    tresorerie: treasury?.name || paymentForm.tresorerie || "",
+    treasuryName: treasury?.name || fallbackName,
+    tresorerie: treasury?.name || fallbackName,
   };
 }
 
+function normalizeDateOnly(value: any) {
+  const raw = String(value || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  const parsed = raw ? new Date(raw) : new Date();
+  if (Number.isNaN(parsed.getTime())) {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  return parsed.toISOString().slice(0, 10);
+}
+
+function buildInsertionDateTime(dateOnly: string) {
+  const now = new Date();
+  return `${dateOnly}T${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}.${String(now.getMilliseconds()).padStart(3, "0")}`;
+}
+
+function getSelectedPaymentDate() {
+  return normalizeDateOnly(paymentForm.datePaiement || new Date().toISOString().slice(0, 10));
+}
+
+function buildMovementUniqueKey(fee: any, operation: "CREDIT" | "DEBIT", reference: string) {
+  const feeIdentity =
+    fee.studentFeeId ||
+    fee.trainingFeeId ||
+    fee.sourceTrainingFeeId ||
+    fee.trainingId ||
+    fee.id ||
+    getFeeCode(fee);
+
+  return [
+    "FRAIS_FORMATION",
+    operation,
+    student.id,
+    feeIdentity,
+    reference || "NO_REF",
+    form.anneeScolaire || student.anneeScolaire || fee.schoolYearName || "2025-2026",
+  ]
+    .map((item) => String(item ?? "").trim())
+    .join("|");
+}
+
+function getLocalTreasuryMovements() {
+  if (typeof window === "undefined") return [] as any[];
+
+  try {
+    const current = JSON.parse(localStorage.getItem("treasuryMovements") || "[]");
+    return Array.isArray(current) ? current : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalTreasuryMovementOnce(movement: any) {
+  if (typeof window === "undefined") return false;
+
+  try {
+    const key = "treasuryMovements";
+    const list = getLocalTreasuryMovements();
+    const uniqueKey = String(movement.uniqueKey || movement.id || "");
+
+    const alreadyExists = list.some((item: any) => {
+      const itemKey = String(item?.uniqueKey || item?.id || "");
+      return itemKey && uniqueKey && itemKey === uniqueKey;
+    });
+
+    if (alreadyExists) return false;
+
+    localStorage.setItem(key, JSON.stringify([movement, ...list]));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function createFeeTreasuryMovement(fee: any, operation: "CREDIT" | "DEBIT", extra: any = {}) {
+  const treasuryPayload = extra.treasuryPayload || buildTreasuryPayload();
+  const amount = Number(extra.amount ?? getFeeAmount(fee) ?? 0);
+  const movementDate = normalizeDateOnly(
+    extra.date ||
+      extra.datePaiement ||
+      extra.paymentDate ||
+      extra.movementDate ||
+      paymentForm.datePaiement ||
+      new Date().toISOString().slice(0, 10)
+  );
+  const insertionDateTime = buildInsertionDateTime(movementDate);
+  const paymentReference = extra.reference || fee.reference || paymentForm.reference || buildPaymentReference();
+  const uniqueKey = buildMovementUniqueKey(fee, operation, paymentReference);
+
+  if (movementKeysInProgressRef.current.has(uniqueKey)) {
+    return false;
+  }
+
+  movementKeysInProgressRef.current.add(uniqueKey);
+
+  try {
+    const studentName = `${student.nom || ""} ${student.prenoms || ""}`.trim();
+    const feeCode = getFeeCode(fee);
+    const feeLabel = getFeeLabel(fee);
+    const isCredit = operation === "CREDIT";
+    const isAnnulation = operation === "DEBIT";
+    const motif = isAnnulation
+      ? `ANNULATION - Frais de formation - ${studentName || "Étudiant"} - ${feeCode}`
+      : `PAIEMENT - Frais de formation - ${studentName || "Étudiant"} - ${feeCode}`;
+
+    const stableId = `fee-${operation.toLowerCase()}-${student.id}-${fee.trainingFeeId || fee.sourceTrainingFeeId || fee.studentFeeId || fee.id}-${paymentReference}`;
+
+    const movement = {
+      id: stableId,
+      uniqueKey,
+      idempotencyKey: uniqueKey,
+      // Important: ny date d'insertion/filtre ao amin'ny Trésorerie mouvements
+      // dia manaraka ilay date nosafidiana tamin'ny paiement frais de formation.
+      date: movementDate,
+      datePaiement: movementDate,
+      paymentDate: movementDate,
+      movementDate,
+      dateInsertion: movementDate,
+      insertedAt: insertionDateTime,
+      createdAt: insertionDateTime,
+      // Champs volontairement redondants pour que la page Trésorerie l'affiche correctement.
+      // Pour annulation: operation = DEBIT sur tous les champs.
+      type: operation,
+      sens: operation,
+      operation,
+      movementType: operation,
+      displayType: operation,
+      nature: isAnnulation ? "ANNULATION" : "PAIEMENT",
+      action: isAnnulation ? "ANNULATION" : "PAIEMENT",
+      status: isAnnulation ? "ANNULATION" : "PAIEMENT",
+      category: isAnnulation ? "ANNULATION_PAIEMENT_FRAIS" : "PAIEMENT_FRAIS",
+      categorie: isAnnulation ? "Annulation frais de formation" : "Paiement frais de formation",
+      source: "FRAIS_DE_FORMATION",
+      sourceType: "STUDENT_FEE",
+      motif,
+      description: motif,
+      libelle: motif,
+      reference: paymentReference,
+      montant: amount,
+      amount,
+      debit: isAnnulation ? amount : 0,
+      credit: isCredit ? amount : 0,
+      studentId: student.id,
+      studentName,
+      matricule: student.matricule || student.registrationNumber || "",
+      className: student.classe || student.className || student.classRoomName || "",
+      schoolYearName: form.anneeScolaire || student.anneeScolaire || fee.schoolYearName || "2025-2026",
+      feeId: fee.studentFeeId || fee.id,
+      studentFeeId: fee.studentFeeId || null,
+      trainingFeeId: fee.trainingFeeId || fee.sourceTrainingFeeId || fee.trainingId || null,
+      feeCode,
+      feeLabel,
+      modePaiement: extra.modePaiement || fee.modePaiement || paymentForm.modePaiement || "Espèce",
+      commentaire: extra.commentaire || fee.commentaire || paymentForm.commentaire || "",
+      ...treasuryPayload,
+    };
+
+    // Tsy alefa amin'ny endpoints maro intsony, satria io no tena nampiteraka doublon.
+    // Ity fonction ity dia fallback ihany rehefa tsy nahavita namorona mouvement ny /api/student-fees.
+    try {
+      const res = await fetch("/api/treasury-movements", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": uniqueKey,
+        },
+        body: JSON.stringify(movement),
+      });
+
+      if (res.ok) return true;
+    } catch {
+      // fallback local etsy ambany
+    }
+
+    return saveLocalTreasuryMovementOnce(movement);
+  } finally {
+    movementKeysInProgressRef.current.delete(uniqueKey);
+  }
+}
 
 function getFeeCode(fee: any) {
   return String(fee.code || fee.month || fee.mois || fee.libelle || fee.name || "-")
@@ -493,10 +677,10 @@ function getSelectedPaidFees() {
   return fees.filter((fee) => selectedPaidFeeIds.includes(fee.id) && isFeePaid(fee));
 }
 
-function canSelectMultiple(e?: any) {
-  if (e?.ctrlKey || e?.metaKey) return true;
-  if (typeof window === "undefined") return false;
-  return window.matchMedia("(max-width: 768px), (pointer: coarse)").matches;
+function canSelectMultiple(_e?: any) {
+  // Sélection multiple simple: un clic ajoute, un deuxième clic retire.
+  // Plus besoin de CTRL + clic sur PC.
+  return true;
 }
 
 function selectPaidFeeForCancel(fee: any, multiple = false) {
@@ -598,7 +782,9 @@ async function payOneFee(fee: any) {
   setActionId(fee.id);
 
   const paymentReference = paymentForm.reference || buildPaymentReference();
+  const paymentDate = getSelectedPaymentDate();
   const treasuryPayload = buildTreasuryPayload();
+  const paymentUniqueKey = buildMovementUniqueKey(fee, "CREDIT", paymentReference);
 
   const paidFee = {
     ...fee,
@@ -607,7 +793,7 @@ async function payOneFee(fee: any) {
     montantPaye: getFeeAmount(fee),
     montantTotal: getFeeAmount(fee),
     reste: 0,
-    paidAt: paymentForm.datePaiement || new Date().toISOString(),
+    paidAt: paymentDate,
     treasuryId: treasuryPayload.treasuryId,
     treasuryName: treasuryPayload.treasuryName,
     tresorerie: treasuryPayload.tresorerie,
@@ -622,24 +808,30 @@ async function payOneFee(fee: any) {
     if (fee.studentFeeId && !String(fee.studentFeeId).startsWith("training-")) {
       const res = await fetch("/api/student-fees", {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Idempotency-Key": paymentUniqueKey },
         body: JSON.stringify({
+          idempotencyKey: paymentUniqueKey,
           id: fee.studentFeeId,
           action: "PAY",
           montantPaye: getFeeAmount(fee),
-          datePaiement: paymentForm.datePaiement,
+          date: paymentDate,
+          datePaiement: paymentDate,
+          paymentDate,
+          movementDate: paymentDate,
+          dateInsertion: paymentDate,
           modePaiement: paymentForm.modePaiement,
           reference: paymentReference,
           commentaire: paymentForm.commentaire,
-          ...treasuryPayload,
+          tresorerie: treasuryPayload.tresorerie,
         }),
       });
       saved = res.ok;
     } else {
       const res = await fetch("/api/student-fees", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Idempotency-Key": paymentUniqueKey },
         body: JSON.stringify({
+          idempotencyKey: paymentUniqueKey,
           studentId: student.id,
           trainingFeeId: fee.trainingFeeId || fee.sourceTrainingFeeId,
           code: getFeeCode(fee),
@@ -648,12 +840,16 @@ async function payOneFee(fee: any) {
           montantPaye: getFeeAmount(fee),
           reste: 0,
           status: "PAYE",
-          datePaiement: paymentForm.datePaiement,
+          date: paymentDate,
+          datePaiement: paymentDate,
+          paymentDate,
+          movementDate: paymentDate,
+          dateInsertion: paymentDate,
           modePaiement: paymentForm.modePaiement,
           reference: paymentReference,
           commentaire: paymentForm.commentaire,
           schoolYearName: form.anneeScolaire || student.anneeScolaire || "2025-2026",
-          ...treasuryPayload,
+          tresorerie: treasuryPayload.tresorerie,
         }),
       });
       saved = res.ok;
@@ -663,6 +859,21 @@ async function payOneFee(fee: any) {
     if (!saved) {
       saveLocalPayment(getPaymentKey(fee), paidFee);
     }
+
+    // Mamorona mouvement CREDIT indray mandeha ihany, amin'ny date paiement choisie.
+    // Tsy asiana treasuryId ao amin'ny studentPayment satria tsy ao amin'ny Prisma schema io champ io.
+    await createFeeTreasuryMovement(fee, "CREDIT", {
+      amount: getFeeAmount(fee),
+      date: paymentDate,
+      datePaiement: paymentDate,
+      paymentDate,
+      movementDate: paymentDate,
+      dateInsertion: paymentDate,
+      reference: paymentReference,
+      modePaiement: paymentForm.modePaiement,
+      commentaire: paymentForm.commentaire,
+      treasuryPayload,
+    });
 
     setFees((prev) =>
       prev.map((item) =>
@@ -674,6 +885,17 @@ async function payOneFee(fee: any) {
     if (saved) await loadStudentFees();
   } catch {
     saveLocalPayment(getPaymentKey(fee), paidFee);
+    await createFeeTreasuryMovement(fee, "CREDIT", {
+      amount: getFeeAmount(fee),
+      date: paymentDate,
+      datePaiement: paymentDate,
+      paymentDate,
+      movementDate: paymentDate,
+      reference: paymentReference,
+      modePaiement: paymentForm.modePaiement,
+      commentaire: paymentForm.commentaire,
+      treasuryPayload,
+    });
     setFees((prev) => prev.map((item) => (item.id === fee.id ? paidFee : item)));
     setSelectedPaidFee(paidFee);
   } finally {
@@ -682,45 +904,55 @@ async function payOneFee(fee: any) {
 }
 
 async function paySelectedFees() {
+  if (paymentInProgressRef.current || actionId !== null) return;
+
   const selectedFees = getSelectedFeesToPay();
   if (selectedFees.length === 0) return;
 
-  if (!paymentForm.treasuryId && !paymentForm.tresorerie) {
-    alert("Veuillez sélectionner une trésorerie avant de valider le paiement.");
-    return;
+  paymentInProgressRef.current = true;
+  setActionId("pay-multiple");
+
+  try {
+    // Date réelle du paiement choisie dans le formulaire.
+    // Io date io no hampidirina any amin'ny Trésorerie mouvements.
+    const paymentDate = getSelectedPaymentDate();
+
+    // Tsy sakanana intsony raha tsy voafidy ny trésorerie: maka principal/default, sinon Caisse principale.
+    const paymentReference = paymentForm.reference || buildPaymentReference();
+    const treasuryPayload = buildTreasuryPayload();
+    if (!paymentForm.reference) {
+      setPaymentForm((p) => ({ ...p, reference: paymentReference }));
+    }
+
+    for (const fee of selectedFees) {
+      await payOneFee(fee);
+    }
+
+    const paidFees = selectedFees.map((fee) => ({
+      ...fee,
+      status: "PAYE",
+      paid: true,
+      montantPaye: getFeeAmount(fee),
+      montantTotal: getFeeAmount(fee),
+      reste: 0,
+      paidAt: paymentDate,
+      treasuryId: treasuryPayload.treasuryId,
+      treasuryName: treasuryPayload.treasuryName,
+      tresorerie: treasuryPayload.tresorerie,
+      modePaiement: paymentForm.modePaiement,
+      reference: paymentReference,
+      commentaire: paymentForm.commentaire,
+    }));
+
+    setSelectedPaidFee(paidFees[paidFees.length - 1] || null);
+    setSelectedPaidFeeIds(paidFees.map((fee) => fee.id));
+    setSelectedFeeIdsToPay([]);
+    setShowPaymentModal(false);
+    printTicketMultiple(paidFees);
+  } finally {
+    paymentInProgressRef.current = false;
+    setActionId(null);
   }
-
-  const paymentReference = paymentForm.reference || buildPaymentReference();
-  const treasuryPayload = buildTreasuryPayload();
-  if (!paymentForm.reference) {
-    setPaymentForm((p) => ({ ...p, reference: paymentReference }));
-  }
-
-  for (const fee of selectedFees) {
-    await payOneFee(fee);
-  }
-
-  const paidFees = selectedFees.map((fee) => ({
-    ...fee,
-    status: "PAYE",
-    paid: true,
-    montantPaye: getFeeAmount(fee),
-    montantTotal: getFeeAmount(fee),
-    reste: 0,
-    paidAt: paymentForm.datePaiement || new Date().toISOString(),
-    treasuryId: treasuryPayload.treasuryId,
-    treasuryName: treasuryPayload.treasuryName,
-    tresorerie: treasuryPayload.tresorerie,
-    modePaiement: paymentForm.modePaiement,
-    reference: paymentReference,
-    commentaire: paymentForm.commentaire,
-  }));
-
-  setSelectedPaidFee(paidFees[paidFees.length - 1] || null);
-  setSelectedPaidFeeIds(paidFees.map((fee) => fee.id));
-  setSelectedFeeIdsToPay([]);
-  setShowPaymentModal(false);
-  printTicketMultiple(paidFees);
 }
 
 async function cancelOnePayment(fee: any) {
@@ -735,21 +967,47 @@ async function cancelOnePayment(fee: any) {
   };
 
   let cancelled = false;
+  const cancelReference = fee.reference || `ANNULATION-${buildPaymentReference()}`;
+  const cancelDate = normalizeDateOnly(new Date().toISOString().slice(0, 10));
+  const cancelUniqueKey = buildMovementUniqueKey(fee, "DEBIT", cancelReference);
 
   if (fee.studentFeeId && !fee.localOnly && !String(fee.studentFeeId).startsWith("training-")) {
     const res = await fetch("/api/student-fees", {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "Idempotency-Key": cancelUniqueKey },
       body: JSON.stringify({
+        idempotencyKey: cancelUniqueKey,
         id: fee.studentFeeId,
         action: "CANCEL",
+        // ANNULATION = vola mivoaka, noho izany DEBIT foana.
+        type: "DEBIT",
+        sens: "DEBIT",
+        operation: "DEBIT",
+        movementType: "DEBIT",
+        nature: "ANNULATION",
+        status: "ANNULATION",
+        category: "ANNULATION_PAIEMENT_FRAIS",
+        categorie: "Annulation frais de formation",
+        source: "FRAIS_DE_FORMATION",
+        sourceType: "STUDENT_FEE",
+        motif: `ANNULATION - Frais de formation - ${getFeeLabel(fee)} - ${getFeeCode(fee)}`,
+        libelle: `ANNULATION - Frais de formation - ${getFeeLabel(fee)} - ${getFeeCode(fee)}`,
+        description: `ANNULATION - Frais de formation - ${getFeeLabel(fee)} - ${getFeeCode(fee)}`,
+        debit: getFeeAmount(fee),
+        credit: 0,
+        montant: getFeeAmount(fee),
+        amount: getFeeAmount(fee),
+        date: cancelDate,
+        datePaiement: cancelDate,
+        paymentDate: cancelDate,
+        movementDate: cancelDate,
+        dateInsertion: cancelDate,
         studentId: student.id,
         trainingFeeId: fee.trainingFeeId || fee.sourceTrainingFeeId,
         schoolYearName: form.anneeScolaire || student.anneeScolaire || fee.schoolYearName || "2025-2026",
-        treasuryId: fee.treasuryId,
-        treasuryName: fee.treasuryName || fee.tresorerie,
         tresorerie: fee.tresorerie || fee.treasuryName,
-        reference: fee.reference,
+        reference: cancelReference,
+        commentaire: `ANNULATION - Annulation paiement frais de formation ${getFeeCode(fee)}`,
       }),
     });
 
@@ -764,6 +1022,24 @@ async function cancelOnePayment(fee: any) {
 
   removeLocalPayment(getPaymentKey(fee));
 
+  // Mamorona mouvement DEBIT indray mandeha ihany ho an'ny annulation.
+  await createFeeTreasuryMovement(fee, "DEBIT", {
+    amount: getFeeAmount(fee),
+    date: cancelDate,
+    datePaiement: cancelDate,
+    paymentDate: cancelDate,
+    movementDate: cancelDate,
+    dateInsertion: cancelDate,
+    reference: cancelReference,
+    modePaiement: fee.modePaiement || paymentForm.modePaiement,
+    commentaire: `ANNULATION - Annulation paiement frais de formation ${getFeeCode(fee)}`,
+    treasuryPayload: {
+      treasuryId: fee.treasuryId,
+      treasuryName: fee.treasuryName || fee.tresorerie || paymentForm.tresorerie || "Caisse principale",
+      tresorerie: fee.tresorerie || fee.treasuryName || paymentForm.tresorerie || "Caisse principale",
+    },
+  });
+
   setFees((prev) =>
     prev.map((item) =>
       item.id === fee.id || getPaymentKey(item) === getPaymentKey(fee)
@@ -776,12 +1052,15 @@ async function cancelOnePayment(fee: any) {
 }
 
 async function cancelPayment() {
+  if (cancelInProgressRef.current || actionId !== null) return;
+
   const selectedPayments = getSelectedPaidFees();
   const paymentsToCancel = selectedPayments.length > 0 ? selectedPayments : selectedPaidFee ? [selectedPaidFee] : [];
   if (paymentsToCancel.length === 0) return;
 
   if (!confirm(paymentsToCancel.length > 1 ? `Annuler ces ${paymentsToCancel.length} paiements ?` : "Annuler ce paiement ?")) return;
 
+  cancelInProgressRef.current = true;
   setActionId("cancel-multiple");
 
   try {
@@ -798,6 +1077,7 @@ async function cancelPayment() {
 
     if (shouldReload) await loadStudentFees();
   } finally {
+    cancelInProgressRef.current = false;
     setActionId(null);
   }
 }
@@ -1465,10 +1745,7 @@ function printTicketMultiple(selectedFees: any[]) {
       </div>
     ) : (
       <>
-        <div className="mb-3 rounded-xl bg-blue-50 px-3 py-2 text-[11px] font-semibold text-blue-700">
-          Mobile : touche plusieurs frais pour les sélectionner ensemble. PC : CTRL + click pour sélection multiple.
-        </div>
-        <div className="training-fee-grid grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
+     <div className="training-fee-grid grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
           {fees.map((fee) => {
             const paid = isFeePaid(fee);
             const selectedPaid = selectedPaidFeeIds.includes(fee.id);
@@ -1756,7 +2033,7 @@ function printTicketMultiple(selectedFees: any[]) {
                   </button>
                   <button
                     type="button"
-                    disabled={actionId !== null || (!paymentForm.treasuryId && !paymentForm.tresorerie)}
+                    disabled={actionId !== null}
                     onClick={paySelectedFees}
                     className="rounded-[2px] bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                   >

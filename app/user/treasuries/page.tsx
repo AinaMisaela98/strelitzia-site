@@ -40,6 +40,140 @@ type SchoolYear = {
   active?: boolean;
 };
 
+type TreasuryMovement = {
+  id?: number | string;
+  treasuryId?: number | string | null;
+  treasury?: { id?: number | string | null } | null;
+  type?: string | null;
+  sens?: string | null;
+  operation?: string | null;
+  movementType?: string | null;
+  debit?: number | string | null;
+  credit?: number | string | null;
+  amount?: number | string | null;
+  montant?: number | string | null;
+  schoolYearName?: string | null;
+  year?: string | null;
+  anneeScolaire?: string | null;
+};
+
+type TreasuryBalance = {
+  totalEntree: number;
+  totalSortie: number;
+  solde: number;
+};
+
+function toNumber(value: unknown) {
+  const cleaned = String(value ?? "0").replace(/[^0-9.-]/g, "");
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function normalizeMovementRows(data: any): TreasuryMovement[] {
+  const raw = Array.isArray(data)
+    ? data
+    : data?.movements || data?.treasuryMovements || data?.data || data?.items || [];
+
+  return Array.isArray(raw) ? raw : [];
+}
+
+function getMovementTreasuryId(movement: TreasuryMovement) {
+  return String(movement.treasuryId ?? movement.treasury?.id ?? "").trim();
+}
+
+function getMovementType(movement: TreasuryMovement) {
+  const raw = String(
+    movement.type ||
+      movement.sens ||
+      movement.operation ||
+      movement.movementType ||
+      ""
+  ).toUpperCase();
+
+  if (raw === "DEBIT" || raw === "SORTIE" || raw === "DEPENSE" || raw === "DÉPENSE") {
+    return "DEBIT";
+  }
+
+  if (raw === "CREDIT" || raw === "CRÉDIT" || raw === "ENTREE" || raw === "ENTRÉE" || raw === "RECETTE") {
+    return "CREDIT";
+  }
+
+  const debit = toNumber(movement.debit);
+  const credit = toNumber(movement.credit);
+  if (debit > 0 && credit <= 0) return "DEBIT";
+  return "CREDIT";
+}
+
+function getMovementAmount(movement: TreasuryMovement) {
+  const debit = toNumber(movement.debit);
+  const credit = toNumber(movement.credit);
+
+  if (debit > 0) return debit;
+  if (credit > 0) return credit;
+
+  return Math.abs(toNumber(movement.amount ?? movement.montant));
+}
+
+function buildRealBalancesByTreasury(movements: TreasuryMovement[]) {
+  const map = new Map<string, TreasuryBalance>();
+
+  for (const movement of movements) {
+    const treasuryId = getMovementTreasuryId(movement);
+    if (!treasuryId) continue;
+
+    const current = map.get(treasuryId) || {
+      totalEntree: 0,
+      totalSortie: 0,
+      solde: 0,
+    };
+
+    const amount = getMovementAmount(movement);
+    if (amount <= 0) continue;
+
+    if (getMovementType(movement) === "DEBIT") {
+      current.totalSortie += amount;
+    } else {
+      current.totalEntree += amount;
+    }
+
+    current.solde = current.totalEntree - current.totalSortie;
+    map.set(treasuryId, current);
+  }
+
+  return map;
+}
+
+function applyRealBalancesToTreasuries(treasuries: Treasury[], movements: TreasuryMovement[]) {
+  const balances = buildRealBalancesByTreasury(movements);
+
+  return treasuries.map((treasury) => {
+    const balance = balances.get(String(treasury.id)) || {
+      totalEntree: 0,
+      totalSortie: 0,
+      solde: 0,
+    };
+
+    return {
+      ...treasury,
+      totalEntree: balance.totalEntree,
+      totalSortie: balance.totalSortie,
+      solde: balance.solde,
+    };
+  });
+}
+
+function getRealTotals(treasuries: Treasury[]) {
+  return treasuries.reduce(
+    (acc, treasury) => {
+      acc.totalEntree += Number(treasury.totalEntree || 0);
+      acc.totalSortie += Number(treasury.totalSortie || 0);
+      acc.soldeGlobal += Number(treasury.solde || 0);
+      return acc;
+    },
+    { totalEntree: 0, totalSortie: 0, soldeGlobal: 0 }
+  );
+}
+
 const TYPE_OPTIONS = [
   { value: "CAISSE", label: "Caisse" },
   { value: "BANQUE", label: "Banque" },
@@ -199,31 +333,41 @@ export default function TreasuriesPage() {
 
     try {
       const qs = `?schoolYearName=${encodeURIComponent(selectedYear)}`;
-      const [treasuryRes, dashboardRes] = await Promise.all([
+      const [treasuryRes, dashboardRes, movementRes] = await Promise.all([
         fetch(`/api/treasuries${qs}`, { cache: "no-store" }),
         fetch(`/api/treasury-dashboard${qs}`, { cache: "no-store" }),
+        fetch(`/api/treasury-movements${qs}`, { cache: "no-store" }),
       ]);
 
       const treasuryJson = await treasuryRes.json().catch(() => ({}));
       const dashboardJson = await dashboardRes.json().catch(() => ({}));
+      const movementJson = await movementRes.json().catch(() => ({}));
 
       // Si l'utilisateur a changé d'année pendant le chargement, on ignore cette ancienne réponse.
       if (seq !== loadSeqRef.current) return;
 
       if (!treasuryRes.ok) throw new Error(treasuryJson.error || "Erreur chargement trésoreries");
       if (!dashboardRes.ok) throw new Error(dashboardJson.error || "Erreur chargement dashboard");
+      if (!movementRes.ok) throw new Error(movementJson.error || "Erreur chargement mouvements");
 
-      const loadedTreasuries = normalizeTreasuries(treasuryJson);
-      const loadedDashboardTreasuries = normalizeTreasuries(dashboardJson);
+      const movementRows = normalizeMovementRows(movementJson);
+      const loadedTreasuries = applyRealBalancesToTreasuries(
+        normalizeTreasuries(treasuryJson),
+        movementRows
+      );
+
+      const dashboardSourceTreasuries = normalizeTreasuries(dashboardJson);
+      const loadedDashboardTreasuries = applyRealBalancesToTreasuries(
+        dashboardSourceTreasuries.length > 0 ? dashboardSourceTreasuries : loadedTreasuries,
+        movementRows
+      );
+      const realTotals = getRealTotals(loadedDashboardTreasuries);
 
       setTreasuries(loadedTreasuries);
       setDashboard({
         ...dashboardJson,
         treasuries: loadedDashboardTreasuries,
-        totals:
-          loadedDashboardTreasuries.length > 0
-            ? dashboardJson.totals
-            : { totalEntree: 0, totalSortie: 0, soldeGlobal: 0 },
+        totals: realTotals,
       });
     } catch (error: any) {
       if (seq === loadSeqRef.current) alert(error?.message || "Erreur serveur");
@@ -474,7 +618,14 @@ export default function TreasuriesPage() {
                     <td className="border-r border-slate-300 px-2 py-[6px]">{item.accountName || ""}</td>
                     <td className="border-r border-slate-300 px-2 py-[6px]">{item.accountNumber || ""}</td>
                     <td className="border-r border-slate-300 px-2 py-[6px]">{item.bankName || ""}</td>
-                    <td className="border-r border-slate-300 px-2 py-[6px] text-right font-bold">{formatMoney(item.solde)} Ar</td>
+                    <td
+                      className={`border-r border-slate-300 px-2 py-[6px] text-right font-black ${
+                        Number(item.solde || 0) < 0 ? "text-red-700" : "text-emerald-700"
+                      }`}
+                      title={`Solde réel = total CREDIT (${formatMoney(item.totalEntree)}) - total DEBIT (${formatMoney(item.totalSortie)})`}
+                    >
+                      {formatMoney(item.solde)} Ar
+                    </td>
                     <td className="border-r border-slate-300 px-2 py-[6px]">{item.address || ""}</td>
                     <td className="border-r border-slate-300 px-2 py-[6px]">{item.bic || ""}</td>
                     <td className="px-2 py-[4px] text-center">

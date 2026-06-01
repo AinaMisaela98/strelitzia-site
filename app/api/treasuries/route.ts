@@ -25,6 +25,81 @@ function getSchoolYearFromBody(body: any) {
   );
 }
 
+function toNumber(value: unknown) {
+  const cleaned = String(value ?? "0").replace(/[^\d.-]/g, "");
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function normalizeMovementType(movement: any) {
+  const raw = text(
+    movement?.type ||
+      movement?.movementType ||
+      movement?.operation ||
+      movement?.sens ||
+      movement?.nature
+  ).toUpperCase();
+
+  if (raw === "DEBIT" || raw === "SORTIE" || raw === "DEPENSE" || raw === "DÉPENSE") {
+    return "DEBIT";
+  }
+
+  if (raw === "CREDIT" || raw === "ENTREE" || raw === "ENTRÉE" || raw === "RECETTE") {
+    return "CREDIT";
+  }
+
+  // Sécurité: raha tsy mazava ny type dia jerena aloha debit/credit.
+  if (toNumber(movement?.debit) > 0) return "DEBIT";
+  if (toNumber(movement?.credit) > 0) return "CREDIT";
+
+  return "CREDIT";
+}
+
+function getMovementAmount(movement: any) {
+  const type = normalizeMovementType(movement);
+
+  if (type === "DEBIT") {
+    return (
+      toNumber(movement?.debit) ||
+      toNumber(movement?.amount) ||
+      toNumber(movement?.montant)
+    );
+  }
+
+  return (
+    toNumber(movement?.credit) ||
+    toNumber(movement?.amount) ||
+    toNumber(movement?.montant)
+  );
+}
+
+function computeTreasuryBalance(movements: any[]) {
+  let totalCredit = 0;
+  let totalDebit = 0;
+
+  for (const movement of movements) {
+    const type = normalizeMovementType(movement);
+    const amount = getMovementAmount(movement);
+
+    if (type === "DEBIT") {
+      totalDebit += amount;
+    } else {
+      totalCredit += amount;
+    }
+  }
+
+  const soldeReel = totalCredit - totalDebit;
+
+  return {
+    totalCredit,
+    totalDebit,
+    soldeReel,
+    balance: soldeReel,
+    solde: soldeReel,
+    isNegative: soldeReel < 0,
+  };
+}
+
 export async function GET(req: Request) {
   const user = await getAuthUser();
   if (!user) {
@@ -39,7 +114,51 @@ export async function GET(req: Request) {
       orderBy: [{ active: "desc" }, { isPrincipal: "desc" }, { name: "asc" }],
     });
 
-    return NextResponse.json({ treasuries, schoolYearName });
+    const treasuryIds = treasuries.map((t) => t.id);
+
+    const movements =
+      treasuryIds.length > 0
+        ? await prisma.treasuryMovement.findMany({
+            where: {
+              schoolYearName,
+              treasuryId: { in: treasuryIds },
+            },
+          })
+        : [];
+
+    const balanceByTreasury = new Map<number, ReturnType<typeof computeTreasuryBalance>>();
+
+    for (const treasury of treasuries) {
+      const treasuryMovements = movements.filter(
+        (movement: any) => Number(movement.treasuryId) === Number(treasury.id)
+      );
+
+      balanceByTreasury.set(treasury.id, computeTreasuryBalance(treasuryMovements));
+    }
+
+    const treasuriesWithRealBalance = treasuries.map((treasury) => {
+      const balance = balanceByTreasury.get(treasury.id) || {
+        totalCredit: 0,
+        totalDebit: 0,
+        soldeReel: 0,
+        balance: 0,
+        solde: 0,
+        isNegative: false,
+      };
+
+      return {
+        ...treasury,
+        ...balance,
+      };
+    });
+
+    const globalTotals = computeTreasuryBalance(movements);
+
+    return NextResponse.json({
+      treasuries: treasuriesWithRealBalance,
+      totals: globalTotals,
+      schoolYearName,
+    });
   } catch (error: any) {
     return NextResponse.json(
       { error: "Erreur serveur", message: error?.message || String(error) },
@@ -101,7 +220,21 @@ export async function POST(req: Request) {
       },
     });
 
-    return NextResponse.json({ treasury, schoolYearName }, { status: 201 });
+    return NextResponse.json(
+      {
+        treasury: {
+          ...treasury,
+          totalCredit: 0,
+          totalDebit: 0,
+          soldeReel: 0,
+          balance: 0,
+          solde: 0,
+          isNegative: false,
+        },
+        schoolYearName,
+      },
+      { status: 201 }
+    );
   } catch (error: any) {
     return NextResponse.json(
       { error: "Erreur serveur", message: error?.message || String(error) },
@@ -183,7 +316,22 @@ export async function PUT(req: Request) {
       },
     });
 
-    return NextResponse.json({ treasury, schoolYearName });
+    const movements = await prisma.treasuryMovement.findMany({
+      where: {
+        treasuryId: id,
+        schoolYearName,
+      },
+    });
+
+    const balance = computeTreasuryBalance(movements);
+
+    return NextResponse.json({
+      treasury: {
+        ...treasury,
+        ...balance,
+      },
+      schoolYearName,
+    });
   } catch (error: any) {
     return NextResponse.json(
       { error: "Erreur serveur", message: error?.message || String(error) },

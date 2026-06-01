@@ -354,12 +354,27 @@ export async function POST(req: Request) {
       );
     }
 
-    const rawMovementType = text(body.movementType || body.type).toUpperCase();
-    const movementType =
-      rawMovementType === "SORTIE" || rawMovementType === "DEPENSE"
-        ? "SORTIE"
-        : "ENTREE";
+   const rawMovementType = text(
+  body.movementType || body.type
+).toUpperCase();
 
+let movementType = "CREDIT";
+
+if (
+  rawMovementType === "DEBIT" ||
+  rawMovementType === "SORTIE" ||
+  rawMovementType === "DEPENSE"
+) {
+  movementType = "DEBIT";
+}
+
+if (
+  rawMovementType === "CREDIT" ||
+  rawMovementType === "ENTREE" ||
+  rawMovementType === "RECETTE"
+) {
+  movementType = "CREDIT";
+}
     const amount = amountToNumber(body.amount || body.montant);
     const category = text(body.category || body.categorie || "AUTRE").toUpperCase();
     const description = text(body.description || body.motif || body.note);

@@ -183,22 +183,15 @@ async function createTreasuryMovementOnce({
   const studentId = Number(studentFee.studentId || body.studentId || 0);
   const trainingFeeId = Number(studentFee.trainingFeeId || body.trainingFeeId || 0);
   const studentFeeId = Number(studentFee.id || body.studentFeeId || 0);
-  const reference = buildPaymentReference(body, studentId, trainingFeeId);
+  const baseReference = buildPaymentReference(body, studentId, trainingFeeId);
+  const uniqueReference = `${baseReference}-${movementType}-${Date.now()}`;
 
-  const existing = await prisma.treasuryMovement.findFirst({
-    where: {
-      treasuryId: treasury.id,
-      movementType,
-      reference,
-      schoolYearName,
-      ...(studentId ? { studentId } : {}),
-      ...(trainingFeeId ? { trainingFeeId } : {}),
-      ...(studentFeeId ? { studentFeeId } : {}),
-    },
-  });
-
-  if (existing) return existing;
-
+  // Important:
+  // On crée TOUJOURS un nouveau mouvement.
+  // Paiement -> ENTREE
+  // Annulation -> SORTIE
+  // Paiement après annulation -> nouvelle ENTREE
+  // Aucun findFirst / aucun overwrite, pour garder l'historique complet.
   return prisma.treasuryMovement.create({
     data: {
       treasuryId: treasury.id,
@@ -209,7 +202,7 @@ async function createTreasuryMovementOnce({
           : "ANNULATION_PAIEMENT_FRAIS",
       amount,
       description,
-      reference,
+      reference: uniqueReference,
       studentId: studentId || null,
       trainingFeeId: trainingFeeId || null,
       studentFeeId: studentFeeId || null,
@@ -218,7 +211,6 @@ async function createTreasuryMovementOnce({
     },
   });
 }
-
 
 async function findPaymentForFee(studentFee: any) {
   return prisma.studentPayment.findFirst({
@@ -288,21 +280,12 @@ async function createCancellationMovementOnce({
 
   if (!treasury) return null;
 
-  const reference = `CANCEL-FEE-${studentFeeId}-${schoolYearName}`;
+  const reference = `CANCEL-FEE-${studentFeeId}-${schoolYearName}-${Date.now()}`;
 
-  const existingCancel = await prisma.treasuryMovement.findFirst({
-    where: {
-      treasuryId,
-      movementType: "SORTIE",
-      category: "ANNULATION_PAIEMENT_FRAIS",
-      reference,
-      studentFeeId,
-      schoolYearName,
-    },
-  });
-
-  if (existingCancel) return existingCancel;
-
+  // Important:
+  // On crée TOUJOURS une nouvelle sortie d'annulation.
+  // Cela permet l'historique complet:
+  // ENTREE -> SORTIE -> ENTREE -> SORTIE...
   return prisma.treasuryMovement.create({
     data: {
       treasuryId,

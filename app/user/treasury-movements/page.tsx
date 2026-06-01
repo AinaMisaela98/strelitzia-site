@@ -10,11 +10,21 @@ type Treasury = {
 };
 
 type Movement = {
-  id: number;
+  id: number | string;
   treasuryId: number;
-  movementType: "ENTREE" | "SORTIE" | string;
+  movementType: "ENTREE" | "SORTIE" | "CREDIT" | "DEBIT" | string;
+  type?: "CREDIT" | "DEBIT" | string | null;
+  sens?: string | null;
+  operation?: string | null;
+  nature?: string | null;
   category: string;
+  categorie?: string | null;
   amount: number;
+  montant?: number | null;
+  debit?: number | null;
+  credit?: number | null;
+  motif?: string | null;
+  libelle?: string | null;
   description?: string | null;
   reference?: string | null;
   studentId?: number | null;
@@ -41,7 +51,7 @@ type Movement = {
   feeCode?: string | null;
   feeAmount?: number | null;
   studentFee?: {
-    id: number;
+    id: number | string;
     libelle?: string | null;
     code?: string | null;
     montantTotal?: number | null;
@@ -52,7 +62,7 @@ type Movement = {
     trainingFeeId?: number | null;
   } | null;
   trainingFee?: {
-    id: number;
+    id: number | string;
     libelle?: string | null;
     code?: string | null;
     montant?: number | null;
@@ -76,6 +86,10 @@ function toInputDate(value?: string | null) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function getMovementDayKey(value?: string | null) {
+  return toInputDate(value) || todayInput();
 }
 
 function getSummaryDateLabel(from: string, to: string) {
@@ -124,18 +138,57 @@ function getErrorMessage(data: unknown, fallback: string) {
 }
 
 function getMovementLabel(m: Pick<Movement, "category" | "movementType">) {
-  const category = cleanText(m.category);
-  if (category === "PAIEMENT_FRAIS") return "Paiement frais";
-  if (category === "ANNULATION_PAIEMENT_FRAIS") return "Annulation paiement frais";
+  const category = normalizeCategory(m.category);
+  if (category === "PAIEMENT_FRAIS") return "Paiement frais de formation";
+  if (category === "ANNULATION_PAIEMENT_FRAIS") return "ANNULATION - frais de formation";
   if (category === "ENTREE_MANUELLE") return "Entrée manuelle";
   if (category === "DEPENSE") return "Dépense";
   if (category === "TRANSFERT") return "Transfert";
   return category || m.movementType || "-";
 }
 
+function normalizeMovementType(type?: string | null) {
+  const value = cleanText(type).toUpperCase();
+  if (["ENTREE", "CREDIT", "CRÉDIT", "IN", "INCOME"].includes(value)) return "ENTREE";
+  if (["SORTIE", "DEBIT", "DÉBIT", "OUT", "EXPENSE"].includes(value)) return "SORTIE";
+  return value;
+}
+
+function getRawMovementType(m: Pick<Movement, "movementType" | "type" | "sens" | "operation">) {
+  return m.movementType || m.type || m.sens || m.operation || "";
+}
+
+function isCreditMovement(m: Partial<Movement>) {
+  return getStableMovementType(m) === "ENTREE";
+}
+
+function isDebitMovement(m: Partial<Movement>) {
+  return getStableMovementType(m) === "SORTIE";
+}
+
+function normalizeCategory(category?: string | null) {
+  const value = cleanText(category).toUpperCase();
+  if (["ANNULATION", "ANNULATION_FRAIS", "ANNULATION_PAIEMENT", "ANNULATION_PAIEMENT_FRAIS", "ANNULATION_FRAIS_DE_FORMATION", "CANCEL_PAYMENT"].includes(value)) {
+    return "ANNULATION_PAIEMENT_FRAIS";
+  }
+  if (["FRAIS", "FRAIS_DE_FORMATION", "ECOLAGE", "ÉCOLAGE", "PAIEMENT", "PAIEMENT_FRAIS", "PAIEMENT_FRAIS_DE_FORMATION", "PAIEMENT_ECOLAGE", "PAIEMENT_ÉCOLAGE"].includes(value)) {
+    return "PAIEMENT_FRAIS";
+  }
+  return value;
+}
+
+function isFeeMovement(m: Pick<Movement, "category" | "studentFeeId" | "trainingFeeId" | "studentFee" | "trainingFee" | "feeLabel" | "feeCode" | "description">) {
+  const category = normalizeCategory(m.category);
+  if (category === "PAIEMENT_FRAIS" || category === "ANNULATION_PAIEMENT_FRAIS") return true;
+  if (m.studentFeeId || m.trainingFeeId || m.studentFee || m.trainingFee) return true;
+  if (cleanText(m.feeLabel) || cleanText(m.feeCode)) return true;
+  return /frais|écolage|ecolage|annulation\s+paiement/i.test(cleanText(m.description));
+}
+
 function getMovementTypeLabel(type?: string | null) {
-  if (type === "ENTREE") return "CREDIT";
-  if (type === "SORTIE") return "DEBIT";
+  const normalized = normalizeMovementType(type);
+  if (normalized === "ENTREE") return "CREDIT";
+  if (normalized === "SORTIE") return "DEBIT";
   return cleanText(type) || "-";
 }
 
@@ -180,7 +233,7 @@ function getFeeLabelFromMovement(m: Movement) {
   if (trainingFeeLabel && trainingFeeLabel !== "-") return trainingFeeLabel;
 
   const desc = cleanText(m.description);
-  if (m.category === "PAIEMENT_FRAIS" && desc) {
+  if (normalizeCategory(m.category) === "PAIEMENT_FRAIS" && desc) {
     return desc.replace(/^Paiement\s+frais\s*/i, "").replace(/\s*-\s*$/, "").trim() || "Paiement frais";
   }
 
@@ -204,6 +257,144 @@ function getFeePaidAmount(m: Movement) {
   return Number(m.feeAmount ?? m.studentFee?.montantPaye ?? m.trainingFee?.montant ?? m.amount ?? 0);
 }
 
+function getMovementRealAmount(m: Partial<Movement>) {
+  const debit = Number(m.debit || 0);
+  const credit = Number(m.credit || 0);
+  const amount = Number(m.amount ?? m.montant ?? m.feeAmount ?? 0);
+
+  if (debit > 0) return debit;
+  if (credit > 0) return credit;
+  return amount;
+}
+
+
+function getMovementInsertionTime(m: Partial<Movement>) {
+  const createdAt = new Date(String(m.createdAt || "")).getTime();
+  if (Number.isFinite(createdAt)) return createdAt;
+
+  const date = new Date(String((m as any).date || "")).getTime();
+  if (Number.isFinite(date)) return date;
+
+  const idText = String(m.id || "");
+  const numericParts = idText.match(/\d{10,}/g) || [];
+  const lastNumeric = numericParts.length ? Number(numericParts[numericParts.length - 1]) : NaN;
+  if (Number.isFinite(lastNumeric)) return lastNumeric;
+
+  return 0;
+}
+
+function getStableMovementType(m: Partial<Movement>) {
+  const category = normalizeCategory(m.category || m.categorie || "");
+  const raw = normalizeMovementType(getRawMovementType(m as any));
+  const debit = Number(m.debit || 0);
+  const credit = Number(m.credit || 0);
+
+  // PRIORITÉ ABSOLUE AU TYPE EXPLICITE.
+  // Important ho an'ny "Nouveau Mouvement": raha misafidy DEBIT ny utilisateur,
+  // dia DEBIT foana no aseho na inona na inona Motif/Catégorie nofidiana.
+  // Raha misafidy CREDIT dia CREDIT foana koa.
+  if (raw === "SORTIE") return "SORTIE";
+  if (raw === "ENTREE") return "ENTREE";
+
+  // Raha tsy misy type explicite dia debit/credit montant no mamaritra.
+  if (debit > 0 && credit <= 0) return "SORTIE";
+  if (credit > 0 && debit <= 0) return "ENTREE";
+
+  // Fallback ho an'ny anciennes données frais izay tsy manana type/debit/credit mazava.
+  if (category === "ANNULATION_PAIEMENT_FRAIS") return "SORTIE";
+  if (category === "PAIEMENT_FRAIS") return "ENTREE";
+
+  return raw;
+}
+
+function getMovementStorageKey(movementOrId: Movement | number | string | null | undefined) {
+  if (movementOrId === null || movementOrId === undefined) return "";
+
+  // Rehefa string/number no omena dia id direct io.
+  if (typeof movementOrId === "string" || typeof movementOrId === "number") return String(movementOrId);
+
+  const m = movementOrId;
+  const realId = cleanText(m.id);
+  if (isRealDatabaseId(realId)) return realId;
+
+  // Stable key: tsy miankina amin'ny id fake generated, mba tsy hiteraka doublon
+  // raha tonga avy amin'ny API sy localStorage ilay mouvement mitovy.
+  return [
+    cleanText(m.reference).toUpperCase(),
+    getMovementDayKey(m.createdAt),
+    Number(m.treasuryId || 0),
+    getStableMovementType(m),
+    normalizeCategory(m.category || m.categorie || ""),
+    Number(m.studentId || m.student?.id || 0),
+    Number(m.studentFeeId || m.studentFee?.id || 0),
+    Number(m.trainingFeeId || m.trainingFee?.id || 0),
+    cleanText(m.feeCode || m.studentFee?.code || m.trainingFee?.code).toUpperCase(),
+    getMovementRealAmount(m),
+  ].join("|");
+}
+
+function getMovementDeleteKeys(movementOrId: Movement | number | string | null | undefined) {
+  if (movementOrId === null || movementOrId === undefined) return [] as string[];
+  if (typeof movementOrId === "string" || typeof movementOrId === "number") {
+    return [String(movementOrId)];
+  }
+
+  const keys = new Set<string>();
+  keys.add(String(movementOrId.id || ""));
+  keys.add(getMovementStorageKey(movementOrId));
+  return Array.from(keys).filter(Boolean);
+}
+
+function isRealDatabaseId(id: number | string | null | undefined) {
+  if (id === null || id === undefined) return false;
+  return /^\d+$/.test(String(id));
+}
+
+function getDeletedMovementIds() {
+  if (typeof window === "undefined") return [] as string[];
+  try {
+    const parsed = JSON.parse(localStorage.getItem("deletedTreasuryMovementIds") || "[]");
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveDeletedMovementId(id: number | string) {
+  if (typeof window === "undefined") return;
+  const key = String(id);
+  const ids = getDeletedMovementIds();
+  if (!ids.includes(key)) {
+    localStorage.setItem("deletedTreasuryMovementIds", JSON.stringify([...ids, key]));
+  }
+}
+
+function saveDeletedMovementKeys(keys: string[]) {
+  if (typeof window === "undefined") return;
+  const current = new Set(getDeletedMovementIds());
+  keys.forEach((key) => {
+    if (key) current.add(String(key));
+  });
+  localStorage.setItem("deletedTreasuryMovementIds", JSON.stringify(Array.from(current)));
+}
+
+function removeLocalTreasuryMovement(idOrMovement: Movement | number | string) {
+  if (typeof window === "undefined") return;
+  try {
+    const deleteKeys = new Set(getMovementDeleteKeys(idOrMovement));
+    const rawLocal = localStorage.getItem("treasuryMovements");
+    const parsedLocal = rawLocal ? JSON.parse(rawLocal) : [];
+    const list = Array.isArray(parsedLocal) ? parsedLocal : [];
+    const filtered = list.filter((item: any) => {
+      const itemKeys = getMovementDeleteKeys(item);
+      return !itemKeys.some((key) => deleteKeys.has(key));
+    });
+    localStorage.setItem("treasuryMovements", JSON.stringify(filtered));
+  } catch {
+    // Tsy manakana suppression raha localStorage misy erreur.
+  }
+}
+
 export default function TreasuryMovementsPage() {
   const [treasuries, setTreasuries] = useState<Treasury[]>([]);
   const [movements, setMovements] = useState<Movement[]>([]);
@@ -219,7 +410,7 @@ export default function TreasuryMovementsPage() {
 
   const [formDate, setFormDate] = useState(todayInput());
   const [formTreasuryId, setFormTreasuryId] = useState("");
-  const [formType, setFormType] = useState<"ENTREE" | "SORTIE" | "">("");
+  const [formType, setFormType] = useState<"CREDIT" | "DEBIT" | "">("");
   const [formAmount, setFormAmount] = useState("");
   const [formReference, setFormReference] = useState(`TR-${Date.now()}`);
   const [formMotif, setFormMotif] = useState("");
@@ -252,7 +443,52 @@ export default function TreasuryMovementsPage() {
       if (!movementRes.ok) throw new Error(getErrorMessage(movementJson, "Erreur chargement mouvements"));
 
       setTreasuries(Array.isArray(treasuryJson.treasuries) ? treasuryJson.treasuries : []);
-      setMovements(Array.isArray(movementJson.movements) ? movementJson.movements : []);
+      const apiMovements = Array.isArray(movementJson.movements) ? movementJson.movements : [];
+      let localMovements: Movement[] = [];
+      try {
+        const rawLocal = localStorage.getItem("treasuryMovements");
+        const parsedLocal = rawLocal ? JSON.parse(rawLocal) : [];
+        localMovements = Array.isArray(parsedLocal) ? parsedLocal : [];
+      } catch {
+        localMovements = [];
+      }
+
+      const deletedIds = new Set(getDeletedMovementIds());
+
+      // API no source principale. LocalStorage ampiasaina fallback ihany.
+      // Raha mitovy reference/date/trésorerie/type/montant dia tazonina ilay API record
+      // mba tsy hisy duplication amin'ny affichage.
+      const merged = [...localMovements, ...apiMovements];
+      const unique = new Map<string, Movement>();
+
+      for (const rawItem of merged) {
+        const item = {
+          ...rawItem,
+          amount: getMovementRealAmount(rawItem),
+          movementType: getStableMovementType(rawItem) === "SORTIE" ? "DEBIT" : "CREDIT",
+          type: getStableMovementType(rawItem) === "SORTIE" ? "DEBIT" : "CREDIT",
+          sens: getStableMovementType(rawItem) === "SORTIE" ? "DEBIT" : "CREDIT",
+          operation: getStableMovementType(rawItem) === "SORTIE" ? "DEBIT" : "CREDIT",
+          category: normalizeCategory(rawItem.category || rawItem.categorie || rawItem.category),
+        } as Movement;
+
+        const itemKeys = getMovementDeleteKeys(item);
+        if (itemKeys.some((key) => deletedIds.has(key))) continue;
+
+        const key = getMovementStorageKey(item);
+        if (!key) continue;
+
+        const existing = unique.get(key);
+        const existingIsReal = existing ? isRealDatabaseId(existing.id) : false;
+        const itemIsReal = isRealDatabaseId(item.id);
+
+        // Raha misy doublon: real DB id no prioritaire, sinon ilay vao farany no tazonina.
+        if (!existing || (!existingIsReal && itemIsReal)) {
+          unique.set(key, item);
+        }
+      }
+
+      setMovements(Array.from(unique.values()));
     } catch (error) {
       console.error("TREASURY_MOVEMENTS_LOAD_ERROR", error);
       alert(error instanceof Error ? error.message : "Erreur chargement mouvements");
@@ -268,7 +504,7 @@ export default function TreasuryMovementsPage() {
 
   const categories = useMemo(() => {
     const set = new Set<string>();
-    for (const m of movements) if (m.category) set.add(m.category);
+    for (const m of movements) if (m.category) set.add(normalizeCategory(m.category));
     return Array.from(set).sort();
   }, [movements]);
 
@@ -277,45 +513,55 @@ export default function TreasuryMovementsPage() {
     const from = filterFrom ? new Date(`${filterFrom}T00:00:00`) : null;
     const to = filterTo ? new Date(`${filterTo}T23:59:59`) : null;
 
-    return movements.filter((m) => {
-      const created = new Date(m.createdAt);
-      const paymentMode = getPaymentModeFromDescription(m.description);
-      const studentName = getStudentName(m);
-      const studentMatricule = getStudentMatricule(m);
-      const studentClass = getStudentClass(m);
+    return movements
+      .filter((m) => {
+        const created = new Date(m.createdAt);
+        const paymentMode = getPaymentModeFromDescription(m.description);
+        const studentName = getStudentName(m);
+        const studentMatricule = getStudentMatricule(m);
+        const studentClass = getStudentClass(m);
 
-      if (from && !Number.isNaN(created.getTime()) && created < from) return false;
-      if (to && !Number.isNaN(created.getTime()) && created > to) return false;
-      if (filterTreasury && String(m.treasuryId) !== filterTreasury) return false;
-      if (filterMovementType !== "TOUT" && m.movementType !== filterMovementType) return false;
-      if (filterCategory && m.category !== filterCategory) return false;
-      if (filterPaymentMode && paymentMode.toLowerCase() !== filterPaymentMode.toLowerCase()) return false;
-      if (filterMatricule && !studentMatricule.toLowerCase().includes(filterMatricule.toLowerCase())) return false;
-      if (filterClasse && !studentClass.toLowerCase().includes(filterClasse.toLowerCase())) return false;
+        if (from && !Number.isNaN(created.getTime()) && created < from) return false;
+        if (to && !Number.isNaN(created.getTime()) && created > to) return false;
+        if (filterTreasury && String(m.treasuryId) !== filterTreasury) return false;
+        if (filterMovementType !== "TOUT" && getMovementTypeLabel(getStableMovementType(m)) !== filterMovementType) return false;
+        if (filterCategory && normalizeCategory(m.category) !== normalizeCategory(filterCategory)) return false;
+        if (filterPaymentMode && paymentMode.toLowerCase() !== filterPaymentMode.toLowerCase()) return false;
+        if (filterMatricule && !studentMatricule.toLowerCase().includes(filterMatricule.toLowerCase())) return false;
+        if (filterClasse && !studentClass.toLowerCase().includes(filterClasse.toLowerCase())) return false;
 
-      const haystack = [
-        m.reference,
-        m.category,
-        getMovementLabel(m),
-        m.description,
-        m.movementType,
-        m.treasury?.name,
-        m.schoolYearName,
-        m.createdBy,
-        studentName,
-        studentMatricule,
-        studentClass,
-        getFeeLabelFromMovement(m),
-        getFeeCodeFromMovement(m),
-        paymentMode,
-      ]
-        .filter((v) => v !== null && v !== undefined)
-        .join(" ")
-        .toLowerCase();
+        const haystack = [
+          m.reference,
+          m.category,
+          getMovementLabel(m),
+          m.description,
+          m.movementType,
+          m.treasury?.name,
+          m.schoolYearName,
+          m.createdBy,
+          studentName,
+          studentMatricule,
+          studentClass,
+          getFeeLabelFromMovement(m),
+          getFeeCodeFromMovement(m),
+          paymentMode,
+        ]
+          .filter((v) => v !== null && v !== undefined)
+          .join(" ")
+          .toLowerCase();
 
-      if (q && !haystack.includes(q)) return false;
-      return true;
-    });
+        if (q && !haystack.includes(q)) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        // Affichage demandé: izay mouvement inseré farany no miseho ambony.
+        // Mifototra amin'ny createdAt/date d'insertion, ary fallback amin'ny timestamp ao amin'ny id raha local/generated.
+        const db = getMovementInsertionTime(b);
+        const da = getMovementInsertionTime(a);
+        if (db !== da) return db - da;
+
+        return String(b.id || "").localeCompare(String(a.id || ""), "fr", { numeric: true });
+      });
   }, [
     movements,
     search,
@@ -330,12 +576,12 @@ export default function TreasuryMovementsPage() {
   ]);
 
   const totalCredit = filteredMovements
-    .filter((m) => m.movementType === "ENTREE")
-    .reduce((sum, m) => sum + Number(m.amount || 0), 0);
+    .filter((m) => isCreditMovement(m))
+    .reduce((sum, m) => sum + getMovementRealAmount(m), 0);
 
   const totalDebit = filteredMovements
-    .filter((m) => m.movementType === "SORTIE")
-    .reduce((sum, m) => sum + Number(m.amount || 0), 0);
+    .filter((m) => isDebitMovement(m))
+    .reduce((sum, m) => sum + getMovementRealAmount(m), 0);
 
   const solde = totalCredit - totalDebit;
 
@@ -351,8 +597,8 @@ export default function TreasuryMovementsPage() {
         solde: 0,
       };
 
-      if (m.movementType === "ENTREE") current.credit += Number(m.amount || 0);
-      if (m.movementType === "SORTIE") current.debit += Number(m.amount || 0);
+      if (isCreditMovement(m)) current.credit += getMovementRealAmount(m);
+      if (isDebitMovement(m)) current.debit += getMovementRealAmount(m);
       current.solde = current.credit - current.debit;
       map.set(key, current);
     }
@@ -363,29 +609,44 @@ export default function TreasuryMovementsPage() {
   const realGlobalSolde = realBalanceByTreasury.reduce((sum, item) => sum + item.solde, 0);
 
   const balanceByMovement = useMemo(() => {
-    const map = new Map<number, { before: number; after: number; debit: number; credit: number }>();
-    const runningByTreasury = new Map<number, number>();
+    const map = new Map<string, { before: number; after: number; debit: number; credit: number }>();
 
-    // Solde réel: calculé sur TOUS les mouvements chargés, pas seulement sur le filtre affiché.
-    // Le solde est calculé par trésorerie pour éviter de mélanger Caisse, Banque, MVola, etc.
+    // Logique demandée:
+    // - Chaque journée repart à 0.
+    // - Dans une même journée, le solde avant reprend le solde après de la ligne précédente.
+    // - La dernière insertion de la journée porte donc le compte final du jour.
+    // - Le calcul reste séparé par trésorerie pour ne pas mélanger Caisse, Banque, MVola, etc.
+    const runningByTreasuryAndDay = new Map<string, number>();
+
     [...movements]
       .sort((a, b) => {
+        const dayA = getMovementDayKey(a.createdAt);
+        const dayB = getMovementDayKey(b.createdAt);
+        if (dayA !== dayB) return dayA.localeCompare(dayB);
+
+        const treasuryA = Number(a.treasuryId || 0);
+        const treasuryB = Number(b.treasuryId || 0);
+        if (treasuryA !== treasuryB) return treasuryA - treasuryB;
+
         const da = new Date(a.createdAt).getTime();
         const db = new Date(b.createdAt).getTime();
         if (da !== db) return da - db;
-        return a.id - b.id;
+
+        return String(a.id || "").localeCompare(String(b.id || ""), "fr", { numeric: true });
       })
       .forEach((m) => {
         const treasuryKey = Number(m.treasuryId || 0);
-        const previous = runningByTreasury.get(treasuryKey) || 0;
-        const amount = Number(m.amount || 0);
-        const debit = m.movementType === "SORTIE" ? amount : 0;
-        const credit = m.movementType === "ENTREE" ? amount : 0;
+        const dayKey = getMovementDayKey(m.createdAt);
+        const runningKey = `${treasuryKey}-${dayKey}`;
+        const previous = runningByTreasuryAndDay.get(runningKey) || 0;
+        const amount = getMovementRealAmount(m);
+        const debit = isDebitMovement(m) ? amount : 0;
+        const credit = isCreditMovement(m) ? amount : 0;
         const before = previous;
         const after = previous - debit + credit;
 
-        runningByTreasury.set(treasuryKey, after);
-        map.set(m.id, { before, after, debit, credit });
+        runningByTreasuryAndDay.set(runningKey, after);
+        map.set(getMovementStorageKey(m), { before, after, debit, credit });
       });
 
     return map;
@@ -404,30 +665,55 @@ export default function TreasuryMovementsPage() {
 
     setSaving(true);
     try {
-      const category = formMotif || (formType === "ENTREE" ? "ENTREE_MANUELLE" : "DEPENSE");
+      const selectedType: "CREDIT" | "DEBIT" = formType === "DEBIT" ? "DEBIT" : "CREDIT";
+      const category = formMotif || (selectedType === "CREDIT" ? "ENTREE_MANUELLE" : "DEPENSE");
+      const movementLabel = formDescription || getMovementLabel({ category, movementType: selectedType });
+      const insertionDate = formDate || todayInput();
+      const now = new Date();
+      const insertionDateTime = `${insertionDate}T${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}.${String(now.getMilliseconds()).padStart(3, "0")}`;
+
+      const payload = {
+        treasuryId,
+
+        // TYPE FORCÉ PAR LE CHOIX UTILISATEUR, PAS PAR LE MOTIF.
+        // CREDIT sélectionné => CREDIT foana.
+        // DEBIT sélectionné => DEBIT foana.
+        movementType: selectedType,
+        type: selectedType,
+        sens: selectedType,
+        operation: selectedType,
+        nature: selectedType,
+
+        category,
+        categorie: category,
+        amount,
+        montant: amount,
+        debit: selectedType === "DEBIT" ? amount : 0,
+        credit: selectedType === "CREDIT" ? amount : 0,
+        description: movementLabel,
+        motif: movementLabel,
+        libelle: movementLabel,
+        reference: formReference || `TR-${Date.now()}`,
+        schoolYearName,
+        date: insertionDate,
+        createdAt: insertionDateTime,
+      };
+
       const res = await fetch("/api/treasury-movements", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          treasuryId,
-          movementType: formType,
-          category,
-          amount,
-          description: formDescription || getMovementLabel({ category, movementType: formType }),
-          reference: formReference || `TR-${Date.now()}`,
-          schoolYearName,
-          createdAt: formDate,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(getErrorMessage(data, "Erreur enregistrement mouvement"));
 
-      const movementDate = formDate || todayInput();
 
       setShowNewModal(false);
-      setFilterFrom(movementDate);
-      setFilterTo(movementDate);
+      // Affichage filtré par date d'insertion: rehefa mamorona mouvement vaovao
+      // dia aseho avy hatrany ilay andro nampidirana azy ihany.
+      setFilterFrom(formDate || todayInput());
+      setFilterTo(formDate || todayInput());
       setFormDate(todayInput());
       setFormTreasuryId("");
       setFormType("");
@@ -444,13 +730,38 @@ export default function TreasuryMovementsPage() {
     }
   }
 
-  async function deleteMovement(id: number) {
+  async function deleteMovement(id: number | string) {
+    const target = movements.find((item) => String(item.id) === String(id) || getMovementStorageKey(item) === String(id));
+    const movementId = String(id || "").trim();
+    const deleteKeys = getMovementDeleteKeys(target || movementId);
+
+    if (!movementId && deleteKeys.length === 0) return alert("ID mouvement introuvable.");
     if (!confirm("Supprimer ce mouvement ?")) return;
+
     try {
-      const res = await fetch(`/api/treasury-movements?id=${id}`, { method: "DELETE" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(getErrorMessage(data, "Erreur suppression mouvement"));
-      await loadData();
+      const realId = target && isRealDatabaseId(target.id) ? String(target.id) : isRealDatabaseId(movementId) ? movementId : "";
+
+      if (realId) {
+        const res = await fetch(`/api/treasury-movements?id=${encodeURIComponent(realId)}`, {
+          method: "DELETE",
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(getErrorMessage(data, "Erreur suppression mouvement"));
+      }
+
+      // Na real DB na id texte: soratana ao anaty liste supprimée ny id sy stable key
+      // mba tsy hiverina miseho indray rehefa refresh.
+      saveDeletedMovementKeys(deleteKeys.length ? deleteKeys : [movementId]);
+      removeLocalTreasuryMovement(target || movementId);
+
+      setMovements((prev) =>
+        prev.filter((item) => {
+          const itemKeys = getMovementDeleteKeys(item);
+          return !itemKeys.some((key) => (deleteKeys.length ? deleteKeys : [movementId]).includes(key));
+        })
+      );
+
+      if (realId) await loadData();
     } catch (error) {
       console.error("TREASURY_MOVEMENT_DELETE_ERROR", error);
       alert(error instanceof Error ? error.message : "Erreur suppression mouvement");
@@ -491,7 +802,7 @@ export default function TreasuryMovementsPage() {
     ];
 
     const rows = filteredMovements.map((m) => {
-      const balance = balanceByMovement.get(m.id) || { before: 0, debit: 0, credit: 0, after: 0 };
+      const balance = balanceByMovement.get(getMovementStorageKey(m)) || { before: 0, debit: 0, credit: 0, after: 0 };
       return [
         m.schoolYearName || schoolYearName,
         formatDateFR(m.createdAt),
@@ -580,24 +891,37 @@ export default function TreasuryMovementsPage() {
 
         <div className="rounded-[6px] border border-slate-200 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b bg-slate-800 px-3 py-2 text-white">
-            <div className="font-bold">Résumé journalier</div>
-            <div className="text-[10px] text-slate-200">Solde réel calculé selon la date filtrée</div>
+            <div className="font-bold">Résumé des mouvements</div>
+            <div className="text-[10px] text-slate-200">Paiement frais = CREDIT • Annulation frais = DEBIT</div>
           </div>
 
           <div className="grid grid-cols-1 gap-2 p-3 md:grid-cols-3">
             <div className="rounded-[6px] border border-emerald-200 bg-emerald-50 p-3 shadow-sm">
-              <div className="text-[10px] uppercase tracking-wide text-emerald-700">Total Crédit du jour</div>
+              <div className="text-[10px] uppercase tracking-wide text-emerald-700">Total Crédit</div>
               <div className="mt-1 text-[18px] font-black text-emerald-700">{money(totalCredit)}</div>
             </div>
             <div className="rounded-[6px] border border-red-200 bg-red-50 p-3 shadow-sm">
-              <div className="text-[10px] uppercase tracking-wide text-red-700">Total Débit du jour</div>
+              <div className="text-[10px] uppercase tracking-wide text-red-700">Total Débit</div>
               <div className="mt-1 text-[18px] font-black text-red-700">{money(totalDebit)}</div>
             </div>
-            <div className="rounded-[6px] border border-slate-200 bg-slate-900 p-3 text-white shadow-sm">
-              <div className="text-[10px] uppercase tracking-wide text-slate-300">Solde réel global du jour</div>
-              <div className={realGlobalSolde >= 0 ? "mt-1 text-[18px] font-black text-white" : "mt-1 text-[18px] font-black text-red-200"}>
+            <div
+              className={
+                realGlobalSolde >= 0
+                  ? "rounded-[6px] border border-slate-200 bg-slate-900 p-3 text-white shadow-sm"
+                  : "rounded-[6px] border-2 border-red-500 bg-red-700 p-3 text-white shadow-sm"
+              }
+            >
+              <div className={realGlobalSolde >= 0 ? "text-[10px] uppercase tracking-wide text-slate-300" : "text-[10px] uppercase tracking-wide text-red-100"}>
+                Solde du filtre/date
+              </div>
+              <div className={realGlobalSolde >= 0 ? "mt-1 text-[18px] font-black text-white" : "mt-1 text-[18px] font-black text-white"}>
                 {money(realGlobalSolde)}
               </div>
+              {realGlobalSolde < 0 && (
+                <div className="mt-1 rounded bg-white/15 px-2 py-1 text-[10px] font-bold text-white">
+                  ⚠ Solde négatif : perte / compte en moins
+                </div>
+              )}
             </div>
           </div>
 
@@ -617,21 +941,47 @@ export default function TreasuryMovementsPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="rechercher élève, frais, matricule, classe..."
-            className="h-[30px] w-full max-w-[320px] border border-slate-300 px-2 outline-none focus:border-cyan-600"
-          />
-          <button
-            type="button"
-            onClick={() => setShowFilterModal(true)}
-            className="h-[30px] w-[28px] rounded-[3px] bg-cyan-600 text-white hover:bg-cyan-700"
-            title="Filtrer"
-          >
-            ▼
-          </button>
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-wrap items-center gap-2 rounded-[4px] border border-cyan-200 bg-cyan-50 p-2">
+            <span className="text-[11px] font-bold text-cyan-900">Affichage par date d'insertion</span>
+            <input
+              type="date"
+              value={filterFrom}
+              onChange={(e) => {
+                setFilterFrom(e.target.value);
+                setFilterTo(e.target.value);
+              }}
+              className="h-[30px] border border-cyan-300 bg-white px-2 text-[12px] font-semibold text-slate-800 outline-none focus:border-cyan-600"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const today = todayInput();
+                setFilterFrom(today);
+                setFilterTo(today);
+              }}
+              className="h-[30px] rounded-[3px] bg-cyan-600 px-3 text-[11px] font-semibold text-white hover:bg-cyan-700"
+            >
+              Aujourd'hui
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="rechercher élève, frais, matricule, classe..."
+              className="h-[30px] w-full max-w-[320px] border border-slate-300 px-2 outline-none focus:border-cyan-600"
+            />
+            <button
+              type="button"
+              onClick={() => setShowFilterModal(true)}
+              className="h-[30px] w-[28px] rounded-[3px] bg-cyan-600 text-white hover:bg-cyan-700"
+              title="Filtrer"
+            >
+              ▼
+            </button>
+          </div>
         </div>
 
         <div className="hidden overflow-x-auto rounded-[4px] border border-slate-300 bg-white md:block">
@@ -678,7 +1028,7 @@ export default function TreasuryMovementsPage() {
                   const studentClass = getStudentClass(m);
                   const feeLabel = getFeeLabelFromMovement(m);
                   const feeCode = getFeeCodeFromMovement(m);
-                  const balance = balanceByMovement.get(m.id) || { before: 0, debit: 0, credit: 0, after: 0 };
+                  const balance = balanceByMovement.get(getMovementStorageKey(m)) || { before: 0, debit: 0, credit: 0, after: 0 };
                   const modePaiement = getPaymentModeFromDescription(m.description);
 
                   return (
@@ -717,12 +1067,12 @@ export default function TreasuryMovementsPage() {
                       <td className="border px-2 py-1 align-top text-center">
                         <span
                           className={
-                            m.movementType === "ENTREE"
+                            isCreditMovement(m)
                               ? "inline-flex rounded-full bg-emerald-100 px-2 py-[2px] text-[9px] font-bold text-emerald-700"
                               : "inline-flex rounded-full bg-red-100 px-2 py-[2px] text-[9px] font-bold text-red-700"
                           }
                         >
-                          {getMovementTypeLabel(m.movementType)}
+                          {getMovementTypeLabel(getStableMovementType(m))}
                         </span>
                       </td>
                       <td className="border px-2 py-1 align-top whitespace-nowrap">{feeCode}</td>
@@ -734,7 +1084,16 @@ export default function TreasuryMovementsPage() {
                       <td className="border px-2 py-1 align-top text-right font-bold text-emerald-700 whitespace-nowrap">
                         {balance.credit ? money(balance.credit) : "-"}
                       </td>
-                      <td className="border px-2 py-1 align-top text-right font-bold text-blue-700 whitespace-nowrap">{money(balance.after)}</td>
+                      <td
+                        className={
+                          balance.after >= 0
+                            ? "border px-2 py-1 align-top text-right font-bold text-blue-700 whitespace-nowrap"
+                            : "border px-2 py-1 align-top text-right font-black text-red-700 bg-red-50 whitespace-nowrap"
+                        }
+                      >
+                        {money(balance.after)}
+                        {balance.after < 0 && <div className="text-[8px] font-bold text-red-600">⚠ moins</div>}
+                      </td>
                       <td className="border px-2 py-1 align-top">
                         <div className="max-w-[110px] truncate" title={m.createdBy || ""}>{m.createdBy || "-"}</div>
                       </td>
@@ -763,8 +1122,8 @@ export default function TreasuryMovementsPage() {
             const studentClass = getStudentClass(m);
             const feeLabel = getFeeLabelFromMovement(m);
             const feeCode = getFeeCodeFromMovement(m);
-            const isPaymentFee = m.category === "PAIEMENT_FRAIS" || m.category === "ANNULATION_PAIEMENT_FRAIS";
-            const balance = balanceByMovement.get(m.id) || { before: 0, debit: 0, credit: 0, after: 0 };
+            const isPaymentFee = isFeeMovement(m);
+            const balance = balanceByMovement.get(getMovementStorageKey(m)) || { before: 0, debit: 0, credit: 0, after: 0 };
 
             return (
               <div key={`mobile-${m.id}`} className="rounded-[6px] border border-slate-200 bg-white p-3 shadow-sm">
@@ -779,12 +1138,12 @@ export default function TreasuryMovementsPage() {
                   </div>
                   <span
                     className={
-                      m.movementType === "ENTREE"
+                      isCreditMovement(m)
                         ? "shrink-0 rounded-full bg-emerald-100 px-2 py-[2px] text-[10px] font-bold text-emerald-700"
                         : "shrink-0 rounded-full bg-red-100 px-2 py-[2px] text-[10px] font-bold text-red-700"
                     }
                   >
-                    {getMovementTypeLabel(m.movementType)}
+                    {getMovementTypeLabel(getStableMovementType(m))}
                   </span>
                 </div>
 
@@ -796,10 +1155,13 @@ export default function TreasuryMovementsPage() {
                   </div>
                   <div className="text-right">
                     <span className="text-slate-500">Montant</span>
-                    <p className={m.movementType === "ENTREE" ? "font-black text-emerald-700" : "font-black text-red-700"}>
-                      {money(m.amount)}
+                    <p className={isCreditMovement(m) ? "font-black text-emerald-700" : "font-black text-red-700"}>
+                      {money(getMovementRealAmount(m))}
                     </p>
-                    <p className="text-[10px] text-slate-500">Solde après: {money(balance.after)}</p>
+                    <p className={balance.after >= 0 ? "text-[10px] text-slate-500" : "rounded bg-red-50 px-1 text-[10px] font-bold text-red-700"}>
+                      Solde après: {money(balance.after)}
+                      {balance.after < 0 ? " ⚠ moins" : ""}
+                    </p>
                     <p className="text-[10px] text-slate-500">N° {m.id} • {m.treasury?.name || "-"}</p>
                   </div>
                 </div>
@@ -832,8 +1194,8 @@ export default function TreasuryMovementsPage() {
                   <span>Type du Mouvement</span>
                   <select value={formType} onChange={(e) => setFormType(e.target.value as any)} className="h-[26px] w-full border px-2">
                     <option value="">Choisissez le type du mouvement</option>
-                    <option value="ENTREE">CREDIT</option>
-                    <option value="SORTIE">DEBIT</option>
+                    <option value="CREDIT">CREDIT</option>
+                    <option value="DEBIT">DEBIT</option>
                   </select>
                 </label>
                 <label className="space-y-1">
@@ -863,6 +1225,7 @@ export default function TreasuryMovementsPage() {
                   <select value={formMotif} onChange={(e) => setFormMotif(e.target.value)} className="h-[26px] w-full border px-2">
                     <option value="">Choisissez le motif</option>
                     <option value="PAIEMENT_FRAIS">Paiement frais</option>
+                    <option value="ANNULATION_PAIEMENT_FRAIS">Annulation paiement frais</option>
                     <option value="ENTREE_MANUELLE">Entrée manuelle</option>
                     <option value="DEPENSE">Dépense</option>
                     <option value="TRANSFERT">Transfert</option>
@@ -921,8 +1284,8 @@ export default function TreasuryMovementsPage() {
                   <span>Type mouvement</span>
                   <select value={filterMovementType} onChange={(e) => setFilterMovementType(e.target.value)} className="h-[26px] w-full border border-slate-300 px-2">
                     <option value="TOUT">TOUT</option>
-                    <option value="ENTREE">CREDIT</option>
-                    <option value="SORTIE">DEBIT</option>
+                    <option value="CREDIT">CREDIT</option>
+                    <option value="DEBIT">DEBIT</option>
                   </select>
                 </label>
                 <label className="space-y-1">
