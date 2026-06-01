@@ -29,7 +29,6 @@ export async function POST(req: Request) {
 try {
 const auth = await getAuthUser();
 
-```
 if (!auth || auth.role !== "ADMIN") {
   return NextResponse.json(
     { error: "Accès refusé" },
@@ -39,11 +38,11 @@ if (!auth || auth.role !== "ADMIN") {
 
 const body = await req.json();
 
-const name = String(body.name || "").trim();
-const email = String(body.email || "")
+const name = (body.name || "").trim();
+const email = (body.email || "")
   .trim()
   .toLowerCase();
-const password = String(body.password || "");
+const password = body.password || "";
 const roleId = body.roleId
   ? Number(body.roleId)
   : null;
@@ -75,7 +74,8 @@ if (existingUser) {
 let systemRole:
   | "ADMIN"
   | "DIRECTEUR"
-  | "SECRETAIRE" = "SECRETAIRE";
+  | "SECRETAIRE" =
+  "SECRETAIRE";
 
 let selectedRole = null;
 
@@ -104,12 +104,9 @@ const user = await prisma.user.create({
     name,
     email,
     password: hashedPassword,
-
     role: systemRole,
-
     roleId:
       selectedRole?.id ?? null,
-
     active: true,
   },
   include: {
@@ -118,7 +115,6 @@ const user = await prisma.user.create({
 });
 
 return NextResponse.json(user);
-```
 
 } catch (error: any) {
 console.error(
@@ -126,7 +122,6 @@ console.error(
 error
 );
 
-```
 if (error?.code === "P2002") {
   return NextResponse.json(
     {
@@ -145,7 +140,6 @@ return NextResponse.json(
   },
   { status: 500 }
 );
-```
 
 }
 }
