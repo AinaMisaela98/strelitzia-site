@@ -46,7 +46,7 @@ model User {
 
   // Champ ancien conservé pour ne pas casser le login, la sidebar et les reçus.
   // Il garde ADMIN / DIRECTEUR / SECRETAIRE ou le nom du rôle personnalisé.
-  role      String   @default("SECRETAIRE")
+  role Role @default(SECRETAIRE)
 
   // Nouveau rôle personnalisable créé par l'ADMIN.
   // Table réelle en production: "UserRole" pour éviter le conflit avec l'ancien enum PostgreSQL "Role".
