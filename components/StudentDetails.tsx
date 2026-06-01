@@ -219,12 +219,18 @@ function normalizeDateOnly(value: any) {
   return parsed.toISOString().slice(0, 10);
 }
 
-function buildInsertionDateTime(_dateOnly?: string) {
-  // Filaharana logique ao amin'ny Trésorerie mouvements:
-  // izay action natao farany (paiement na annulation) no ambony indrindra,
-  // na inona na inona date paiement nosafidiana.
+function buildInsertionDateTime(dateOnly?: string) {
+  // Filtre par date ao amin'ny Trésorerie mouvements:
+  // ny daty dia ilay date paiement nosafidiana.
+  // Ny ora kosa dia heure réelle nanaovana insertion mba hilaharana tsara ao anatin'ilay daty.
+  const movementDate = normalizeDateOnly(dateOnly || new Date().toISOString().slice(0, 10));
   const now = new Date();
-  return now.toISOString();
+
+  return `${movementDate}T${String(now.getHours()).padStart(2, "0")}:${String(
+    now.getMinutes()
+  ).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}.${String(
+    now.getMilliseconds()
+  ).padStart(3, "0")}`;
 }
 
 function getSelectedPaymentDate() {
