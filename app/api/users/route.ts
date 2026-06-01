@@ -32,7 +32,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
   }
 
-  const { name, email, password, role, active } = await req.json();
+  const {
+  name,
+  email,
+  password,
+  role,
+  roleId,
+} = await req.json();
 
   if (!name || !email || !password || !role) {
     return NextResponse.json({ error: "Champs incomplets" }, { status: 400 });
