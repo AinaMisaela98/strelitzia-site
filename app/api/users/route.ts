@@ -39,16 +39,36 @@ export async function POST(req: Request) {
   }
 
   const hashedPassword = await bcrypt.hash(password, 10);
-
+try {
   const user = await prisma.user.create({
     data: {
       name,
-      email,
+      email: email.trim().toLowerCase(),
       password: hashedPassword,
       role,
-      active: active ?? true,
+      roleId: roleId || null,
+      active: true,
     },
   });
 
   return NextResponse.json(user);
+} catch (error: any) {
+  if (error?.code === "P2002") {
+    return NextResponse.json(
+      {
+        error: "Cette adresse email existe déjà.",
+      },
+      { status: 400 }
+    );
+  }
+
+  console.error("CREATE_USER_ERROR", error);
+
+  return NextResponse.json(
+    {
+      error: "Erreur lors de la création de l'utilisateur",
+    },
+    { status: 500 }
+  );
+}
 }
