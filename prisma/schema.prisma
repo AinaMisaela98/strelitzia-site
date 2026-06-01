@@ -22,7 +22,11 @@ model UserRole {
 
   @@map("UserRole")
 }
-
+enum Role {
+  ADMIN
+  DIRECTEUR
+  SECRETAIRE
+}
 enum Sexe {
   Masculin
   Feminin
