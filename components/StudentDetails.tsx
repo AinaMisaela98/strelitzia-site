@@ -855,25 +855,27 @@ async function payOneFee(fee: any) {
       saved = res.ok;
     }
 
-    // Fallback local: mampandeha paiement/impression na dia mbola tsy vonona aza ny API POST/PATCH.
+    // Sécurité anti-doublon:
+    // Si /api/student-fees a répondu OK, c'est l'API qui a déjà créé le mouvement CREDIT.
+    // Donc le frontend ne recrée PAS de mouvement.
+    // On crée un mouvement ici uniquement si l'API student-fees n'a pas sauvegardé,
+    // pour garder un fallback local/API treasury-movements sans doublon.
     if (!saved) {
       saveLocalPayment(getPaymentKey(fee), paidFee);
-    }
 
-    // Mamorona mouvement CREDIT indray mandeha ihany, amin'ny date paiement choisie.
-    // Tsy asiana treasuryId ao amin'ny studentPayment satria tsy ao amin'ny Prisma schema io champ io.
-    await createFeeTreasuryMovement(fee, "CREDIT", {
-      amount: getFeeAmount(fee),
-      date: paymentDate,
-      datePaiement: paymentDate,
-      paymentDate,
-      movementDate: paymentDate,
-      dateInsertion: paymentDate,
-      reference: paymentReference,
-      modePaiement: paymentForm.modePaiement,
-      commentaire: paymentForm.commentaire,
-      treasuryPayload,
-    });
+      await createFeeTreasuryMovement(fee, "CREDIT", {
+        amount: getFeeAmount(fee),
+        date: paymentDate,
+        datePaiement: paymentDate,
+        paymentDate,
+        movementDate: paymentDate,
+        dateInsertion: paymentDate,
+        reference: paymentReference,
+        modePaiement: paymentForm.modePaiement,
+        commentaire: paymentForm.commentaire,
+        treasuryPayload,
+      });
+    }
 
     setFees((prev) =>
       prev.map((item) =>
@@ -1022,23 +1024,29 @@ async function cancelOnePayment(fee: any) {
 
   removeLocalPayment(getPaymentKey(fee));
 
-  // Mamorona mouvement DEBIT indray mandeha ihany ho an'ny annulation.
-  await createFeeTreasuryMovement(fee, "DEBIT", {
-    amount: getFeeAmount(fee),
-    date: cancelDate,
-    datePaiement: cancelDate,
-    paymentDate: cancelDate,
-    movementDate: cancelDate,
-    dateInsertion: cancelDate,
-    reference: cancelReference,
-    modePaiement: fee.modePaiement || paymentForm.modePaiement,
-    commentaire: `ANNULATION - Annulation paiement frais de formation ${getFeeCode(fee)}`,
-    treasuryPayload: {
-      treasuryId: fee.treasuryId,
-      treasuryName: fee.treasuryName || fee.tresorerie || paymentForm.tresorerie || "Caisse principale",
-      tresorerie: fee.tresorerie || fee.treasuryName || paymentForm.tresorerie || "Caisse principale",
-    },
-  });
+  // Sécurité anti-doublon:
+  // Si /api/student-fees a répondu OK, c'est l'API qui a déjà créé le mouvement DEBIT d'annulation.
+  // Donc le frontend ne recrée PAS de mouvement.
+  // On crée un mouvement ici uniquement si aucun PATCH API n'a été fait
+  // (cas localOnly/fallback), afin d'éviter les doublons en ligne.
+  if (!cancelled) {
+    await createFeeTreasuryMovement(fee, "DEBIT", {
+      amount: getFeeAmount(fee),
+      date: cancelDate,
+      datePaiement: cancelDate,
+      paymentDate: cancelDate,
+      movementDate: cancelDate,
+      dateInsertion: cancelDate,
+      reference: cancelReference,
+      modePaiement: fee.modePaiement || paymentForm.modePaiement,
+      commentaire: `ANNULATION - Annulation paiement frais de formation ${getFeeCode(fee)}`,
+      treasuryPayload: {
+        treasuryId: fee.treasuryId,
+        treasuryName: fee.treasuryName || fee.tresorerie || paymentForm.tresorerie || "Caisse principale",
+        tresorerie: fee.tresorerie || fee.treasuryName || paymentForm.tresorerie || "Caisse principale",
+      },
+    });
+  }
 
   setFees((prev) =>
     prev.map((item) =>
@@ -1842,11 +1850,11 @@ function printTicketMultiple(selectedFees: any[]) {
 
             <button
               type="button"
-              disabled={actionId === "cancel-multiple"}
+              disabled={actionId === "cancel-multiple" || cancelInProgressRef.current}
               onClick={cancelPayment}
-              className="min-w-[115px] rounded-[2px] border border-red-500 bg-white px-5 py-2 text-[12px] text-red-600 hover:bg-red-50 disabled:opacity-60"
+              className="min-w-[115px] rounded-[2px] border border-red-500 bg-white px-5 py-2 text-[12px] text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              ↺ ANNULER {selectedPaidFeeIds.length > 1 ? `(${selectedPaidFeeIds.length})` : ""}
+              {actionId === "cancel-multiple" ? "Annulation..." : `↺ ANNULER ${selectedPaidFeeIds.length > 1 ? `(${selectedPaidFeeIds.length})` : ""}`}
             </button>
           </div>
         )}

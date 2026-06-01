@@ -672,6 +672,33 @@ export default function TreasuryMovementsPage() {
       const now = new Date();
       const insertionDateTime = `${insertionDate}T${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}.${String(now.getMilliseconds()).padStart(3, "0")}`;
 
+      const stableReference =
+        String(formReference || "").trim() ||
+        [
+          "TR",
+          schoolYearName,
+          treasuryId,
+          selectedType,
+          insertionDate,
+          amount,
+          category,
+          movementLabel,
+        ]
+          .map((item) => String(item ?? "").trim().replace(/\\s+/g, "-"))
+          .join("-");
+
+      const idempotencyKey = [
+        "MANUAL_TREASURY_MOVEMENT",
+        schoolYearName,
+        treasuryId,
+        selectedType,
+        amount,
+        insertionDate,
+        stableReference,
+      ]
+        .map((item) => String(item ?? "").trim())
+        .join("|");
+
       const payload = {
         treasuryId,
 
@@ -693,7 +720,8 @@ export default function TreasuryMovementsPage() {
         description: movementLabel,
         motif: movementLabel,
         libelle: movementLabel,
-        reference: formReference || `TR-${Date.now()}`,
+        reference: stableReference,
+        idempotencyKey,
         schoolYearName,
         date: insertionDate,
         createdAt: insertionDateTime,
@@ -701,7 +729,10 @@ export default function TreasuryMovementsPage() {
 
       const res = await fetch("/api/treasury-movements", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": idempotencyKey,
+        },
         body: JSON.stringify(payload),
       });
 
