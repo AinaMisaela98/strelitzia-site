@@ -1118,73 +1118,241 @@ async function cancelPayment() {
   }
 }
 
+function escapeReceiptText(value: any) {
+  return String(value ?? "-")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function getReceiptStyles() {
+  return `
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: #fff; }
+    body {
+      width: 80mm;
+      min-width: 80mm;
+      max-width: 80mm;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 12px;
+      line-height: 1.35;
+      color: #000;
+      padding: 7px 8px 10px;
+    }
+    .receipt-paper { width: 100%; }
+    .center { text-align: center; }
+    .bold { font-weight: 800; }
+    .logo {
+      width: 72px;
+      height: 72px;
+      object-fit: contain;
+      display: block;
+      margin: 0 auto 3px;
+    }
+    .school {
+      font-size: 17px;
+      font-weight: 900;
+      letter-spacing: .3px;
+      text-transform: uppercase;
+    }
+    .slogan {
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .7px;
+      margin-top: 1px;
+      text-transform: uppercase;
+    }
+    .receipt-title {
+      margin: 7px auto 4px;
+      padding: 5px 6px;
+      border: 2px solid #000;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+    .meta {
+      font-size: 10.5px;
+      margin-top: 3px;
+    }
+    .line {
+      border-top: 1px dashed #000;
+      margin: 8px 0;
+    }
+    .row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+      margin: 4px 0;
+      word-break: break-word;
+    }
+    .row span:first-child { color: #111; }
+    .row span:last-child { text-align: right; font-weight: 800; }
+    .student-box {
+      border: 1px solid #000;
+      border-radius: 6px;
+      padding: 6px;
+      margin-top: 7px;
+    }
+    .fees-head, .fee-row, .total-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 27mm;
+      gap: 6px;
+      align-items: start;
+    }
+    .fees-head {
+      font-weight: 900;
+      border-bottom: 1px solid #000;
+      padding-bottom: 4px;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      font-size: 11px;
+    }
+    .fee-row {
+      padding: 3px 0;
+      border-bottom: 1px dotted #999;
+    }
+    .fee-code { font-size: 12px; font-weight: 900; }
+    .fee-label { font-size: 10.5px; font-weight: 600; }
+    .amount { text-align: right; font-weight: 900; white-space: nowrap; }
+    .total-row {
+      margin-top: 7px;
+      padding: 7px 0 3px;
+      border-top: 2px solid #000;
+      font-size: 15px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+    .paye-stamp {
+      margin: 12px auto 8px;
+      width: 92%;
+      border: 3px solid #000;
+      border-radius: 8px;
+      padding: 8px 4px;
+      text-align: center;
+      font-size: 24px;
+      font-weight: 900;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+    .signature {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
+      font-size: 10.5px;
+      text-align: center;
+    }
+    .signature div {
+      min-height: 32px;
+      border-top: 1px solid #000;
+      padding-top: 3px;
+    }
+    .footer {
+      margin-top: 10px;
+      text-align: center;
+      font-size: 10.5px;
+      font-weight: 700;
+    }
+    @media print {
+      @page { size: 80mm auto; margin: 0; }
+      html, body { width: 80mm; min-width: 80mm; max-width: 80mm; margin: 0; }
+      body { padding: 7px 8px 10px; }
+      button { display: none !important; }
+    }
+  `;
+}
+
+function getReceiptHeaderHtml(title: string, now: string) {
+  return `
+    <div class="center">
+      <img src="/logo-strelitzia.png" class="logo" alt="Strelitzia Private School" onerror="this.style.display='none'" />
+      <div class="school">STRELITZIA PRIVATE SCHOOL</div>
+      <div class="slogan">INTEGRITY • EXCELLENCE</div>
+      <div class="receipt-title">${escapeReceiptText(title)}</div>
+      <div class="meta">Imprimé le : <b>${escapeReceiptText(now)}</b></div>
+    </div>
+  `;
+}
+
 function printTicket(fee: any) {
-  const win = window.open("", "_blank", "width=320,height=650");
+  const win = window.open("", "_blank", "width=420,height=720");
   if (!win) return;
 
   const studentName = `${student.nom || ""} ${student.prenoms || ""}`.trim();
   const classe = student.classe || student.className || student.classRoomName || "-";
   const matricule = student.matricule || student.registrationNumber || "-";
   const now = new Date().toLocaleString("fr-FR");
+  const paidDate = formatDate(fee.paidAt || paymentForm.datePaiement || new Date().toISOString());
+  const amount = getFeeAmount(fee);
+  const reference = fee.reference || paymentForm.reference || "-";
+  const mode = fee.modePaiement || paymentForm.modePaiement || "-";
+  const treasury = fee.tresorerie || fee.treasuryName || paymentForm.tresorerie || "-";
+  const schoolYear = form.anneeScolaire || student.anneeScolaire || fee.schoolYearName || "-";
 
   win.document.write(`
+    <!doctype html>
     <html>
       <head>
-        <title>Reçu ${getFeeCode(fee)}</title>
-        <style>
-          * { box-sizing: border-box; }
-          body {
-            width: 58mm;
-            font-family: Arial, monospace;
-            font-size: 11px;
-            padding: 6px;
-            color: #000;
-            margin: 0;
-          }
-          .center { text-align: center; }
-          .bold { font-weight: 700; }
-          .school { font-size: 14px; font-weight: 900; }
-          .small { font-size: 10px; }
-          .line { border-top: 1px dashed #000; margin: 7px 0; }
-          .row { display: flex; justify-content: space-between; gap: 7px; }
-          .total { font-size: 13px; font-weight: 900; }
-          @media print {
-            @page { size: 58mm auto; margin: 0; }
-            body { margin: 0; width: 58mm; }
-            button { display: none; }
-          }
-        </style>
+        <meta charset="utf-8" />
+        <title>Reçu ${escapeReceiptText(getFeeCode(fee))}</title>
+        <style>${getReceiptStyles()}</style>
       </head>
       <body>
-        <div class="center school">STRELITZIA SCHOOL</div>
-        <div class="center bold">REÇU FRAIS DE FORMATION</div>
-        <div class="center small">${now}</div>
-        <div class="line"></div>
+        <div class="receipt-paper">
+          ${getReceiptHeaderHtml("Reçu officiel de paiement", now)}
 
-        <div>Élève : <span class="bold">${studentName || "-"}</span></div>
-        <div>Matricule : <span class="bold">${matricule}</span></div>
-        <div>Classe : <span class="bold">${classe}</span></div>
+          <div class="student-box">
+            <div class="row"><span>Élève</span><span>${escapeReceiptText(studentName || "-")}</span></div>
+            <div class="row"><span>Matricule</span><span>${escapeReceiptText(matricule)}</span></div>
+            <div class="row"><span>Classe</span><span>${escapeReceiptText(classe)}</span></div>
+            <div class="row"><span>Année scolaire</span><span>${escapeReceiptText(schoolYear)}</span></div>
+          </div>
 
-        <div class="line"></div>
+          <div class="line"></div>
 
-        <div class="row"><span>Frais</span><span class="bold">${getFeeCode(fee)}</span></div>
-        <div class="bold">${getFeeLabel(fee)}</div>
-        <div class="row total"><span>Montant payé</span><span>${formatAmount(getFeeAmount(fee))} Ar</span></div>
-        <div class="row"><span>Reste</span><span>0 Ar</span></div>
-        <div class="row"><span>Statut</span><span class="bold">PAYÉ</span></div>
-        <div class="row"><span>Mode</span><span>${fee.modePaiement || "-"}</span></div>
-        <div class="row"><span>Référence</span><span>${fee.reference || "-"}</span></div>
+          <div class="row"><span>Date paiement</span><span>${escapeReceiptText(paidDate)}</span></div>
+          <div class="row"><span>Trésorerie</span><span>${escapeReceiptText(treasury)}</span></div>
+          <div class="row"><span>Mode paiement</span><span>${escapeReceiptText(mode)}</span></div>
+          <div class="row"><span>Référence</span><span>${escapeReceiptText(reference)}</span></div>
 
-        <div class="line"></div>
-        <div class="center small">Merci pour votre paiement</div>
-        <br/>
-        <div class="center small">Signature / Cachet</div>
-        <br/><br/>
+          <div class="line"></div>
+
+          <div class="fees-head"><div>Désignation</div><div class="amount">Montant</div></div>
+          <div class="fee-row">
+            <div>
+              <div class="fee-code">${escapeReceiptText(getFeeCode(fee))}</div>
+              <div class="fee-label">${escapeReceiptText(getFeeLabel(fee))}</div>
+            </div>
+            <div class="amount">${formatAmount(amount)} Ar</div>
+          </div>
+
+          <div class="total-row">
+            <div>Total payé</div>
+            <div class="amount">${formatAmount(amount)} Ar</div>
+          </div>
+
+          <div class="row"><span>Reste à payer</span><span>0 Ar</span></div>
+          <div class="paye-stamp">✓ PAYÉ</div>
+
+          <div class="signature">
+            <div>Signature / Cachet</div>
+            <div>Caissier(ère)</div>
+          </div>
+
+          <div class="footer">
+            Merci pour votre paiement<br/>
+            Reçu généré par STRELITZIA PRIVATE SCHOOL
+          </div>
+        </div>
 
         <script>
           window.onload = function() {
             window.focus();
-            window.print();
+            setTimeout(function(){ window.print(); }, 250);
           };
         </script>
       </body>
@@ -1197,7 +1365,7 @@ function printTicket(fee: any) {
 function printTicketMultiple(selectedFees: any[]) {
   if (!selectedFees.length) return;
 
-  const win = window.open("", "_blank", "width=320,height=650");
+  const win = window.open("", "_blank", "width=420,height=720");
   if (!win) return;
 
   const studentName = `${student.nom || ""} ${student.prenoms || ""}`.trim();
@@ -1205,50 +1373,81 @@ function printTicketMultiple(selectedFees: any[]) {
   const matricule = student.matricule || student.registrationNumber || "-";
   const now = new Date().toLocaleString("fr-FR");
   const total = selectedFees.reduce((sum, fee) => sum + getFeeAmount(fee), 0);
+  const paidDate = formatDate(paymentForm.datePaiement || selectedFees[0]?.paidAt || new Date().toISOString());
+  const reference = paymentForm.reference || selectedFees[0]?.reference || "-";
+  const mode = paymentForm.modePaiement || selectedFees[0]?.modePaiement || "-";
+  const treasury = paymentForm.tresorerie || selectedFees[0]?.tresorerie || selectedFees[0]?.treasuryName || "-";
+  const schoolYear = form.anneeScolaire || student.anneeScolaire || selectedFees[0]?.schoolYearName || "-";
   const rows = selectedFees
     .map(
       (fee) => `
-        <div class="row"><span>${getFeeCode(fee)}</span><span>${formatAmount(getFeeAmount(fee))} Ar</span></div>
-        <div class="small bold">${getFeeLabel(fee)}</div>
+        <div class="fee-row">
+          <div>
+            <div class="fee-code">${escapeReceiptText(getFeeCode(fee))}</div>
+            <div class="fee-label">${escapeReceiptText(getFeeLabel(fee))}</div>
+          </div>
+          <div class="amount">${formatAmount(getFeeAmount(fee))} Ar</div>
+        </div>
       `
     )
     .join("");
 
   win.document.write(`
+    <!doctype html>
     <html>
       <head>
+        <meta charset="utf-8" />
         <title>Reçu frais formation</title>
-        <style>
-          * { box-sizing: border-box; }
-          body { width: 58mm; font-family: Arial, monospace; font-size: 11px; padding: 6px; color: #000; margin: 0; }
-          .center { text-align: center; }
-          .bold { font-weight: 700; }
-          .school { font-size: 14px; font-weight: 900; }
-          .small { font-size: 10px; }
-          .line { border-top: 1px dashed #000; margin: 7px 0; }
-          .row { display: flex; justify-content: space-between; gap: 7px; }
-          .total { font-size: 13px; font-weight: 900; }
-          @media print { @page { size: 58mm auto; margin: 0; } body { margin: 0; width: 58mm; } button { display: none; } }
-        </style>
+        <style>${getReceiptStyles()}</style>
       </head>
       <body>
-        <div class="center school">STRELITZIA SCHOOL</div>
-        <div class="center bold">REÇU FRAIS DE FORMATION</div>
-        <div class="center small">${now}</div>
-        <div class="line"></div>
-        <div>Élève : <span class="bold">${studentName || "-"}</span></div>
-        <div>Matricule : <span class="bold">${matricule}</span></div>
-        <div>Classe : <span class="bold">${classe}</span></div>
-        <div class="line"></div>
-        ${rows}
-        <div class="line"></div>
-        <div class="row total"><span>Total payé</span><span>${formatAmount(total)} Ar</span></div>
-        <div class="row"><span>Mode</span><span>${paymentForm.modePaiement || "-"}</span></div>
-        <div class="row"><span>Référence</span><span>${paymentForm.reference || "-"}</span></div>
-        <div class="line"></div>
-        <div class="center small">Merci pour votre paiement</div>
-        <br/><div class="center small">Signature / Cachet</div><br/><br/>
-        <script>window.onload = function() { window.focus(); window.print(); };</script>
+        <div class="receipt-paper">
+          ${getReceiptHeaderHtml("Reçu officiel de paiement", now)}
+
+          <div class="student-box">
+            <div class="row"><span>Élève</span><span>${escapeReceiptText(studentName || "-")}</span></div>
+            <div class="row"><span>Matricule</span><span>${escapeReceiptText(matricule)}</span></div>
+            <div class="row"><span>Classe</span><span>${escapeReceiptText(classe)}</span></div>
+            <div class="row"><span>Année scolaire</span><span>${escapeReceiptText(schoolYear)}</span></div>
+          </div>
+
+          <div class="line"></div>
+
+          <div class="row"><span>Date paiement</span><span>${escapeReceiptText(paidDate)}</span></div>
+          <div class="row"><span>Trésorerie</span><span>${escapeReceiptText(treasury)}</span></div>
+          <div class="row"><span>Mode paiement</span><span>${escapeReceiptText(mode)}</span></div>
+          <div class="row"><span>Référence</span><span>${escapeReceiptText(reference)}</span></div>
+
+          <div class="line"></div>
+
+          <div class="fees-head"><div>Désignation</div><div class="amount">Montant</div></div>
+          ${rows}
+
+          <div class="total-row">
+            <div>Total payé</div>
+            <div class="amount">${formatAmount(total)} Ar</div>
+          </div>
+
+          <div class="row"><span>Reste à payer</span><span>0 Ar</span></div>
+          <div class="paye-stamp">✓ PAYÉ</div>
+
+          <div class="signature">
+            <div>Signature / Cachet</div>
+            <div>Caissier(ère)</div>
+          </div>
+
+          <div class="footer">
+            Merci pour votre paiement<br/>
+            Reçu généré par STRELITZIA PRIVATE SCHOOL
+          </div>
+        </div>
+
+        <script>
+          window.onload = function() {
+            window.focus();
+            setTimeout(function(){ window.print(); }, 250);
+          };
+        </script>
       </body>
     </html>
   `);
