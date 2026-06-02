@@ -558,39 +558,79 @@ useEffect(() => {
   }
 
 
-  async function openStudentRecap(student: Student) {
+  function openStudentRecap(student: Student) {
     setSelectedStudent(student);
     setStudentRecapOpen(true);
-    setStudentFees([]);
-    setLoadingRecap(true);
+  }
 
-    try {
-      const res = await fetch(
-        `/api/student-fees?studentId=${student.id}&_ts=${Date.now()}`,
-        { cache: "no-store" }
-      );
+  function printStudentInfo(student: Student) {
+    const rows = [
+      ["Matricule", student.matricule],
+      ["Site", student.site],
+      ["Année scolaire", student.anneeScolaire],
+      ["Date inscription", formatDate(student.dateInscription)],
+      ["Nom", student.nom],
+      ["Prénom(s)", student.prenoms],
+      ["Sexe", student.sexe],
+      ["Classe", student.classe],
+      ["Série / Section", student.section],
+      ["Contact", student.contact || "-"],
+      ["Date de naissance", formatDate(student.dateNaissance)],
+      ["Lieu de naissance", student.lieuNaissance || "-"],
+      ["Père", student.pereNom || "-"],
+      ["Mère", student.mereNom || "-"],
+    ];
 
-      if (!res.ok) {
-        setStudentFees([]);
-        return;
-      }
+    const html = `
+      <html>
+        <head>
+          <title>Information étudiant - ${student.matricule}</title>
+          <style>
+            @page { size: A4; margin: 14mm; }
+            * { box-sizing: border-box; }
+            body { font-family: Arial, sans-serif; color: #0f172a; margin: 0; }
+            .header { border-bottom: 3px solid #0f172a; padding-bottom: 14px; margin-bottom: 18px; }
+            .school { font-size: 24px; font-weight: 900; letter-spacing: .04em; }
+            .title { margin-top: 6px; font-size: 15px; font-weight: 800; color: #2563eb; }
+            .student { margin-top: 12px; padding: 12px; border: 1px solid #cbd5e1; border-radius: 14px; background: #f8fafc; }
+            .name { font-size: 20px; font-weight: 900; }
+            .meta { margin-top: 4px; font-size: 12px; color: #475569; font-weight: 700; }
+            table { width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 12px; }
+            td { border: 1px solid #cbd5e1; padding: 9px 10px; }
+            td:first-child { width: 34%; background: #f1f5f9; font-weight: 900; color: #334155; }
+            td:last-child { font-weight: 700; color: #0f172a; }
+            .footer { margin-top: 18px; text-align: right; color: #64748b; font-size: 11px; font-weight: 700; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="school">STRELITZIA SCHOOL</div>
+            <div class="title">Fiche information étudiant</div>
+          </div>
+          <div class="student">
+            <div class="name">${student.nom || ""} ${student.prenoms || ""}</div>
+            <div class="meta">M° ${student.matricule || "-"} • ${student.classe || "Classe -"} • ${student.section || "Série -"}</div>
+          </div>
+          <table>
+            <tbody>
+              ${rows.map(([label, value]) => `<tr><td>${label}</td><td>${value || "-"}</td></tr>`).join("")}
+            </tbody>
+          </table>
+          <div class="footer">Imprimé le ${new Date().toLocaleDateString("fr-FR")}</div>
+        </body>
+      </html>
+    `;
 
-      const data = await res.json();
-      const fees = Array.isArray(data)
-        ? data
-        : Array.isArray(data?.fees)
-        ? data.fees
-        : Array.isArray(data?.studentFees)
-        ? data.studentFees
-        : [];
+    const win = window.open("", "_blank", "width=900,height=700");
+    if (!win) return alert("Popup bloqué");
 
-      setStudentFees(fees);
-    } catch (error) {
-      console.error(error);
-      setStudentFees([]);
-    } finally {
-      setLoadingRecap(false);
-    }
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+
+    setTimeout(() => {
+      win.print();
+    }, 400);
   }
 
   async function logout() {
@@ -1804,12 +1844,12 @@ if (item === "Mouvements de Trésorerie") {
 
         {studentRecapOpen && selectedStudent && (
           <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-slate-950/70 p-2 md:p-4">
-            <div className="flex max-h-[94vh] w-full max-w-[1160px] flex-col overflow-hidden rounded-[28px] border border-white/20 bg-white shadow-[0_24px_70px_rgba(2,6,23,.45)]">
+            <div className="flex max-h-[94vh] w-full max-w-[760px] flex-col overflow-hidden rounded-[28px] border border-white/20 bg-white shadow-[0_24px_70px_rgba(2,6,23,.45)]">
               <div className="theme-sidebar relative overflow-hidden p-4 text-white md:p-5">
                 <div className="absolute -right-20 -top-24 h-52 w-52 rounded-full bg-white/10" />
                 <div className="relative flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-[10px] font-black uppercase tracking-[.26em] text-white/55">Récapitulatif étudiant</p>
+                    <p className="text-[10px] font-black uppercase tracking-[.26em] text-white/55">Information étudiant</p>
                     <h2 className="mt-1 truncate text-[22px] font-black md:text-[28px]">
                       {selectedStudent.nom} {selectedStudent.prenoms}
                     </h2>
@@ -1824,7 +1864,7 @@ if (item === "Mouvements de Trésorerie") {
                     type="button"
                     onClick={() => setStudentRecapOpen(false)}
                     className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl border border-white/15 bg-white/10 text-[18px] font-black text-white transition hover:bg-white/20"
-                    aria-label="Fermer le récapitulatif"
+                    aria-label="Fermer information étudiant"
                   >
                     ✕
                   </button>
@@ -1832,127 +1872,43 @@ if (item === "Mouvements de Trésorerie") {
               </div>
 
               <div className="min-h-0 overflow-y-auto bg-slate-50 p-3 md:p-5">
-                <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
-                  <div className="space-y-4">
-                    <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
-                      <div className="border-b border-slate-200 bg-white px-4 py-3">
-                        <h3 className="text-[15px] font-black text-slate-950">Informations étudiant</h3>
-                        <p className="text-[11px] font-bold text-slate-500">Identité, classe et contact.</p>
-                      </div>
-
-                      <div className="grid gap-2 p-4 text-[12px]">
-                        {[
-                          ["Matricule", selectedStudent.matricule],
-                          ["Site", selectedStudent.site],
-                          ["Année scolaire", selectedStudent.anneeScolaire],
-                          ["Date inscription", formatDate(selectedStudent.dateInscription)],
-                          ["Nom", selectedStudent.nom],
-                          ["Prénom(s)", selectedStudent.prenoms],
-                          ["Sexe", selectedStudent.sexe],
-                          ["Classe", selectedStudent.classe],
-                          ["Série / Section", selectedStudent.section],
-                          ["Contact", selectedStudent.contact || "-"],
-                          ["Date de naissance", formatDate(selectedStudent.dateNaissance)],
-                          ["Lieu de naissance", selectedStudent.lieuNaissance || "-"],
-                          ["Père", selectedStudent.pereNom || "-"],
-                          ["Mère", selectedStudent.mereNom || "-"],
-                        ].map(([label, value]) => (
-                          <div key={label} className="grid grid-cols-[120px_1fr] gap-2 rounded-2xl bg-slate-50 px-3 py-2">
-                            <span className="font-black text-slate-500">{label}</span>
-                            <span className="font-bold text-slate-950">{value}</span>
-                          </div>
-                        ))}
-                      </div>
+                <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
+                  <div className="flex flex-col gap-3 border-b border-slate-200 bg-white px-4 py-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <h3 className="text-[15px] font-black text-slate-950">Informations étudiant</h3>
+                      <p className="text-[11px] font-bold text-slate-500">Récapitulatif simple affiché au clic sur le matricule.</p>
                     </div>
-
-                    <div className="rounded-[24px] border border-blue-100 bg-blue-50/70 p-4 shadow-sm">
-                      <div className="flex items-start gap-3">
-                        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-white text-[22px] shadow-sm">📚</div>
-                        <div>
-                          <p className="text-[12px] font-black text-blue-900">Vue frais de formation</p>
-                          <p className="mt-1 text-[11px] font-bold leading-relaxed text-blue-700">
-                            Affichage simple comme dans le détail étudiant : frais créé et statut payé ou non payé uniquement.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => printStudentInfo(selectedStudent)}
+                      className="w-fit rounded-xl theme-button px-4 py-2.5 text-[11px] font-black text-white shadow-sm transition hover:brightness-110"
+                    >
+                      ⎙ Imprimer PDF
+                    </button>
                   </div>
 
-                  <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
-                    <div className="flex flex-col gap-2 border-b border-slate-200 bg-white px-4 py-3 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <h3 className="text-[15px] font-black text-slate-950">Frais de formation</h3>
-                        <p className="text-[11px] font-bold text-slate-500">Vue simple : frais créé avec statut payé ou non payé.</p>
+                  <div className="grid gap-2 p-4 text-[12px]">
+                    {[
+                      ["Matricule", selectedStudent.matricule],
+                      ["Site", selectedStudent.site],
+                      ["Année scolaire", selectedStudent.anneeScolaire],
+                      ["Date inscription", formatDate(selectedStudent.dateInscription)],
+                      ["Nom", selectedStudent.nom],
+                      ["Prénom(s)", selectedStudent.prenoms],
+                      ["Sexe", selectedStudent.sexe],
+                      ["Classe", selectedStudent.classe],
+                      ["Série / Section", selectedStudent.section],
+                      ["Contact", selectedStudent.contact || "-"],
+                      ["Date de naissance", formatDate(selectedStudent.dateNaissance)],
+                      ["Lieu de naissance", selectedStudent.lieuNaissance || "-"],
+                      ["Père", selectedStudent.pereNom || "-"],
+                      ["Mère", selectedStudent.mereNom || "-"],
+                    ].map(([label, value]) => (
+                      <div key={label} className="grid grid-cols-[125px_1fr] gap-2 rounded-2xl bg-slate-50 px-3 py-2.5 md:grid-cols-[155px_1fr]">
+                        <span className="font-black text-slate-500">{label}</span>
+                        <span className="font-bold text-slate-950">{value}</span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => openStudentRecap(selectedStudent)}
-                        className="w-fit rounded-xl theme-button px-3 py-2 text-[11px] font-black text-white shadow-sm"
-                      >
-                        ⟳ Recharger les frais
-                      </button>
-                    </div>
-
-                    {loadingRecap ? (
-                      <div className="flex min-h-[260px] items-center justify-center p-8">
-                        <div className="text-center">
-                          <div className="mx-auto student-loading-spinner" />
-                          <p className="mt-3 text-[12px] font-black text-slate-700">Chargement des frais...</p>
-                        </div>
-                      </div>
-                    ) : studentFees.length === 0 ? (
-                      <div className="flex min-h-[260px] items-center justify-center p-8 text-center">
-                        <div>
-                          <div className="mx-auto grid h-14 w-14 place-items-center rounded-3xl bg-slate-100 text-[26px]">📄</div>
-                          <p className="mt-3 text-[13px] font-black text-slate-700">Aucun frais trouvé</p>
-                          <p className="mt-1 text-[11px] font-bold text-slate-500">Vérifiez si les frais de formation sont déjà créés pour cet étudiant.</p>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="max-h-[58vh] overflow-auto p-3">
-                        <div className="grid gap-2">
-                          {studentFees.map((fee, index) => {
-                            const status = normalizeFeeStatus(fee);
-                            const isPaid = status === "PAYE";
-                            return (
-                              <div
-                                key={fee.id || `${fee.code || "fee"}-${index}`}
-                                className={`flex flex-col gap-2 rounded-2xl border px-4 py-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md md:flex-row md:items-center md:justify-between ${
-                                  isPaid
-                                    ? "border-emerald-200 bg-emerald-50"
-                                    : "border-red-200 bg-red-50"
-                                }`}
-                              >
-                                <div className="min-w-0">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <span className={`rounded-full px-2.5 py-1 text-[10px] font-black ${
-                                      isPaid
-                                        ? "bg-emerald-100 text-emerald-700"
-                                        : "bg-red-100 text-red-700"
-                                    }`}>
-                                      {fee.code || "FRAIS"}
-                                    </span>
-                                    <span className="truncate text-[13px] font-black text-slate-950">
-                                      {feeLabel(fee)}
-                                    </span>
-                                  </div>
-                                  <p className="mt-1 text-[10px] font-bold text-slate-500">
-                                    Frais de formation attribué à l’étudiant
-                                  </p>
-                                </div>
-
-                                <span className={`inline-flex w-fit items-center rounded-full px-3 py-1.5 text-[10px] font-black ${
-                                  isPaid
-                                    ? "bg-emerald-600 text-white"
-                                    : "bg-red-600 text-white"
-                                }`}>
-                                  {isPaid ? "✅ Payé" : "🔴 Non payé"}
-                                </span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>                    )}
+                    ))}
                   </div>
                 </div>
               </div>
