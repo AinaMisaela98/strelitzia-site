@@ -523,9 +523,6 @@ useEffect(() => {
     return 0;
   }
 
-  function formatMoney(value: unknown) {
-    return `${toNumber(value).toLocaleString("fr-FR")} Ar`;
-  }
 
   function feeLabel(fee: StudentFeeRecap) {
     return fee.label || fee.libelle || fee.name || "Frais";
@@ -560,33 +557,6 @@ useEffect(() => {
     return "NON_PAYE";
   }
 
-  const recapTotals = useMemo<{
-    total: number;
-    paid: number;
-    remaining: number;
-  }>(() => {
-    return studentFees.reduce(
-      (
-        acc: {
-          total: number;
-          paid: number;
-          remaining: number;
-        },
-        fee: StudentFeeRecap
-      ) => ({
-        total: acc.total + toNumber(feeAmount(fee)),
-        paid: acc.paid + toNumber(feePaid(fee)),
-        remaining:
-          acc.remaining +
-          toNumber(feeRemaining(fee)),
-      }),
-      {
-        total: 0,
-        paid: 0,
-        remaining: 0,
-      }
-    );
-  }, [studentFees]);
 
   async function openStudentRecap(student: Student) {
     setSelectedStudent(student);
@@ -1895,18 +1865,15 @@ if (item === "Mouvements de Trésorerie") {
                       </div>
                     </div>
 
-                    <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
-                      <div className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm">
-                        <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">Total frais</p>
-                        <p className="mt-1 text-[18px] font-black text-slate-950">{formatMoney(recapTotals.total)}</p>
-                      </div>
-                      <div className="rounded-[22px] border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
-                        <p className="text-[10px] font-black uppercase tracking-wide text-emerald-600">Total payé</p>
-                        <p className="mt-1 text-[18px] font-black text-emerald-700">{formatMoney(recapTotals.paid)}</p>
-                      </div>
-                      <div className="rounded-[22px] border border-red-200 bg-red-50 p-4 shadow-sm">
-                        <p className="text-[10px] font-black uppercase tracking-wide text-red-600">Reste à payer</p>
-                        <p className="mt-1 text-[18px] font-black text-red-700">{formatMoney(recapTotals.remaining)}</p>
+                    <div className="rounded-[24px] border border-blue-100 bg-blue-50/70 p-4 shadow-sm">
+                      <div className="flex items-start gap-3">
+                        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-white text-[22px] shadow-sm">📚</div>
+                        <div>
+                          <p className="text-[12px] font-black text-blue-900">Vue frais de formation</p>
+                          <p className="mt-1 text-[11px] font-bold leading-relaxed text-blue-700">
+                            Affichage simple comme dans le détail étudiant : frais créé et statut payé ou non payé uniquement.
+                          </p>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1914,8 +1881,8 @@ if (item === "Mouvements de Trésorerie") {
                   <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
                     <div className="flex flex-col gap-2 border-b border-slate-200 bg-white px-4 py-3 md:flex-row md:items-center md:justify-between">
                       <div>
-                        <h3 className="text-[15px] font-black text-slate-950">Frais de scolarité / formation</h3>
-                        <p className="text-[11px] font-bold text-slate-500">Statut automatique : payé, partiel ou non payé.</p>
+                        <h3 className="text-[15px] font-black text-slate-950">Frais de formation</h3>
+                        <p className="text-[11px] font-bold text-slate-500">Vue simple : frais créé avec statut payé ou non payé.</p>
                       </div>
                       <button
                         type="button"
@@ -1942,45 +1909,50 @@ if (item === "Mouvements de Trésorerie") {
                         </div>
                       </div>
                     ) : (
-                      <div className="max-h-[58vh] overflow-auto">
-                        <table className="w-full min-w-[760px] border-separate border-spacing-0 text-[11px]">
-                          <thead className="sticky top-0 z-10 theme-dark-btn text-white">
-                            <tr>
-                              {["Code", "Libellé", "Montant", "Payé", "Reste", "Statut"].map((h) => (
-                                <th key={h} className="border-r border-white/10 px-3 py-2 text-left text-[10px] font-black uppercase tracking-wide">
-                                  {h}
-                                </th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {studentFees.map((fee, index) => {
-                              const status = normalizeFeeStatus(fee);
-                              return (
-                                <tr key={fee.id || `${fee.code || "fee"}-${index}`} className="odd:bg-white even:bg-slate-50 hover:bg-blue-50">
-                                  <td className="border-b border-r border-slate-200 px-3 py-2 font-black text-blue-700">{fee.code || "-"}</td>
-                                  <td className="border-b border-r border-slate-200 px-3 py-2 font-bold text-slate-900">{feeLabel(fee)}</td>
-                                  <td className="border-b border-r border-slate-200 px-3 py-2 font-black text-slate-700">{formatMoney(feeAmount(fee))}</td>
-                                  <td className="border-b border-r border-slate-200 px-3 py-2 font-black text-emerald-700">{formatMoney(feePaid(fee))}</td>
-                                  <td className="border-b border-r border-slate-200 px-3 py-2 font-black text-red-700">{formatMoney(feeRemaining(fee))}</td>
-                                  <td className="border-b border-slate-200 px-3 py-2">
-                                    {status === "PAYE" && (
-                                      <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 text-[10px] font-black text-emerald-700">✅ Payé</span>
-                                    )}
-                                    {status === "PARTIEL" && (
-                                      <span className="inline-flex rounded-full bg-amber-100 px-3 py-1 text-[10px] font-black text-amber-700">🟡 Partiel</span>
-                                    )}
-                                    {status === "NON_PAYE" && (
-                                      <span className="inline-flex rounded-full bg-red-100 px-3 py-1 text-[10px] font-black text-red-700">🔴 Non payé</span>
-                                    )}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
+                      <div className="max-h-[58vh] overflow-auto p-3">
+                        <div className="grid gap-2">
+                          {studentFees.map((fee, index) => {
+                            const status = normalizeFeeStatus(fee);
+                            const isPaid = status === "PAYE";
+                            return (
+                              <div
+                                key={fee.id || `${fee.code || "fee"}-${index}`}
+                                className={`flex flex-col gap-2 rounded-2xl border px-4 py-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md md:flex-row md:items-center md:justify-between ${
+                                  isPaid
+                                    ? "border-emerald-200 bg-emerald-50"
+                                    : "border-red-200 bg-red-50"
+                                }`}
+                              >
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className={`rounded-full px-2.5 py-1 text-[10px] font-black ${
+                                      isPaid
+                                        ? "bg-emerald-100 text-emerald-700"
+                                        : "bg-red-100 text-red-700"
+                                    }`}>
+                                      {fee.code || "FRAIS"}
+                                    </span>
+                                    <span className="truncate text-[13px] font-black text-slate-950">
+                                      {feeLabel(fee)}
+                                    </span>
+                                  </div>
+                                  <p className="mt-1 text-[10px] font-bold text-slate-500">
+                                    Frais de formation attribué à l’étudiant
+                                  </p>
+                                </div>
+
+                                <span className={`inline-flex w-fit items-center rounded-full px-3 py-1.5 text-[10px] font-black ${
+                                  isPaid
+                                    ? "bg-emerald-600 text-white"
+                                    : "bg-red-600 text-white"
+                                }`}>
+                                  {isPaid ? "✅ Payé" : "🔴 Non payé"}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>                    )}
                   </div>
                 </div>
               </div>
