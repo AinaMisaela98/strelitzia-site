@@ -653,7 +653,7 @@ export async function POST(req: Request) {
                   { code: rowCode },
                   { libelle: rowLibelle },
                 ],
-                ...(student.classRoomId ? { classRoomId: Number(student.classRoomId) } : {}),
+                ...(student.classe ? { classe: student.classe } : {}),
               },
               select: { id: true },
               orderBy: { id: "asc" },
@@ -669,20 +669,19 @@ export async function POST(req: Request) {
           // Tsy io no ampiasaina hitotaly, fa ilaina fotsiny satria required
           // ny relation StudentFee.trainingFeeId ao amin'ny schema.
           if (!validTrainingFeeId) {
-            const createdTrainingFee = await tx.trainingFee.create({
-              data: {
-                schoolYearName,
-                libelle: rowLibelle,
-                code: rowCode,
-                montant: rowAmount,
-                ...(student.classRoomId ? { classRoomId: Number(student.classRoomId) } : {}),
-                ...(student.classe ? { classe: String(student.classe) } : {}),
-              },
-              select: { id: true },
-            });
+        const createdTrainingFee = await tx.trainingFee.create({
+          data: {
+            schoolYearName,
+            libelle: rowLibelle,
+            code: rowCode,
+            montant: rowAmount,
+            classe: student.classe || "",
+          },
+          select: { id: true },
+        });
 
-            validTrainingFeeId = createdTrainingFee.id;
-          }
+        validTrainingFeeId = createdTrainingFee.id;
+      }
 
           const montantPayeInput = toNumber(row.montantPaye || row.paidAmount || row.amountPaid || 0);
           const totalPaid = Math.min(rowAmount, montantPayeInput);

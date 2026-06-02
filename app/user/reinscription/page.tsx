@@ -683,12 +683,23 @@ function ReinscriptionPage() {
           // Raha avy amin'ny /api/training-fees dia misy trainingFeeId.
           // Raha avy amin'ny /api/fee-models dia tsy terena eto ny trainingFeeId,
           // fa ny /api/student-fees no mitady fallback amin'ny code/classe/année.
-          trainingFeeId: row.trainingFeeId || undefined,
-          sourceTrainingFeeId: row.sourceTrainingFeeId || row.trainingFeeId || row.id || undefined,
+          trainingFeeId: "trainingFeeId" in row ? row.trainingFeeId || undefined : undefined,
+          sourceTrainingFeeId:
+            row.sourceTrainingFeeId ||
+            ("trainingFeeId" in row ? row.trainingFeeId : undefined) ||
+            row.id ||
+            undefined,
+          feeModelId:
+  "feeModelId" in row
+    ? row.feeModelId || selectedFeeModel?.id || undefined
+    : selectedFeeModel?.id || undefined,
 
-          feeModelId: row.feeModelId || selectedFeeModel?.id || undefined,
-          feeModelTitle: row.feeModelTitle || (selectedFeeModel ? getFeeModelTitle(selectedFeeModel) : ""),
-
+      feeModelTitle:
+        "feeModelTitle" in row
+          ? row.feeModelTitle || (selectedFeeModel ? getFeeModelTitle(selectedFeeModel) : "")
+          : selectedFeeModel
+            ? getFeeModelTitle(selectedFeeModel)
+            : "",
           code: row.code || row.libelle || "FRAIS",
           libelle: row.libelle || row.code || "Frais de formation",
 
