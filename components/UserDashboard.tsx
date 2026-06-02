@@ -560,15 +560,31 @@ useEffect(() => {
     return "NON_PAYE";
   }
 
-  const recapTotals = useMemo(() => {
+  const recapTotals = useMemo<{
+    total: number;
+    paid: number;
+    remaining: number;
+  }>(() => {
     return studentFees.reduce(
-      (acc, fee) => {
-        acc.total += toNumber(feeAmount(fee));
-        acc.paid += toNumber(feePaid(fee));
-        acc.remaining += toNumber(feeRemaining(fee));
-        return acc;
-      },
-      { total: 0, paid: 0, remaining: 0 }
+      (
+        acc: {
+          total: number;
+          paid: number;
+          remaining: number;
+        },
+        fee: StudentFeeRecap
+      ) => ({
+        total: acc.total + toNumber(feeAmount(fee)),
+        paid: acc.paid + toNumber(feePaid(fee)),
+        remaining:
+          acc.remaining +
+          toNumber(feeRemaining(fee)),
+      }),
+      {
+        total: 0,
+        paid: 0,
+        remaining: 0,
+      }
     );
   }, [studentFees]);
 
