@@ -13,6 +13,12 @@ type Treasury = {
   default?: boolean | null;
 };
 
+type SchoolYear = {
+  id?: number | string;
+  name: string;
+  active?: boolean | null;
+};
+
 type Movement = {
   id: number | string;
   treasuryId: number;
@@ -429,7 +435,9 @@ export default function TreasuryMovementsPage() {
 
   const [search, setSearch] = useState("");
   const [site, setSite] = useState(SITE_NAME);
-  const [schoolYearName, setSchoolYearName] = useState(DEFAULT_YEAR);
+  const [schoolYears, setSchoolYears] = useState<SchoolYear[]>([]);
+  const [loadingSchoolYears, setLoadingSchoolYears] = useState(true);
+  const [schoolYearName, setSchoolYearName] = useState("");
 
   const [formDate, setFormDate] = useState(todayInput());
   const [formTreasuryId, setFormTreasuryId] = useState("");
@@ -465,14 +473,64 @@ export default function TreasuryMovementsPage() {
     }
   }, [formTreasuryId, mainActiveTreasury]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSchoolYears() {
+      try {
+        setLoadingSchoolYears(true);
+
+        const res = await fetch(`/api/school-years?_ts=${Date.now()}`, {
+          cache: "no-store",
+        });
+
+        const json = await res.json().catch(() => ({}));
+        const list: SchoolYear[] = Array.isArray(json)
+          ? json
+          : Array.isArray(json.schoolYears)
+            ? json.schoolYears
+            : Array.isArray(json.data)
+              ? json.data
+              : [];
+
+        if (cancelled) return;
+
+        const cleanedList = list.filter((item) => String(item?.name || "").trim());
+        setSchoolYears(cleanedList);
+
+        const activeYear =
+          cleanedList.find((item) => item.active === true)?.name ||
+          cleanedList[0]?.name ||
+          DEFAULT_YEAR;
+
+        setSchoolYearName((current) => current || activeYear);
+      } catch {
+        if (!cancelled) {
+          setSchoolYears([{ name: DEFAULT_YEAR, active: true }]);
+          setSchoolYearName((current) => current || DEFAULT_YEAR);
+        }
+      } finally {
+        if (!cancelled) setLoadingSchoolYears(false);
+      }
+    }
+
+    loadSchoolYears();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function loadData() {
+    if (!schoolYearName) return;
+
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (schoolYearName) params.set("schoolYearName", schoolYearName);
+      params.set("schoolYearName", schoolYearName);
 
       const [treasuryRes, movementRes] = await Promise.all([
-        fetch("/api/treasuries", { cache: "no-store" }),
+        fetch(`/api/treasuries?${params.toString()}`, { cache: "no-store" }),
         fetch(`/api/treasury-movements?${params.toString()}`, { cache: "no-store" }),
       ]);
 
@@ -1004,10 +1062,20 @@ export default function TreasuryMovementsPage() {
             <select
               value={schoolYearName}
               onChange={(e) => setSchoolYearName(e.target.value)}
-              className="h-[30px] w-full rounded-[3px] border border-slate-800 bg-slate-800 px-2 text-[11px] sm:w-auto sm:text-[12px] font-semibold text-white"
+              disabled={loadingSchoolYears || !schoolYearName}
+              className="h-[30px] w-full rounded-[3px] border border-slate-800 bg-slate-800 px-2 text-[11px] sm:w-auto sm:text-[12px] font-semibold text-white disabled:opacity-70"
             >
-              <option value="2025-2026">Année scolaire : 2025-2026</option>
-              <option value="2026-2027">Année scolaire : 2026-2027</option>
+              {schoolYears.length > 0 ? (
+                schoolYears.map((year) => (
+                  <option key={year.name} value={year.name}>
+                    Année scolaire : {year.name}{year.active ? " (active)" : ""}
+                  </option>
+                ))
+              ) : (
+                <option value={schoolYearName || DEFAULT_YEAR}>
+                  Année scolaire : {schoolYearName || DEFAULT_YEAR}
+                </option>
+              )}
             </select>
 
             <button

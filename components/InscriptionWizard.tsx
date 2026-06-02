@@ -31,6 +31,31 @@ type TrainingFee = {
   montant?: number;
   amount?: number;
   tarif?: number;
+  montantTotal?: number;
+  value?: number;
+  specials?: Record<string, any> | Array<any> | string | null;
+  specialRates?: Record<string, any> | Array<any> | string | null;
+  tarifsSpeciaux?: Record<string, any> | Array<any> | string | null;
+  tarifs?: Record<string, any> | Array<any> | string | null;
+};
+
+type FeeModel = {
+  id: number;
+  title?: string;
+  name?: string;
+  libelle?: string;
+  label?: string;
+  schoolYearName?: string;
+  classe?: string;
+  className?: string;
+  classRoomName?: string;
+  classRoomId?: number;
+  classId?: number;
+  tariffs?: TrainingFee[];
+  rows?: TrainingFee[];
+  details?: TrainingFee[];
+  fees?: TrainingFee[];
+  items?: TrainingFee[];
 };
 
 type OptionType = string | { label: string; value: string };
@@ -53,12 +78,139 @@ function formatAmount(value: number | string) {
     .replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 }
 
+function normalizeArray(value: any): any[] {
+  if (Array.isArray(value)) return value;
+  if (Array.isArray(value?.data)) return value.data;
+  if (Array.isArray(value?.items)) return value.items;
+  if (Array.isArray(value?.models)) return value.models;
+  if (Array.isArray(value?.feeModels)) return value.feeModels;
+  if (Array.isArray(value?.trainingFees)) return value.trainingFees;
+  if (Array.isArray(value?.fees)) return value.fees;
+  if (Array.isArray(value?.tariffs)) return value.tariffs;
+  if (Array.isArray(value?.rows)) return value.rows;
+  if (Array.isArray(value?.details)) return value.details;
+  return [];
+}
+
+function modelTitle(model?: FeeModel | null) {
+  return String(model?.title || model?.name || model?.libelle || model?.label || `Modèle ${model?.id || ""}`).trim();
+}
+
+function getModelRows(model?: FeeModel | null): TrainingFee[] {
+  if (!model) return [];
+  const rows = normalizeArray(model.tariffs || model.rows || model.details || model.fees || model.items);
+  return rows as TrainingFee[];
+}
+
+function getFeeRowStableId(row: TrainingFee, index: number) {
+  return String((row as any).id || (row as any).feeTariffId || (row as any).tariffId || `${feeLabel(row)}-${(row as any).code || ""}-${index}`);
+}
+
 function feeLabel(fee: TrainingFee) {
   return fee.libelle || fee.intitule || fee.title || fee.name || "Frais";
 }
 
+function parseAmount(value: any) {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+
+  const cleaned = String(value)
+    .replace(/\s/g, "")
+    .replace(/[^\d.-]/g, "");
+
+  const amount = Number(cleaned);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
 function feeAmount(fee: TrainingFee) {
-  return Number(fee.montant || fee.amount || fee.tarif || 0);
+  return parseAmount(fee.montant ?? fee.montantTotal ?? fee.amount ?? fee.tarif ?? fee.value ?? 0);
+}
+
+function parseJsonObject(value: any) {
+  if (!value) return {} as Record<string, any>;
+
+  // Fee Models renvoie souvent les tarifs spéciaux sous forme de tableau:
+  // specials: [{ name: "ANCIEN", montant: 80000 }, ...]
+  // On le transforme ici en objet: { ANCIEN: 80000 }.
+  if (Array.isArray(value)) {
+    return value.reduce<Record<string, any>>((acc, item) => {
+      const key = String(
+        item?.name ||
+          item?.nom ||
+          item?.label ||
+          item?.libelle ||
+          item?.tarifName ||
+          item?.tarif ||
+          item?.type ||
+          ""
+      ).trim();
+
+      if (key) {
+        acc[key] =
+          item?.montant ??
+          item?.amount ??
+          item?.value ??
+          item?.tarifAmount ??
+          item?.price ??
+          0;
+      }
+
+      return acc;
+    }, {});
+  }
+
+  if (typeof value === "object") return value as Record<string, any>;
+  if (typeof value !== "string") return {} as Record<string, any>;
+
+  try {
+    const parsed = JSON.parse(value);
+    return parseJsonObject(parsed);
+  } catch {
+    return {} as Record<string, any>;
+  }
+}
+
+function getSpecialTarifs(fee: TrainingFee) {
+  return {
+    ...parseJsonObject(fee.specials),
+    ...parseJsonObject(fee.specialRates),
+    ...parseJsonObject(fee.tarifsSpeciaux),
+    ...parseJsonObject(fee.tarifs),
+  } as Record<string, any>;
+}
+
+function normalizeTarifName(value: any) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function feeAmountByTarif(fee: TrainingFee, tarifName: string) {
+  const principal = feeAmount(fee);
+  const cleanTarif = String(tarifName || "Principal").trim();
+
+  if (!cleanTarif || normalizeTarifName(cleanTarif) === "principal") {
+    return principal;
+  }
+
+  const specials = getSpecialTarifs(fee);
+
+  if (Object.prototype.hasOwnProperty.call(specials, cleanTarif)) {
+    return parseAmount(specials[cleanTarif]);
+  }
+
+  const matchedKey = Object.keys(specials).find(
+    (key) => normalizeTarifName(key) === normalizeTarifName(cleanTarif)
+  );
+
+  if (matchedKey) {
+    return parseAmount(specials[matchedKey]);
+  }
+
+  return principal;
 }
 
 export default function InscriptionWizard({ user }: { user: AuthUser }) {
@@ -74,8 +226,12 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
   const [selectedLevelId, setSelectedLevelId] = useState("");
   const [selectedClassId, setSelectedClassId] = useState("");
 
-  const [trainingFees, setTrainingFees] = useState<TrainingFee[]>([]);
-  const [selectedFeeIds, setSelectedFeeIds] = useState<number[]>([]);
+  const [feeModels, setFeeModels] = useState<FeeModel[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [selectedFeeModelId, setSelectedFeeModelId] = useState("");
+  const [selectedFeeModelDetails, setSelectedFeeModelDetails] = useState<FeeModel | null>(null);
+  const [selectedFeeIds, setSelectedFeeIds] = useState<string[]>([]);
+  const [selectedTarif, setSelectedTarif] = useState("");
 
   const [form, setForm] = useState({
     dateInscription: today,
@@ -117,8 +273,8 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
   }, []);
 
   useEffect(() => {
-    loadTrainingFeesByClass();
-  }, [selectedClassId]);
+    loadFeeModelsByClass();
+  }, [selectedClassId, academics.year, form.classe]);
 
   async function loadAcademics() {
     try {
@@ -133,30 +289,75 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
     }
   }
 
-  async function loadTrainingFeesByClass() {
+  async function loadFeeModelsByClass() {
     const classRoomId = Number(selectedClassId);
 
-    if (!classRoomId) {
-      setTrainingFees([]);
-      setSelectedFeeIds([]);
-      return;
-    }
+    setFeeModels([]);
+    setSelectedFeeModelId("");
+    setSelectedFeeModelDetails(null);
+    setSelectedFeeIds([]);
+    setSelectedTarif("");
+
+    if (!classRoomId) return;
 
     try {
+      setLoadingModels(true);
       setLoadingFees(true);
 
-      const res = await fetch(`/api/training-fees?classRoomId=${classRoomId}`, {
+      const params = new URLSearchParams();
+      if (academics.year) {
+        params.set("schoolYearName", academics.year);
+        params.set("anneeScolaire", academics.year);
+        params.set("year", academics.year);
+      }
+      params.set("classRoomId", String(classRoomId));
+      params.set("classId", String(classRoomId));
+      if (form.classe) {
+        params.set("classe", form.classe);
+        params.set("className", form.classe);
+        params.set("classRoomName", form.classe);
+      }
+
+      const res = await fetch(`/api/fee-models?${params.toString()}`, {
         cache: "no-store",
       });
 
       const data = await res.json();
-      const fees = Array.isArray(data) ? data : [];
+      const models = normalizeArray(data) as FeeModel[];
 
-      setTrainingFees(fees);
-      setSelectedFeeIds(fees.map((fee: TrainingFee) => fee.id));
+      setFeeModels(models);
     } catch {
-      setTrainingFees([]);
-      setSelectedFeeIds([]);
+      setFeeModels([]);
+    } finally {
+      setLoadingModels(false);
+      setLoadingFees(false);
+    }
+  }
+
+  async function selectFeeModel(modelId: string) {
+    setSelectedFeeModelId(modelId);
+    setSelectedFeeModelDetails(null);
+    setSelectedFeeIds([]);
+    setSelectedTarif("");
+
+    if (!modelId) return;
+
+    const fromList = feeModels.find((model) => String(model.id) === modelId) || null;
+
+    try {
+      setLoadingFees(true);
+      const res = await fetch(`/api/fee-models/${modelId}`, { cache: "no-store" });
+      const data = await res.json();
+      const detail = (data?.data || data?.model || data) as FeeModel;
+      const finalModel = { ...(fromList || {}), ...(detail || {}) } as FeeModel;
+      const rows = getModelRows(finalModel);
+
+      setSelectedFeeModelDetails(finalModel);
+      setSelectedFeeIds(rows.map((row, index) => getFeeRowStableId(row, index)));
+    } catch {
+      const rows = getModelRows(fromList);
+      setSelectedFeeModelDetails(fromList);
+      setSelectedFeeIds(rows.map((row, index) => getFeeRowStableId(row, index)));
     } finally {
       setLoadingFees(false);
     }
@@ -166,7 +367,7 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
     setForm((prev) => ({ ...prev, [name]: value }));
   }
 
-  function toggleFee(id: number) {
+  function toggleFee(id: string) {
     if (selectedFeeIds.includes(id)) {
       setSelectedFeeIds(selectedFeeIds.filter((x) => x !== id));
     } else {
@@ -190,6 +391,65 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
     (classe) => String(classe.id) === selectedClassId
   );
 
+  const selectedFeeRows = useMemo(() => {
+    return getModelRows(selectedFeeModelDetails);
+  }, [selectedFeeModelDetails]);
+
+  const availableTarifs = useMemo(() => {
+    if (!selectedFeeModelId) return [];
+
+    const names = new Set<string>(["Principal"]);
+
+    selectedFeeRows.forEach((fee) => {
+      const specials = getSpecialTarifs(fee);
+
+      Object.keys(specials).forEach((key) => {
+        const clean = key.trim();
+        if (clean) names.add(clean);
+      });
+    });
+
+    return Array.from(names);
+  }, [selectedFeeModelId, selectedFeeRows]);
+
+  useEffect(() => {
+    // Tsy atao Principal automatique intsony.
+    // Mila mifidy tarif aloha ny utilisateur vao miseho sy ampidirina ny frais.
+    if (!selectedFeeModelId) {
+      if (selectedTarif) setSelectedTarif("");
+      return;
+    }
+
+    if (selectedTarif && !availableTarifs.includes(selectedTarif)) {
+      setSelectedTarif("");
+    }
+  }, [availableTarifs, selectedFeeModelId, selectedTarif]);
+
+  useEffect(() => {
+    // Rehefa voafidy ny tarif dia ampidirina automatique daholo ny frais ao amin'ilay modèle.
+    // Tsy mila selection ligne tsirairay intsony, mba tsy hisy mélange Principal/Ancien/Famille.
+    if (!selectedFeeModelId || !selectedTarif) {
+      setSelectedFeeIds([]);
+      return;
+    }
+
+    setSelectedFeeIds(selectedFeeRows.map((fee, index) => getFeeRowStableId(fee, index)));
+  }, [selectedFeeModelId, selectedTarif, selectedFeeRows]);
+
+  const selectedFees = useMemo(
+    () => selectedFeeRows.filter((fee, index) => selectedFeeIds.includes(getFeeRowStableId(fee, index))),
+    [selectedFeeRows, selectedFeeIds]
+  );
+
+  const totalSelectedFees = useMemo(
+    () =>
+      selectedFees.reduce(
+        (sum, fee) => sum + feeAmountByTarif(fee, selectedTarif),
+        0
+      ),
+    [selectedFees, selectedTarif]
+  );
+
   const progress = useMemo(() => {
     return Math.round(((step + 1) / steps.length) * 100);
   }, [step]);
@@ -205,6 +465,16 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
       !selectedClassId
     ) {
       alert("Fenoy aloha ireo champs misy *");
+      return;
+    }
+
+    if (!selectedFeeModelId) {
+      alert("Safidio aloha ny modèle de frais.");
+      return;
+    }
+
+    if (!selectedTarif) {
+      alert("Safidio aloha ny tarif ampiharina.");
       return;
     }
 
@@ -253,7 +523,49 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
         return;
       }
 
-      if (selectedFeeIds.length > 0) {
+      if (selectedFees.length > 0) {
+        const feeRows = selectedFees.map((fee, index) => {
+          const amount = feeAmountByTarif(fee, selectedTarif);
+          const stableId = getFeeRowStableId(fee, index);
+
+          return {
+            id: stableId,
+            feeRowId: stableId,
+            feeModelId: Number(selectedFeeModelId),
+            sourceType: "FEE_MODEL",
+            code: fee.code || "",
+            libelle: feeLabel(fee),
+            label: feeLabel(fee),
+            // Montant ligne par ligne avy amin'ilay tarif sélectionné.
+            // Tsy total général no alefa; ity montant ity no an'ilay frais tsirairay.
+            montant: amount,
+            amount,
+            tarifAmount: amount,
+            montantTarifSelectionne: amount,
+            montantChoisi: amount,
+            montantApplique: amount,
+            montantPaye: 0,
+            reste: amount,
+            status: "NON_PAYE",
+            tarifName: selectedTarif,
+            selectedTarif,
+            tarifSelectionne: selectedTarif,
+            appliedTarif: selectedTarif,
+            appliedAmount: amount,
+            selectedTarifAmount: amount,
+            feeModelName: modelTitle(selectedFeeModelDetails),
+            schoolYearName: activeYearName,
+            anneeScolaire: activeYearName,
+            classRoomId: Number(selectedClassId),
+            classId: Number(selectedClassId),
+            classe: selectedClass?.name || form.classe,
+            className: selectedClass?.name || form.classe,
+            section: form.section || "",
+            serie: form.section || "",
+            serieName: form.section || "",
+          };
+        });
+
         const feeRes = await fetch("/api/student-fees", {
           method: "POST",
           headers: {
@@ -261,8 +573,28 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
           },
           body: JSON.stringify({
             studentId: createdStudent.id,
-            trainingFeeIds: selectedFeeIds,
             schoolYearName: activeYearName,
+            anneeScolaire: activeYearName,
+            tarifName: selectedTarif,
+            selectedTarif,
+            tarifSelectionne: selectedTarif,
+            appliedTarif: selectedTarif,
+            classRoomId: Number(selectedClassId),
+            classId: Number(selectedClassId),
+            classe: selectedClass?.name || form.classe,
+            className: selectedClass?.name || form.classe,
+            section: form.section || "",
+            serie: form.section || "",
+            serieName: form.section || "",
+            feeModelId: Number(selectedFeeModelId),
+            feeModelName: modelTitle(selectedFeeModelDetails),
+            sourceType: "FEE_MODEL",
+            modeCreation: "FEE_MODEL_TARIF_ROWS",
+            // Source de vérité: chaque ligne de frais porte déjà le montant du tarif choisi.
+            // Tsy mandefa trainingFeeIds na montantTotal global intsony isika mba tsy hiverenan'ny API amin'ny Principal.
+            feeRows,
+            fees: feeRows,
+            items: feeRows,
           }),
         });
 
@@ -432,8 +764,11 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
                           onChange={(value: string) => {
                             setSelectedLevelId(value);
                             setSelectedClassId("");
-                            setTrainingFees([]);
+                            setFeeModels([]);
+                            setSelectedFeeModelId("");
+                            setSelectedFeeModelDetails(null);
                             setSelectedFeeIds([]);
+                            setSelectedTarif("");
 
                             const level = academics.levels.find(
                               (l) => String(l.id) === value
@@ -454,6 +789,10 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
                           }))}
                           onChange={(value: string) => {
                             setSelectedClassId(value);
+                            setSelectedFeeModelId("");
+                            setSelectedFeeModelDetails(null);
+                            setSelectedFeeIds([]);
+                            setSelectedTarif("");
 
                             const classe = selectedLevel?.classes.find(
                               (c) => String(c.id) === value
@@ -472,6 +811,37 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
                         />
                       </Grid>
 
+                      <div className="mt-6 rounded-[26px] border border-indigo-100 bg-white p-4 md:p-5 shadow-sm">
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                          <Select
+                            label="Modèle de frais *"
+                            value={selectedFeeModelId}
+                            options={feeModels.map((model) => ({
+                              label: modelTitle(model),
+                              value: String(model.id),
+                            }))}
+                            onChange={(value: string) => selectFeeModel(value)}
+                          />
+
+                          <Select
+                            label="Choix tarif *"
+                            value={selectedTarif}
+                            options={availableTarifs}
+                            onChange={(value: string) => setSelectedTarif(value)}
+                          />
+                        </div>
+
+                        <div className="mt-4 rounded-2xl bg-indigo-50 px-4 py-3 text-sm font-black text-indigo-900">
+                          {selectedTarif
+                            ? `${selectedFeeRows.length} frais prêts avec le tarif ${selectedTarif}`
+                            : "Sélectionnez d’abord un tarif"}
+                        </div>
+
+                        <p className="mt-2 text-xs font-semibold text-slate-500">
+                          Safidio aloha ny modèle avy amin'ny Fee Models, avy eo safidio ny tarif. Rehefa voafidy ny tarif dia miseho sy ampidirina automatique daholo ny frais ao anatiny.
+                        </p>
+                      </div>
+
                       <div className="mt-6 rounded-[26px] border border-blue-100 bg-gradient-to-br from-blue-50 via-white to-indigo-50 p-4 md:p-5 shadow-sm">
                         <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                           <div>
@@ -479,37 +849,46 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
                               Frais de formation à lier à l’étudiant
                             </h3>
                             <p className="text-xs text-slate-500">
-                              Les frais créés dans Frais de formation apparaissent automatiquement selon la classe choisie.
+                              Les frais du modèle sélectionné apparaissent seulement après choix du tarif.
                             </p>
                           </div>
 
                           <span className="w-fit rounded-full bg-blue-600 px-4 py-2 text-xs font-black text-white shadow">
-                            {selectedFeeIds.length} sélectionné(s)
+                            {selectedTarif ? `${selectedFeeRows.length} frais du tarif ${selectedTarif}` : "Aucun tarif"}
                           </span>
                         </div>
 
                         {!selectedClassId ? (
                           <div className="rounded-2xl border border-slate-200 bg-white p-5 text-center font-semibold text-slate-500">
-                            Sélectionnez d’abord une classe pour afficher les frais.
+                            Sélectionnez d’abord une classe pour afficher les modèles.
                           </div>
-                        ) : loadingFees ? (
+                        ) : !selectedFeeModelId ? (
+                          <div className="rounded-2xl border border-slate-200 bg-white p-5 text-center font-semibold text-slate-500">
+                            Sélectionnez d'abord un modèle de frais.
+                          </div>
+                        ) : !selectedTarif ? (
+                          <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-5 text-center font-semibold text-indigo-700">
+                            Sélectionnez d'abord un tarif pour afficher les frais du modèle.
+                          </div>
+                        ) : loadingModels || loadingFees ? (
                           <div className="rounded-2xl border border-slate-200 bg-white p-5 text-center font-semibold text-slate-500">
                             Chargement des frais...
                           </div>
-                        ) : trainingFees.length === 0 ? (
+                        ) : selectedFeeModelId && selectedFeeRows.length === 0 ? (
                           <div className="rounded-2xl border border-orange-200 bg-orange-50 p-5 text-center font-semibold text-orange-700">
-                            Aucun frais créé pour cette classe.
+                            Aucun modèle/frais créé pour cette classe.
                           </div>
                         ) : (
                           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                            {trainingFees.map((fee) => {
-                              const checked = selectedFeeIds.includes(fee.id);
+                            {selectedFeeRows.map((fee, index) => {
+                              const rowId = getFeeRowStableId(fee, index);
+                              const checked = selectedFeeIds.includes(rowId);
 
                               return (
                                 <button
-                                  key={fee.id}
+                                  key={rowId}
                                   type="button"
-                                  onClick={() => toggleFee(fee.id)}
+                                  onClick={() => undefined}
                                   className={`group flex items-center gap-3 rounded-2xl border p-4 text-left transition ${
                                     checked
                                       ? "border-blue-500 bg-white shadow-md ring-4 ring-blue-100"
@@ -531,7 +910,7 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
                                       {feeLabel(fee)}
                                     </span>
                                     <span className="mt-1 block text-xs font-semibold text-slate-500">
-                                      {fee.code || "-"} · {formatAmount(feeAmount(fee))} Ar
+                                      {fee.code || "-"} · {formatAmount(feeAmountByTarif(fee, selectedTarif))} Ar
                                     </span>
                                   </span>
                                 </button>
@@ -624,21 +1003,19 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
                         </div>
 
                         <div className="divide-y rounded-2xl border bg-slate-50">
-                          {trainingFees.filter((fee) => selectedFeeIds.includes(fee.id)).length === 0 ? (
+                          {selectedFees.length === 0 ? (
                             <div className="p-4 text-sm font-semibold text-slate-500">
                               Aucun frais sélectionné.
                             </div>
                           ) : (
-                            trainingFees
-                              .filter((fee) => selectedFeeIds.includes(fee.id))
-                              .map((fee) => (
-                                <div key={fee.id} className="flex items-center justify-between gap-3 p-3 text-sm">
-                                  <span className="min-w-0">
-                                    <b>{fee.code || "-"}</b> — {feeLabel(fee)}
-                                  </span>
-                                  <b className="shrink-0">{formatAmount(feeAmount(fee))} Ar</b>
-                                </div>
-                              ))
+                            selectedFees.map((fee, index) => (
+                              <div key={getFeeRowStableId(fee, index)} className="flex items-center justify-between gap-3 p-3 text-sm">
+                                <span className="min-w-0">
+                                  <b>{fee.code || "-"}</b> — {feeLabel(fee)}
+                                </span>
+                                <b className="shrink-0">{formatAmount(feeAmountByTarif(fee, selectedTarif))} Ar</b>
+                              </div>
+                            ))
                           )}
                         </div>
                       </div>

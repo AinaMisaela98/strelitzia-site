@@ -68,10 +68,29 @@ function getFeeCreationOrder(fee: any, fallbackIndex = 0) {
 }
 
 function getFeeUniqueKey(fee: any) {
-  const trainingFeeId = fee?.trainingFeeId || fee?.sourceTrainingFeeId || fee?.trainingId || "";
-  const code = getFeeCode(fee);
-  const label = getFeeLabel(fee);
-  return trainingFeeId ? `TF-${trainingFeeId}` : `${code}-${normalizeText(label)}`;
+  // Clé unique métier: un même frais ne doit apparaître qu'une seule fois
+  // dans FRAIS DE FORMATION, même s'il existe à la fois dans StudentFee
+  // et dans TrainingFee, ou si plusieurs anciennes lignes ont été créées.
+  const code = normalizeText(getFeeCode(fee));
+  const label = normalizeText(getFeeLabel(fee));
+  const schoolYearName = normalizeText(
+    fee?.schoolYearName || fee?.year || fee?.anneeScolaire || form.anneeScolaire || student.anneeScolaire || ""
+  );
+  const classIdentity = normalizeText(
+    fee?.classRoomId ||
+      fee?.classId ||
+      fee?.classeId ||
+      fee?.classe ||
+      fee?.className ||
+      fee?.classRoomName ||
+      form.classe ||
+      student.classe ||
+      student.className ||
+      student.classRoomName ||
+      ""
+  );
+
+  return `${schoolYearName}|${classIdentity}|${code}|${label}`;
 }
 
 function isSameClassFee(fee: any, classeName: string, classRoomId: string | number) {
@@ -97,13 +116,31 @@ function isSameClassFee(fee: any, classeName: string, classRoomId: string | numb
 function uniqueFees(list: any[]) {
   const map = new Map<string, any>();
 
+  function isRealStudentFee(fee: any) {
+    const id = String(fee?.studentFeeId || fee?.id || "");
+    return Boolean(fee?.studentFeeId) && !id.startsWith("training-");
+  }
+
+  function feePriority(fee: any) {
+    // Priorité maximale aux StudentFee réels déjà attachés à l'étudiant,
+    // car ils contiennent le montant du tarif réellement choisi.
+    let score = 0;
+    if (isRealStudentFee(fee)) score += 1000;
+    if (isFeePaid(fee)) score += 500;
+    if (Number(getFeeAmount(fee)) > 0) score += 100;
+    if (fee?.trainingFeeId || fee?.sourceTrainingFeeId || fee?.trainingId) score += 20;
+
+    const createdAt = fee?.createdAt ? new Date(fee.createdAt).getTime() : 0;
+    if (Number.isFinite(createdAt)) score += Math.min(createdAt / 1000000000000, 10);
+
+    return score;
+  }
+
   for (const fee of list) {
     const key = getFeeUniqueKey(fee);
     const existing = map.get(key);
 
-    // Raha misy doublon dia tazonina ilay efa PAYE, sinon ilay voalohany no tazonina
-    // mba tsy hikorontana ny filaharana avy amin'ny création.
-    if (!existing || (!isFeePaid(existing) && isFeePaid(fee))) {
+    if (!existing || feePriority(fee) >= feePriority(existing)) {
       map.set(key, fee);
     }
   }
@@ -411,6 +448,39 @@ function getFeeAmount(fee: any) {
   return Number(fee.modifiedMontant ?? fee.montantTotal ?? fee.amount ?? fee.montant ?? fee.tarif ?? fee.value ?? 0);
 }
 
+function getRealPaidAmount(fee: any) {
+  // Annulation: tokony hiala ilay vola tena voaloa tamin'io frais io ihany.
+  // Raha Ancien no naloa dia montant Ancien no DEBIT, fa tsy montant Principal.
+  const candidates = [
+    fee?.montantPaye,
+    fee?.paidAmount,
+    fee?.amountPaid,
+    fee?.paymentAmount,
+    fee?.montantRegle,
+    fee?.montantRéglé,
+    fee?.montantVerse,
+    fee?.montantVersé,
+    fee?.appliedAmount,
+    fee?.selectedTarifAmount,
+    fee?.montantTarifSelectionne,
+    fee?.montantChoisi,
+    fee?.montantApplique,
+    fee?.modifiedMontant,
+    fee?.montantTotal,
+    fee?.amount,
+    fee?.montant,
+    fee?.tarif,
+    fee?.value,
+  ];
+
+  for (const candidate of candidates) {
+    const amount = Number(String(candidate ?? '').replace(/[^0-9.-]/g, ''));
+    if (Number.isFinite(amount) && amount > 0) return amount;
+  }
+
+  return 0;
+}
+
 function getFeeLabel(fee: any) {
   return String(fee.libelle || fee.label || fee.name || fee.code || "Frais");
 }
@@ -633,6 +703,12 @@ async function loadStudentFees() {
         return sameYear && sameClass;
       });
 
+    const currentClassTrainingFeeIds = new Set(
+      trainingData
+        .map((fee: any) => String(fee?.id || fee?.trainingFeeId || fee?.sourceTrainingFeeId || ""))
+        .filter(Boolean)
+    );
+
     const localPayments = getLocalPayments();
     const paidMap = new Map<string, any>();
 
@@ -642,24 +718,46 @@ async function loadStudentFees() {
       paidMap.set(getFeeCode(f), f);
     });
 
+    const studentFeesForCurrentStudent = studentData
+      .map((f, index) => ({ ...f, __sourceIndex: index }))
+      .filter((fee: any) => {
+        const feeYear = String(
+          fee.schoolYearName || fee.year || fee.anneeScolaire || ""
+        ).trim();
+
+        const sameYear = !schoolYearName || !feeYear || feeYear === schoolYearName;
+        if (!sameYear) return false;
+
+        const feeHasClassInfo = Boolean(
+          fee?.classe ||
+            fee?.className ||
+            fee?.classRoomName ||
+            fee?.class ||
+            fee?.classRoomId ||
+            fee?.classId ||
+            fee?.classeId
+        );
+
+        if (feeHasClassInfo) return isSameClassFee(fee, classeName, classRoomId);
+
+        const feeTrainingId = String(
+          fee?.trainingFeeId || fee?.sourceTrainingFeeId || fee?.trainingId || ""
+        );
+
+        if (feeTrainingId) return currentClassTrainingFeeIds.has(feeTrainingId);
+
+        return true;
+      })
+      .map((f, index) => normalizeStudentFee(f, Number(f.__sourceIndex ?? index)));
+
+    const trainingFeesFallback = trainingData.map((f, index) =>
+      normalizeTrainingFee(f, Number(f.__sourceIndex ?? index), paidMap, localPayments)
+    );
+
     const visibleFees =
-      trainingData.length > 0
-        ? trainingData.map((f, index) =>
-            normalizeTrainingFee(f, Number(f.__sourceIndex ?? index), paidMap, localPayments)
-          )
-        : studentData
-            .map((f, index) => ({ ...f, __sourceIndex: index }))
-            .filter((fee: any) => {
-              const feeYear = String(
-                fee.schoolYearName || fee.year || fee.anneeScolaire || ""
-              ).trim();
-
-              const sameYear = !schoolYearName || !feeYear || feeYear === schoolYearName;
-              const sameClass = isSameClassFee(fee, classeName, classRoomId);
-
-              return sameYear && sameClass;
-            })
-            .map((f, index) => normalizeStudentFee(f, Number(f.__sourceIndex ?? index)));
+      studentFeesForCurrentStudent.length > 0
+        ? studentFeesForCurrentStudent
+        : trainingFeesFallback;
 
     setFees(sortFees(uniqueFees(visibleFees)));
   } catch {
@@ -981,12 +1079,19 @@ async function paySelectedFees() {
 }
 
 async function cancelOnePayment(fee: any) {
+  const realPaidAmount = getRealPaidAmount(fee);
+
   const unpaidFee = {
     ...fee,
     status: "NON_PAYE",
     paid: false,
     montantPaye: 0,
-    reste: getFeeAmount(fee),
+    // Rehefa annulation dia averina ho reste ilay vola tena naloa tamin'io frais io.
+    // Tsy maka Principal intsony raha Ancien/Famille no tena paiement.
+    montantTotal: realPaidAmount || getFeeAmount(fee),
+    appliedAmount: realPaidAmount || getFeeAmount(fee),
+    selectedTarifAmount: realPaidAmount || getFeeAmount(fee),
+    reste: realPaidAmount || getFeeAmount(fee),
     paidAt: null,
     localOnly: false,
   };
@@ -994,7 +1099,16 @@ async function cancelOnePayment(fee: any) {
   let cancelled = false;
   const cancelReference = fee.reference || `ANNULATION-${buildPaymentReference()}`;
   const cancelDate = normalizeDateOnly(new Date().toISOString().slice(0, 10));
-  const cancelUniqueKey = buildMovementUniqueKey(fee, "DEBIT", cancelReference);
+  const cancelUniqueKey = buildMovementUniqueKey(
+    { ...fee, montantPaye: realPaidAmount, montantTotal: realPaidAmount || getFeeAmount(fee), amount: realPaidAmount || getFeeAmount(fee) },
+    "DEBIT",
+    cancelReference
+  );
+
+  if (!realPaidAmount || realPaidAmount <= 0) {
+    alert("Montant réel du paiement introuvable. Annulation impossible pour éviter une erreur de montant.");
+    return false;
+  }
 
   if (fee.studentFeeId && !fee.localOnly && !String(fee.studentFeeId).startsWith("training-")) {
     const res = await fetch("/api/student-fees", {
@@ -1018,10 +1132,13 @@ async function cancelOnePayment(fee: any) {
         motif: `ANNULATION - Frais de formation - ${getFeeLabel(fee)} - ${getFeeCode(fee)}`,
         libelle: `ANNULATION - Frais de formation - ${getFeeLabel(fee)} - ${getFeeCode(fee)}`,
         description: `ANNULATION - Frais de formation - ${getFeeLabel(fee)} - ${getFeeCode(fee)}`,
-        debit: getFeeAmount(fee),
+        debit: realPaidAmount,
         credit: 0,
-        montant: getFeeAmount(fee),
-        amount: getFeeAmount(fee),
+        montant: realPaidAmount,
+        amount: realPaidAmount,
+        montantPaye: realPaidAmount,
+        montantTotal: realPaidAmount,
+        reste: realPaidAmount,
         date: cancelDate,
         datePaiement: cancelDate,
         paymentDate: cancelDate,
@@ -1034,6 +1151,13 @@ async function cancelOnePayment(fee: any) {
         sortAt: buildInsertionDateTime(cancelDate),
         studentId: student.id,
         trainingFeeId: fee.trainingFeeId || fee.sourceTrainingFeeId,
+        // Champs supplémentaires pour que l'API garde le montant réel du paiement annulé.
+        originalMontantPaye: realPaidAmount,
+        paidAmount: realPaidAmount,
+        amountPaid: realPaidAmount,
+        appliedAmount: realPaidAmount,
+        selectedTarifAmount: realPaidAmount,
+        tarifName: fee.tarifName || fee.selectedTarif || fee.appliedTarif || fee.tarifSelectionne || fee.tarifApplique || "",
         schoolYearName: form.anneeScolaire || student.anneeScolaire || fee.schoolYearName || "2025-2026",
         tresorerie: fee.tresorerie || fee.treasuryName,
         reference: cancelReference,
@@ -1059,7 +1183,10 @@ async function cancelOnePayment(fee: any) {
   // (cas localOnly/fallback), afin d'éviter les doublons en ligne.
   if (!cancelled) {
     await createFeeTreasuryMovement(fee, "DEBIT", {
-      amount: getFeeAmount(fee),
+      amount: realPaidAmount,
+      montant: realPaidAmount,
+      debit: realPaidAmount,
+      credit: 0,
       date: cancelDate,
       datePaiement: cancelDate,
       paymentDate: cancelDate,
@@ -1705,9 +1832,16 @@ function printTicketMultiple(selectedFees: any[]) {
 
     if (!ok) return;
 
-    const res = await fetch(`/api/students/${form.id}`, {
-      method: "DELETE",
-    });
+    const deleteParams = new URLSearchParams();
+    const schoolYearName = String(form.anneeScolaire || student.anneeScolaire || "").trim();
+    if (schoolYearName) deleteParams.set("schoolYearName", schoolYearName);
+
+    const res = await fetch(
+      `/api/students/${form.id}${deleteParams.toString() ? `?${deleteParams.toString()}` : ""}`,
+      {
+        method: "DELETE",
+      }
+    );
 
     if (!res.ok) {
       alert("Erreur suppression étudiant");

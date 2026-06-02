@@ -510,7 +510,7 @@ export async function DELETE(req: Request) {
     const url = new URL(req.url);
 
     const id = Number(url.searchParams.get("id") || 0);
-    const schoolYearName = await resolveSchoolYear(
+    const requestedSchoolYearName = text(
       url.searchParams.get("schoolYearName") ||
         url.searchParams.get("anneeScolaire") ||
         url.searchParams.get("year")
@@ -520,29 +520,55 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: "ID obligatoire" }, { status: 400 });
     }
 
-    const existing = await prisma.treasuryMovement.findFirst({
-      where: {
-        id,
-        schoolYearName,
+    // Suppression fiable: on récupère d'abord le mouvement par son ID réel.
+    // Ensuite on utilise l'année scolaire enregistrée dans la donnée elle-même.
+    // Cela évite l'erreur 404 quand l'écran a encore une ancienne année active
+    // alors que le mouvement appartient à une autre année scolaire.
+    const existing = await prisma.treasuryMovement.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        schoolYearName: true,
       },
-      select: { id: true },
     });
 
     if (!existing) {
       return NextResponse.json(
-        { error: "Mouvement introuvable dans cette année scolaire." },
+        { error: "Mouvement introuvable." },
         { status: 404 }
       );
     }
 
+    const movementSchoolYearName = text(existing.schoolYearName);
+
+    // Sécurité année scolaire: si le frontend envoie une année, elle doit
+    // correspondre à l'année stockée sur le mouvement. Sinon on refuse pour
+    // empêcher une suppression dans une mauvaise année scolaire.
+    if (
+      requestedSchoolYearName &&
+      movementSchoolYearName &&
+      requestedSchoolYearName !== movementSchoolYearName
+    ) {
+      return NextResponse.json(
+        {
+          error: "Mouvement hors année scolaire sélectionnée.",
+          requestedSchoolYearName,
+          movementSchoolYearName,
+        },
+        { status: 409 }
+      );
+    }
+
     await prisma.treasuryMovement.delete({
-      where: { id },
+      where: { id: existing.id },
     });
 
     return NextResponse.json({
       ok: true,
+      success: true,
       deleted: true,
-      schoolYearName,
+      id: existing.id,
+      schoolYearName: movementSchoolYearName || requestedSchoolYearName,
     });
   } catch (error: any) {
     console.error("TREASURY_MOVEMENTS_DELETE_ERROR", error);

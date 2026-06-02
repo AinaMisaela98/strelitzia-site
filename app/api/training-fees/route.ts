@@ -21,10 +21,18 @@ function amountToNumber(value: any) {
   return Number(String(value || "").replace(/\s/g, "").replace(/,/g, "")) || 0;
 }
 
-function modelFieldNames(modelName: string) {
+function modelFieldMetas(modelName: string) {
   const runtimeModel = (prisma as any)?._runtimeDataModel?.models?.[modelName];
-  const fields = runtimeModel?.fields || [];
-  return fields.map((f: any) => f.name) as string[];
+  return runtimeModel?.fields || [];
+}
+
+function modelFieldNames(modelName: string) {
+  return modelFieldMetas(modelName).map((f: any) => f.name) as string[];
+}
+
+function modelFieldType(modelName: string, fieldName: string) {
+  const field = modelFieldMetas(modelName).find((f: any) => f.name === fieldName);
+  return String(field?.type || field?.kind || "");
 }
 
 function has(fields: string[], field: string) {
@@ -50,6 +58,58 @@ function normalizeText(value: any) {
 
 function normalizeUpper(value: any) {
   return normalizeText(value).toUpperCase();
+}
+
+function normalizeSpecialTarifs(value: any) {
+  if (!value) return {};
+
+  let source = value;
+
+  if (typeof value === "string") {
+    try {
+      source = JSON.parse(value);
+    } catch {
+      return {};
+    }
+  }
+
+  if (typeof source !== "object" || Array.isArray(source)) return {};
+
+  const result: Record<string, number> = {};
+
+  for (const [key, rawAmount] of Object.entries(source)) {
+    const name = normalizeText(key);
+    const amount = amountToNumber(rawAmount);
+
+    if (name && amount >= 0) {
+      result[name] = amount;
+    }
+  }
+
+  return result;
+}
+
+function specialTarifsField(fields: string[]) {
+  return pickFirst(fields, [
+    "specials",
+    "tarifs",
+    "specialTarifs",
+    "tarifsSpeciaux",
+    "montantsSpeciaux",
+    "specialAmounts",
+    "customTarifs",
+  ]);
+}
+
+function valueForPrismaField(modelName: string, fieldName: string, value: any) {
+  const fieldType = modelFieldType(modelName, fieldName).toLowerCase();
+
+  // Raha Json ny champ ao Prisma dia alefa object directement.
+  // Raha String/Text kosa dia tehirizina JSON string.
+  if (fieldType.includes("json")) return value;
+  if (fieldType.includes("string")) return JSON.stringify(value || {});
+
+  return value;
 }
 
 async function resolveClassNameFromRequest(url: URL) {
@@ -163,6 +223,15 @@ function buildTrainingFeeData(fields: string[], input: any, row: any) {
   if (libelleField) data[libelleField] = row.libelle;
   if (codeField) data[codeField] = row.code;
   if (montantField) data[montantField] = row.montant;
+
+  const specialsField = specialTarifsField(fields);
+  if (specialsField) {
+    data[specialsField] = valueForPrismaField(
+      "TrainingFee",
+      specialsField,
+      normalizeSpecialTarifs(row.specials || row.tarifs || row.tarifsSpeciaux)
+    );
+  }
 
   return data;
 }
@@ -355,6 +424,7 @@ export async function POST(req: Request) {
             libelle: body.libelle || body.intitule || body.title || body.name,
             code: body.code,
             montant: body.montant || body.amount,
+            specials: body.specials || body.tarifs || body.tarifsSpeciaux,
           },
         ];
 
@@ -365,6 +435,7 @@ export async function POST(req: Request) {
         ).trim(),
         code: String(row.code || "").trim(),
         montant: amountToNumber(row.montant || row.amount || row.tarif),
+        specials: normalizeSpecialTarifs(row.specials || row.tarifs || row.tarifsSpeciaux),
       }))
       .filter((row: any) => row.libelle && row.code && row.montant > 0);
 
@@ -475,6 +546,7 @@ export async function PATCH(req: Request) {
     const libelleField = pickFirst(fields, ["libelle", "intitule", "title", "name"]);
     const codeField = pickFirst(fields, ["code"]);
     const montantField = pickFirst(fields, ["montant", "amount", "tarif"]);
+    const specialsField = specialTarifsField(fields);
 
     const data: any = {};
 
@@ -488,6 +560,19 @@ export async function PATCH(req: Request) {
 
     if (montantField && body.montant !== undefined) {
       data[montantField] = amountToNumber(body.montant);
+    }
+
+    if (
+      specialsField &&
+      (body.specials !== undefined ||
+        body.tarifs !== undefined ||
+        body.tarifsSpeciaux !== undefined)
+    ) {
+      data[specialsField] = valueForPrismaField(
+        "TrainingFee",
+        specialsField,
+        normalizeSpecialTarifs(body.specials || body.tarifs || body.tarifsSpeciaux)
+      );
     }
 
     if (!Object.keys(data).length) {

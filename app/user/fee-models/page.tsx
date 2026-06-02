@@ -53,31 +53,31 @@ export default function FeeModelsPage() {
   const pathname = usePathname();
 
   const sidebarLinks = [
-  {
-    label: "Année scolaire",
-    href: "/user/school-years",
-  },
+    {
+      label: "Année scolaire",
+      href: "/user/school-years",
+    },
 
-  {
-    label: "Liste des niveaux",
-    href: "/user/academics",
-  },
+    {
+      label: "Liste des niveaux",
+      href: "/user/academics",
+    },
 
-  {
-    label: "Modèles de frais",
-    href: "/user/fee-models",
-  },
+    {
+      label: "Modèles de frais",
+      href: "/user/fee-models",
+    },
 
-  {
-    label: "Frais de formation",
-    href: "/user/training-fees",
-  },
+    {
+      label: "Frais de formation",
+      href: "/user/training-fees",
+    },
 
-  {
-    label: "Activités scolaires",
-    href: "/user/school-activities",
-  },
-];
+    {
+      label: "Activités scolaires",
+      href: "/user/school-activities",
+    },
+  ];
 
   const [models, setModels] = useState<FeeModel[]>([]);
   const [search, setSearch] = useState("");
@@ -91,32 +91,53 @@ export default function FeeModelsPage() {
 
   const [schoolYears, setSchoolYears] = useState<SchoolYear[]>([]);
   const [schoolYearName, setSchoolYearName] = useState("");
+  const [yearFilter, setYearFilter] = useState("");
 
   const [specialColumns, setSpecialColumns] = useState<string[]>([]);
   const [newSpecialColumn, setNewSpecialColumn] = useState("");
 
   const [draftRows, setDraftRows] = useState<DraftRow[]>([]);
-  const [savedTariffInputs, setSavedTariffInputs] = useState<Record<number, SavedTariffDraft>>({});
-  const [cellSpecialInputs, setCellSpecialInputs] = useState<Record<string, string>>({});
+  const [savedTariffInputs, setSavedTariffInputs] = useState<
+    Record<number, SavedTariffDraft>
+  >({});
+  const [cellSpecialInputs, setCellSpecialInputs] = useState<
+    Record<string, string>
+  >({});
 
   const [message, setMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
+  const activeSchoolYearName = useMemo(() => {
+    return (
+      schoolYears.find((year) => year.active)?.name ||
+      schoolYears[0]?.name ||
+      ""
+    );
+  }, [schoolYears]);
+
   const filteredModels = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const selectedYear = (yearFilter || activeSchoolYearName || "").trim();
 
-    if (!q) return models;
+    return models.filter((model) => {
+      const modelYear = String(model.schoolYearName || "").trim();
+      const sameYear = !selectedYear || modelYear === selectedYear;
+      const matchSearch =
+        !q ||
+        `${model.title} ${model.schoolYearName}`.toLowerCase().includes(q);
 
-    return models.filter((model) =>
-      `${model.title} ${model.schoolYearName}`.toLowerCase().includes(q)
-    );
-  }, [models, search]);
+      return sameYear && matchSearch;
+    });
+  }, [models, search, yearFilter, activeSchoolYearName]);
+
+  useEffect(() => {
+    loadSchoolYears();
+  }, []);
 
   useEffect(() => {
     loadModels();
-    loadSchoolYears();
-  }, []);
+  }, [yearFilter]);
 
   function showSuccess(text: string) {
     setSuccessMessage(text);
@@ -153,15 +174,35 @@ export default function FeeModelsPage() {
   }
 
   function buildSavedTariffInputs(model: FeeModel) {
-    return model.tariffs.reduce<Record<number, SavedTariffDraft>>((acc, tariff) => {
-      acc[tariff.id] = {
-        libelle: tariff.libelle || "",
-        code: tariff.code || "",
-        montant: formatAmountInput(tariff.montant),
-      };
+    return model.tariffs.reduce<Record<number, SavedTariffDraft>>(
+      (acc, tariff) => {
+        acc[tariff.id] = {
+          libelle: tariff.libelle || "",
+          code: tariff.code || "",
+          montant: formatAmountInput(tariff.montant),
+        };
 
-      return acc;
-    }, {});
+        return acc;
+      },
+      {},
+    );
+  }
+
+  function buildCellSpecialInputs(model: FeeModel, columns: string[]) {
+    const inputs: Record<string, string> = {};
+
+    for (const tariff of model.tariffs) {
+      for (const column of columns) {
+        const found = tariff.specials.find(
+          (special) => special.name === column,
+        );
+        inputs[`${tariff.id}-${column}`] = found
+          ? formatAmountInput(found.amount)
+          : "";
+      }
+    }
+
+    return inputs;
   }
 
   function sortedTariffs(model: FeeModel) {
@@ -170,7 +211,7 @@ export default function FeeModelsPage() {
 
   function extractSpecialColumns(model: FeeModel) {
     const names = model.tariffs.flatMap((tariff) =>
-      tariff.specials.map((special) => special.name)
+      tariff.specials.map((special) => special.name),
     );
 
     return Array.from(new Set(names));
@@ -192,7 +233,7 @@ export default function FeeModelsPage() {
           new Set([
             ...fromDb,
             ...saved.filter((name) => typeof name === "string"),
-          ])
+          ]),
         );
       }
     } catch (error) {
@@ -206,7 +247,7 @@ export default function FeeModelsPage() {
     try {
       localStorage.setItem(
         specialColumnsStorageKey(modelId),
-        JSON.stringify(Array.from(new Set(columns)))
+        JSON.stringify(Array.from(new Set(columns))),
       );
     } catch (error) {
       console.error("Erreur sauvegarde colonnes tarifs:", error);
@@ -224,7 +265,7 @@ export default function FeeModelsPage() {
     throw new Error(
       text.startsWith("<!DOCTYPE")
         ? "API introuvable ou erreur HTML retournée. Vérifiez les routes API."
-        : text || "Réponse API invalide."
+        : text || "Réponse API invalide.",
     );
   }
 
@@ -237,7 +278,9 @@ export default function FeeModelsPage() {
         setSchoolYears(data);
 
         const active = data.find((year: SchoolYear) => year.active);
-        setSchoolYearName(active?.name || data[0]?.name || "");
+        const defaultYear = active?.name || data[0]?.name || "";
+        setSchoolYearName(defaultYear);
+        setYearFilter(defaultYear);
       }
     } catch (error) {
       console.error(error);
@@ -247,10 +290,30 @@ export default function FeeModelsPage() {
 
   async function loadModels() {
     try {
-      const res = await fetch(`/api/fee-models?q=${encodeURIComponent(search)}`);
+      const params = new URLSearchParams();
+      const selectedYear = (yearFilter || activeSchoolYearName || "").trim();
+
+      if (search.trim()) params.set("q", search.trim());
+      if (selectedYear) {
+        params.set("schoolYearName", selectedYear);
+        params.set("anneeScolaire", selectedYear);
+        params.set("year", selectedYear);
+      }
+
+      const res = await fetch(`/api/fee-models?${params.toString()}`, {
+        cache: "no-store",
+      });
       const data = await safeJson(res);
 
-      setModels(Array.isArray(data) ? data : []);
+      const list = Array.isArray(data)
+        ? data
+        : Array.isArray(data.models)
+          ? data.models
+          : Array.isArray(data.feeModels)
+            ? data.feeModels
+            : [];
+
+      setModels(list);
     } catch (error: any) {
       console.error(error);
       setMessage(error?.message || "Erreur chargement modèles de frais.");
@@ -284,6 +347,7 @@ export default function FeeModelsPage() {
       }
 
       resetCreateForm();
+      setYearFilter(schoolYearName || yearFilter || activeSchoolYearName);
       setCreateOpen(false);
       await loadModels();
 
@@ -311,8 +375,9 @@ export default function FeeModelsPage() {
       setTitle(data.title);
       setClasse(data.classe || "GENERAL");
       setSchoolYearName(data.schoolYearName);
-      setSpecialColumns(loadPersistedSpecialColumns(data));
-      setCellSpecialInputs({});
+      const columns = loadPersistedSpecialColumns(data);
+      setSpecialColumns(columns);
+      setCellSpecialInputs(buildCellSpecialInputs(data, columns));
       setDraftRows([]);
       setEditOpen(true);
     } catch (error: any) {
@@ -388,7 +453,9 @@ export default function FeeModelsPage() {
           const duplicatedSpecial = await safeJson(specialRes);
 
           if (!specialRes.ok) {
-            setMessage(duplicatedSpecial.message || "Erreur duplication tarif spécial.");
+            setMessage(
+              duplicatedSpecial.message || "Erreur duplication tarif spécial.",
+            );
             return;
           }
         }
@@ -396,11 +463,16 @@ export default function FeeModelsPage() {
 
       persistSpecialColumns(duplicatedModel.id, duplicatedSpecialColumns);
 
-      const fullDuplicatedRes = await fetch(`/api/fee-models/${duplicatedModel.id}`);
+      const fullDuplicatedRes = await fetch(
+        `/api/fee-models/${duplicatedModel.id}`,
+      );
       const fullDuplicated = await safeJson(fullDuplicatedRes);
 
       if (!fullDuplicatedRes.ok) {
-        setMessage(fullDuplicated.message || "Modèle dupliqué, mais ouverture impossible.");
+        setMessage(
+          fullDuplicated.message ||
+            "Modèle dupliqué, mais ouverture impossible.",
+        );
         await loadModels();
         return;
       }
@@ -411,7 +483,9 @@ export default function FeeModelsPage() {
       setClasse(fullDuplicated.classe || "GENERAL");
       setSchoolYearName(fullDuplicated.schoolYearName);
       setSpecialColumns(duplicatedSpecialColumns);
-      setCellSpecialInputs({});
+      setCellSpecialInputs(
+        buildCellSpecialInputs(fullDuplicated, duplicatedSpecialColumns),
+      );
       setDraftRows([]);
       setCreateOpen(false);
       setEditOpen(true);
@@ -437,10 +511,11 @@ export default function FeeModelsPage() {
       setSavedTariffInputs(buildSavedTariffInputs(data));
       setSpecialColumns((previous) => {
         const merged = Array.from(
-          new Set([...previous, ...loadPersistedSpecialColumns(data)])
+          new Set([...previous, ...loadPersistedSpecialColumns(data)]),
         );
 
         persistSpecialColumns(data.id, merged);
+        setCellSpecialInputs(buildCellSpecialInputs(data, merged));
 
         return merged;
       });
@@ -464,8 +539,14 @@ export default function FeeModelsPage() {
 
         if (!input) continue;
 
-        if (!input.libelle.trim() || !input.code.trim() || !input.montant.trim()) {
-          setMessage("Chaque ligne enregistrée doit avoir Libellé, Code et Montant.");
+        if (
+          !input.libelle.trim() ||
+          !input.code.trim() ||
+          !input.montant.trim()
+        ) {
+          setMessage(
+            "Chaque ligne enregistrée doit avoir Libellé, Code et Montant.",
+          );
           return;
         }
       }
@@ -475,23 +556,114 @@ export default function FeeModelsPage() {
           row.libelle.trim() ||
           row.code.trim() ||
           row.montant.trim() ||
-          Object.values(row.specials).some((v: string) => v.trim())
+          Object.values(row.specials).some((v: string) => v.trim()),
       );
+
+      for (const tariff of savedRows) {
+        for (const columnName of specialColumns) {
+          const key = `${tariff.id}-${columnName}`;
+          const inputAmount = cellSpecialInputs[key] || "";
+          const found = tariff.specials.find(
+            (special) => special.name === columnName,
+          );
+          const numericAmount = amountToNumber(inputAmount);
+
+          if (inputAmount.trim()) {
+            if (found) {
+              if (found.amount !== numericAmount) {
+                const specialDeleteRes = await fetch(
+                  `/api/fee-special-tariffs/${found.id}`,
+                  {
+                    method: "DELETE",
+                  },
+                );
+
+                if (!specialDeleteRes.ok) {
+                  setMessage("Erreur modification tarif spécial.");
+                  return;
+                }
+
+                const specialCreateRes = await fetch(
+                  "/api/fee-special-tariffs",
+                  {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      feeTariffId: tariff.id,
+                      name: columnName,
+                      amount: numericAmount,
+                    }),
+                  },
+                );
+
+                const specialCreateData = await safeJson(specialCreateRes);
+
+                if (!specialCreateRes.ok) {
+                  setMessage(
+                    specialCreateData.message ||
+                      "Erreur modification tarif spécial.",
+                  );
+                  return;
+                }
+              }
+            } else {
+              const specialCreateRes = await fetch("/api/fee-special-tariffs", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  feeTariffId: tariff.id,
+                  name: columnName,
+                  amount: numericAmount,
+                }),
+              });
+
+              const specialCreateData = await safeJson(specialCreateRes);
+
+              if (!specialCreateRes.ok) {
+                setMessage(
+                  specialCreateData.message || "Erreur ajout tarif spécial.",
+                );
+                return;
+              }
+            }
+          } else if (found) {
+            const specialDeleteRes = await fetch(
+              `/api/fee-special-tariffs/${found.id}`,
+              {
+                method: "DELETE",
+              },
+            );
+
+            if (!specialDeleteRes.ok) {
+              setMessage("Erreur suppression montant spécial.");
+              return;
+            }
+          }
+        }
+      }
 
       for (const row of rowsToSave) {
         if (!row.libelle.trim() || !row.code.trim() || !row.montant.trim()) {
-          setMessage("Chaque nouvelle ligne doit avoir Libellé, Code et Montant.");
+          setMessage(
+            "Chaque nouvelle ligne doit avoir Libellé, Code et Montant.",
+          );
           return;
         }
       }
 
       const allCodes = [
-        ...savedRows.map((tariff) => savedTariffInputs[tariff.id]?.code.trim().toLowerCase()).filter(Boolean),
-        ...rowsToSave.map((row) => row.code.trim().toLowerCase()).filter(Boolean),
+        ...savedRows
+          .map((tariff) =>
+            savedTariffInputs[tariff.id]?.code.trim().toLowerCase(),
+          )
+          .filter(Boolean),
+        ...rowsToSave
+          .map((row) => row.code.trim().toLowerCase())
+          .filter(Boolean),
       ];
 
       const duplicatedCode = allCodes.find(
-        (code, index) => allCodes.findIndex((item) => item === code) !== index
+        (code, index) => allCodes.findIndex((item) => item === code) !== index,
       );
 
       if (duplicatedCode) {
@@ -633,7 +805,11 @@ export default function FeeModelsPage() {
       return;
     }
 
-    if (specialColumns.some((column) => column.toLowerCase() === name.toLowerCase())) {
+    if (
+      specialColumns.some(
+        (column) => column.toLowerCase() === name.toLowerCase(),
+      )
+    ) {
       setMessage("Cette colonne existe déjà.");
       return;
     }
@@ -648,9 +824,36 @@ export default function FeeModelsPage() {
       return next;
     });
 
+    setCellSpecialInputs((previous) => {
+      const next = { ...previous };
+
+      if (selectedModel) {
+        for (const tariff of sortedTariffs(selectedModel)) {
+          const savedInput = savedTariffInputs[tariff.id];
+          next[`${tariff.id}-${name}`] = formatAmountInput(
+            savedInput?.montant || tariff.montant,
+          );
+        }
+      }
+
+      return next;
+    });
+
+    setDraftRows((previous) =>
+      previous.map((row) => ({
+        ...row,
+        specials: {
+          ...row.specials,
+          [name]: formatAmountInput(row.montant),
+        },
+      })),
+    );
+
     setNewSpecialColumn("");
     setMessage("");
-    showSuccess(`Tarif "${name}" ajouté.`);
+    showSuccess(
+      `Tarif "${name}" ajouté avec duplication du montant principal.`,
+    );
   }
 
   function removeSpecialColumn(name: string) {
@@ -672,18 +875,17 @@ export default function FeeModelsPage() {
         delete specials[name];
 
         return { ...row, specials };
-      })
+      }),
     );
 
     showSuccess(`Tarif "${name}" supprimé.`);
   }
 
-
   function clearDraftRow(tempId: string) {
     setDraftRows((previous) =>
       previous.map((row) =>
-        row.tempId === tempId ? createEmptyDraftRow() : row
-      )
+        row.tempId === tempId ? createEmptyDraftRow() : row,
+      ),
     );
   }
 
@@ -701,7 +903,7 @@ export default function FeeModelsPage() {
   function updateSavedTariffInput(
     tariffId: number,
     field: "libelle" | "code" | "montant",
-    value: string
+    value: string,
   ) {
     setSavedTariffInputs((previous) => ({
       ...previous,
@@ -715,12 +917,12 @@ export default function FeeModelsPage() {
   function updateDraftRow(
     tempId: string,
     field: "libelle" | "code" | "montant",
-    value: string
+    value: string,
   ) {
     setDraftRows((previous) =>
       previous.map((row) =>
-        row.tempId === tempId ? { ...row, [field]: value } : row
-      )
+        row.tempId === tempId ? { ...row, [field]: value } : row,
+      ),
     );
   }
 
@@ -735,57 +937,20 @@ export default function FeeModelsPage() {
                 [column]: formatAmountInput(value),
               },
             }
-          : row
-      )
+          : row,
+      ),
     );
   }
 
-  function updateCellInput(tariffId: number, columnName: string, value: string) {
+  function updateCellInput(
+    tariffId: number,
+    columnName: string,
+    value: string,
+  ) {
     setCellSpecialInputs((previous) => ({
       ...previous,
       [`${tariffId}-${columnName}`]: formatAmountInput(value),
     }));
-  }
-
-  async function addSpecialAmountToTariff(tariffId: number, columnName: string) {
-    const key = `${tariffId}-${columnName}`;
-    const amount = cellSpecialInputs[key];
-
-    if (!amount || !amount.trim()) {
-      setMessage("Montant tarif spécial obligatoire.");
-      return;
-    }
-
-    try {
-      const res = await fetch("/api/fee-special-tariffs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          feeTariffId: tariffId,
-          name: columnName,
-          amount: amountToNumber(amount),
-        }),
-      });
-
-      const data = await safeJson(res);
-
-      if (!res.ok) {
-        setMessage(data.message || "Erreur ajout tarif spécial.");
-        return;
-      }
-
-      setCellSpecialInputs((previous) => {
-        const copy = { ...previous };
-        delete copy[key];
-        return copy;
-      });
-
-      await refreshSelectedModel();
-      showSuccess("Tarif ajouté.");
-    } catch (error: any) {
-      console.error("Erreur ajout tarif spécial:", error);
-      setMessage(error?.message || "Erreur ajout tarif spécial.");
-    }
   }
 
   async function deleteTariff(id: number) {
@@ -794,14 +959,6 @@ export default function FeeModelsPage() {
     await fetch(`/api/fee-tariffs/${id}`, { method: "DELETE" });
     await refreshSelectedModel();
     showSuccess("Tarif supprimé.");
-  }
-
-  async function deleteSpecial(id: number) {
-    if (!confirm("Supprimer ce montant spécial ?")) return;
-
-    await fetch(`/api/fee-special-tariffs/${id}`, { method: "DELETE" });
-    await refreshSelectedModel();
-    showSuccess("Montant supprimé.");
   }
 
   return (
@@ -866,7 +1023,25 @@ export default function FeeModelsPage() {
             </div>
           </div>
 
-          <div className="mb-2 flex justify-end">
+          <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <label className="mb-1 block text-xs font-bold">
+                Filtre Année scolaire
+              </label>
+              <select
+                value={yearFilter}
+                onChange={(event) => setYearFilter(event.target.value)}
+                className="h-[30px] min-w-[210px] border border-slate-300 bg-white px-2 text-[11px]"
+              >
+                {schoolYears.map((year) => (
+                  <option key={year.id} value={year.name}>
+                    {year.name}
+                    {year.active ? " — Principale" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div>
               <label className="mb-1 block text-xs">Recherche</label>
               <input
@@ -875,7 +1050,8 @@ export default function FeeModelsPage() {
                 onKeyDown={(event) => {
                   if (event.key === "Enter") loadModels();
                 }}
-                className="h-[26px] w-[160px] border border-slate-300 px-2 text-[11px]"
+                className="h-[30px] w-[180px] border border-slate-300 px-2 text-[11px]"
+                placeholder="Nom du modèle..."
               />
             </div>
           </div>
@@ -1043,7 +1219,9 @@ export default function FeeModelsPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <input
                     value={newSpecialColumn}
-                    onChange={(event) => setNewSpecialColumn(event.target.value)}
+                    onChange={(event) =>
+                      setNewSpecialColumn(event.target.value)
+                    }
                     placeholder="Ex: Ancien élève, Famille..."
                     className="h-[30px] w-[180px] border border-slate-300 px-2 text-[11px]"
                   />
@@ -1062,14 +1240,14 @@ export default function FeeModelsPage() {
                   {message}
                 </div>
               )}
-<button
-  type="button"
-  onClick={addDraftRow}
-  disabled={isSaving}
-  className="mb-2 rounded bg-emerald-600 px-2.5 py-1.5 text-[11px] text-white font-black disabled:cursor-not-allowed disabled:opacity-60"
->
-  + Ajouter une ligne
-</button>
+              <button
+                type="button"
+                onClick={addDraftRow}
+                disabled={isSaving}
+                className="mb-2 rounded bg-emerald-600 px-2.5 py-1.5 text-[11px] text-white font-black disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                + Ajouter une ligne
+              </button>
               <div className="max-h-[54vh] overflow-auto border border-slate-300">
                 <table className="w-full min-w-[760px] border-collapse text-[11px]">
                   <thead className="bg-[#2d333d] text-white">
@@ -1113,7 +1291,8 @@ export default function FeeModelsPage() {
 
                   <tbody>
                     {sortedTariffs(selectedModel).map((tariff, tariffIndex) => {
-                      const isLastSavedTariff = tariffIndex === sortedTariffs(selectedModel).length - 1;
+                      const isLastSavedTariff =
+                        tariffIndex === sortedTariffs(selectedModel).length - 1;
                       const savedInput = savedTariffInputs[tariff.id] || {
                         libelle: tariff.libelle,
                         code: tariff.code,
@@ -1121,130 +1300,104 @@ export default function FeeModelsPage() {
                       };
 
                       return (
-                      <tr key={tariff.id} className="odd:bg-[#eaf2fb] even:bg-white">
-                        <td className="border border-slate-300 p-[3px]">
-                          <input
-                            value={savedInput.libelle}
-                            onChange={(event) =>
-                              updateSavedTariffInput(
-                                tariff.id,
-                                "libelle",
-                                event.target.value
-                              )
-                            }
-                            disabled={isSaving}
-                            className="h-[30px] w-full border border-slate-300 bg-white px-1.5 py-1 text-[11px] outline-none disabled:bg-slate-100"
-                          />
-                        </td>
-
-                        <td className="border border-slate-300 p-[3px]">
-                          <input
-                            value={savedInput.code}
-                            onChange={(event) =>
-                              updateSavedTariffInput(
-                                tariff.id,
-                                "code",
-                                event.target.value
-                              )
-                            }
-                            disabled={isSaving}
-                            className="h-[30px] w-full border border-slate-300 bg-white px-1.5 py-1 text-center text-[11px] outline-none disabled:bg-slate-100"
-                          />
-                        </td>
-
-                        <td className="border border-slate-300 p-[3px]">
-                          <input
-                            value={savedInput.montant}
-                            onChange={(event) =>
-                              updateSavedTariffInput(
-                                tariff.id,
-                                "montant",
-                                event.target.value
-                              )
-                            }
-                            disabled={isSaving}
-                            className="h-[30px] w-full border border-slate-300 bg-white px-1.5 py-1 text-right text-[11px] font-semibold outline-none disabled:bg-slate-100"
-                          />
-                        </td>
-
-                        {specialColumns.map((column) => {
-                          const found = tariff.specials.find(
-                            (special) => special.name === column
-                          );
-                          const key = `${tariff.id}-${column}`;
-
-                          return (
-                            <td
-                              key={column}
-                              className="border border-slate-300 px-1.5 py-[4px] text-right font-bold text-blue-600"
-                            >
-                              {found ? (
-                                <div className="flex items-center justify-end gap-1">
-                                  <span>{formatMoney(found.amount)}</span>
-
-                                  <button
-                                    onClick={() => deleteSpecial(found.id)}
-                                    disabled={isSaving}
-                                    className="rounded bg-red-500 px-1.5 py-[1px] text-[11px] text-white disabled:cursor-not-allowed disabled:opacity-60"
-                                  >
-                                    ×
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-1">
-                                  <input
-                                    value={cellSpecialInputs[key] || ""}
-                                    onChange={(event) =>
-                                      updateCellInput(
-                                        tariff.id,
-                                        column,
-                                        event.target.value
-                                      )
-                                    }
-                                    placeholder="0"
-                                    disabled={isSaving}
-                                    className="h-[28px] w-full border border-slate-300 px-1.5 py-1 text-right text-[11px] outline-none disabled:bg-slate-100"
-                                  />
-
-                                  <button
-                                    onClick={() =>
-                                      addSpecialAmountToTariff(tariff.id, column)
-                                    }
-                                    disabled={isSaving}
-                                    className="rounded bg-emerald-600 px-2 py-1 text-[11px] text-white disabled:cursor-not-allowed disabled:opacity-60"
-                                  >
-                                    +
-                                  </button>
-                                </div>
-                              )}
-                            </td>
-                          );
-                        })}
-
-                        <td className="border border-slate-300 px-1.5 py-[4px] text-center">
-                          <div className="flex items-center justify-center gap-1">
-                            <button
-                              onClick={() => deleteTariff(tariff.id)}
+                        <tr
+                          key={tariff.id}
+                          className="odd:bg-[#eaf2fb] even:bg-white"
+                        >
+                          <td className="border border-slate-300 p-[3px]">
+                            <input
+                              value={savedInput.libelle}
+                              onChange={(event) =>
+                                updateSavedTariffInput(
+                                  tariff.id,
+                                  "libelle",
+                                  event.target.value,
+                                )
+                              }
                               disabled={isSaving}
-                              className="rounded bg-red-600 px-2 py-1 text-[11px] font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
-                              title="Supprimer cette ligne"
-                            >
-                              ×
-                            </button>
+                              className="h-[30px] w-full border border-slate-300 bg-white px-1.5 py-1 text-[11px] outline-none disabled:bg-slate-100"
+                            />
+                          </td>
 
-                            {isLastSavedTariff && draftRows.length === 0 && (
-                              <button
-                                onClick={addDraftRow}
-                                disabled={isSaving}
-                                className="rounded bg-emerald-600 px-2 py-1 text-[11px] font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
-                                title="Ajouter une ligne vide"
+                          <td className="border border-slate-300 p-[3px]">
+                            <input
+                              value={savedInput.code}
+                              onChange={(event) =>
+                                updateSavedTariffInput(
+                                  tariff.id,
+                                  "code",
+                                  event.target.value,
+                                )
+                              }
+                              disabled={isSaving}
+                              className="h-[30px] w-full border border-slate-300 bg-white px-1.5 py-1 text-center text-[11px] outline-none disabled:bg-slate-100"
+                            />
+                          </td>
+
+                          <td className="border border-slate-300 p-[3px]">
+                            <input
+                              value={savedInput.montant}
+                              onChange={(event) =>
+                                updateSavedTariffInput(
+                                  tariff.id,
+                                  "montant",
+                                  event.target.value,
+                                )
+                              }
+                              disabled={isSaving}
+                              className="h-[30px] w-full border border-slate-300 bg-white px-1.5 py-1 text-right text-[11px] font-semibold outline-none disabled:bg-slate-100"
+                            />
+                          </td>
+
+                          {specialColumns.map((column) => {
+                            const key = `${tariff.id}-${column}`;
+
+                            return (
+                              <td
+                                key={column}
+                                className="border border-slate-300 p-[3px]"
                               >
-                                +
+                                <input
+                                  value={cellSpecialInputs[key] || ""}
+                                  onChange={(event) =>
+                                    updateCellInput(
+                                      tariff.id,
+                                      column,
+                                      event.target.value,
+                                    )
+                                  }
+                                  placeholder="0"
+                                  disabled={isSaving}
+                                  className="h-[30px] w-full border border-slate-300 bg-white px-1.5 py-1 text-right text-[11px] font-semibold text-blue-700 outline-none disabled:bg-slate-100"
+                                />
+                              </td>
+                            );
+                          })}
+
+                          <td className="border border-slate-300 px-1.5 py-[4px] text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                onClick={() => deleteTariff(tariff.id)}
+                                disabled={isSaving}
+                                className="rounded bg-red-600 px-2 py-1 text-[11px] font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                title="Supprimer cette ligne"
+                              >
+                                ×
                               </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
+
+                              {isLastSavedTariff && draftRows.length === 0 && (
+                                <button
+                                  onClick={addDraftRow}
+                                  disabled={isSaving}
+                                  className="rounded bg-emerald-600 px-2 py-1 text-[11px] font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                  title="Ajouter une ligne vide"
+                                >
+                                  +
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
                       );
                     })}
 
@@ -1257,7 +1410,7 @@ export default function FeeModelsPage() {
                               updateDraftRow(
                                 row.tempId,
                                 "libelle",
-                                event.target.value
+                                event.target.value,
                               )
                             }
                             placeholder="Libellé"
@@ -1270,7 +1423,11 @@ export default function FeeModelsPage() {
                           <input
                             value={row.code}
                             onChange={(event) =>
-                              updateDraftRow(row.tempId, "code", event.target.value)
+                              updateDraftRow(
+                                row.tempId,
+                                "code",
+                                event.target.value,
+                              )
                             }
                             placeholder="Code"
                             disabled={isSaving}
@@ -1285,7 +1442,7 @@ export default function FeeModelsPage() {
                               updateDraftRow(
                                 row.tempId,
                                 "montant",
-                                formatAmountInput(event.target.value)
+                                formatAmountInput(event.target.value),
                               )
                             }
                             placeholder="Montant"
@@ -1295,14 +1452,17 @@ export default function FeeModelsPage() {
                         </td>
 
                         {specialColumns.map((column) => (
-                          <td key={column} className="border border-slate-300 p-[3px]">
+                          <td
+                            key={column}
+                            className="border border-slate-300 p-[3px]"
+                          >
                             <input
                               value={row.specials[column] || ""}
                               onChange={(event) =>
                                 updateDraftSpecial(
                                   row.tempId,
                                   column,
-                                  event.target.value
+                                  event.target.value,
                                 )
                               }
                               placeholder={column}
@@ -1333,7 +1493,11 @@ export default function FeeModelsPage() {
                               }
                               disabled={isSaving}
                               className="rounded bg-red-600 px-2 py-1.5 text-[11px] font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
-                              title={draftRows.length > 1 ? "Supprimer cette ligne" : "Vider cette ligne"}
+                              title={
+                                draftRows.length > 1
+                                  ? "Supprimer cette ligne"
+                                  : "Vider cette ligne"
+                              }
                             >
                               ×
                             </button>
@@ -1376,13 +1540,7 @@ export default function FeeModelsPage() {
   );
 }
 
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
       <span className="mb-1 block text-[12px] text-slate-600">{label}</span>

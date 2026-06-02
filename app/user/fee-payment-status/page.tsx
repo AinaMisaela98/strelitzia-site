@@ -62,7 +62,6 @@ const EMPTY_FILTERS: Filters = {
   matricule: "",
 };
 
-
 function formatDate(value?: string) {
   if (!value) return "";
   const date = new Date(value);
@@ -123,18 +122,11 @@ function rowMatchesSearch(row: FeeRow, query: string) {
   if (!q) return true;
 
   const haystack = normalizeSearch(
-    [
-      row.matricule,
-      row.fullName,
-      row.classe,
-      row.serie,
-      row.site,
-    ].join(" ")
+    [row.matricule, row.fullName, row.classe, row.serie, row.site].join(" ")
   );
 
   return haystack.includes(q);
 }
-
 
 export default function EtatPaiementFraisPage() {
   const [rows, setRows] = useState<FeeRow[]>([]);
@@ -154,12 +146,16 @@ export default function EtatPaiementFraisPage() {
 
       const params = new URLSearchParams();
 
-      if (nextFilters.anneeScolaire) params.append("anneeScolaire", nextFilters.anneeScolaire);
+      if (nextFilters.anneeScolaire) {
+        params.append("anneeScolaire", nextFilters.anneeScolaire);
+        params.append("schoolYearName", nextFilters.anneeScolaire);
+        params.append("year", nextFilters.anneeScolaire);
+      }
+
       if (nextFilters.site) params.append("site", nextFilters.site);
       if (nextFilters.classe) params.append("classe", nextFilters.classe);
       if (nextFilters.section) params.append("section", nextFilters.section);
       if (nextFilters.frais) params.append("frais", nextFilters.frais);
-      // Recherche nom/matricule côté client pour permettre les deux sans changer l’API.
 
       const res = await fetch(`/api/fee-payment-status?${params.toString()}`, {
         cache: "no-store",
@@ -171,18 +167,44 @@ export default function EtatPaiementFraisPage() {
         throw new Error(data?.error || "Erreur lors du chargement");
       }
 
-      setRows(Array.isArray(data.rows) ? data.rows : []);
-      setFeeCodes(Array.isArray(data.feeCodes) ? data.feeCodes : Array.isArray(data.months) ? data.months : []);
+      const apiActiveYear = String(data.activeYear || "").trim();
+
+      if (apiActiveYear) {
+        setActiveYear(apiActiveYear);
+      }
+
       setApiFilters(data.filters || {});
 
-      if (data.activeYear) {
-        setActiveYear(data.activeYear);
+      // Année scolaire active = principale/default.
+      // Premier chargement: raha mbola tsy misy année voafidy, averina chargena
+      // amin'ny année scolaire active mba tsy hiseho ny données année hafa.
+      if (!nextFilters.anneeScolaire && apiActiveYear) {
+        const activeYearFilters: Filters = {
+          ...nextFilters,
+          anneeScolaire: apiActiveYear,
+        };
+
+        setFilters(activeYearFilters);
+        await loadData(activeYearFilters);
+        return;
+      }
+
+      setRows(Array.isArray(data.rows) ? data.rows : []);
+      setFeeCodes(
+        Array.isArray(data.feeCodes)
+          ? data.feeCodes
+          : Array.isArray(data.months)
+            ? data.months
+            : []
+      );
+
+      if (apiActiveYear) {
         setFilters((prev) =>
           prev.anneeScolaire
             ? prev
             : {
                 ...prev,
-                anneeScolaire: data.activeYear,
+                anneeScolaire: apiActiveYear,
               }
         );
       }
@@ -209,11 +231,15 @@ export default function EtatPaiementFraisPage() {
       setError("");
       setFixMessage("");
 
+      const selectedYear = filters.anneeScolaire || activeYear;
+
       const res = await fetch("/api/fee-payment-status/correct", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          anneeScolaire: filters.anneeScolaire || activeYear,
+          anneeScolaire: selectedYear,
+          schoolYearName: selectedYear,
+          year: selectedYear,
           site: filters.site,
           classe: filters.classe,
           section: filters.section,
@@ -232,7 +258,10 @@ export default function EtatPaiementFraisPage() {
         )} frais recalculés.`
       );
 
-      await loadData(filters);
+      await loadData({
+        ...filters,
+        anneeScolaire: selectedYear,
+      });
     } catch (e: unknown) {
       console.error(e);
       const message = e instanceof Error ? e.message : "Correction impossible";
@@ -271,14 +300,16 @@ export default function EtatPaiementFraisPage() {
   }, [apiFilters.trainingFees, rows]);
 
   const schoolYears = useMemo(() => {
-    if (apiFilters.schoolYears?.length) return apiFilters.schoolYears;
-    return [];
-  }, [apiFilters.schoolYears]);
+    const years = apiFilters.schoolYears?.length ? apiFilters.schoolYears : [];
+
+    if (!activeYear) return years;
+
+    return [activeYear, ...years.filter((year) => year !== activeYear)];
+  }, [apiFilters.schoolYears, activeYear]);
 
   const displayedRows = useMemo(() => {
     return rows.filter((row) => rowMatchesSearch(row, filters.matricule));
   }, [rows, filters.matricule]);
-
 
   function updateFilter<K extends keyof Filters>(key: K, value: Filters[K], autoLoad = true) {
     const nextFilters: Filters = {
@@ -342,7 +373,7 @@ export default function EtatPaiementFraisPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "etat-paiement-frais.csv";
+    a.download = `etat-paiement-frais-${filters.anneeScolaire || activeYear || "annee"}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -356,7 +387,8 @@ export default function EtatPaiementFraisPage() {
               Etat paiement des frais
             </h1>
             <p className="text-[11px] text-slate-500">
-              Les colonnes viennent automatiquement des frais créés dans TrainingFee. Année principale : {activeYear || "non définie"}.
+              Les colonnes viennent automatiquement des frais créés dans TrainingFee.
+              Année principale : {activeYear || "non définie"}.
             </p>
           </div>
 
@@ -393,10 +425,11 @@ export default function EtatPaiementFraisPage() {
             onChange={(e) => updateFilter("anneeScolaire", e.target.value)}
             className="h-[38px] rounded bg-slate-800 px-2 font-semibold text-white outline-none"
           >
-            <option value="">Année scolaire : {activeYear || "TOUT"}</option>
+            <option value="">Année scolaire active : {activeYear || "TOUT"}</option>
             {schoolYears.map((y) => (
               <option key={y} value={y}>
-                Année scolaire : {y}
+                {y === activeYear ? "⭐ Année active : " : "Année scolaire : "}
+                {y}
               </option>
             ))}
           </select>
@@ -581,7 +614,7 @@ export default function EtatPaiementFraisPage() {
 
                 {feeCodes.map((code) => (
                   <td key={code} className="border border-slate-300 text-center">
-                    {rows.filter((r) => !isRowCodePaid(r, code)).length}
+                    {displayedRows.filter((r) => !isRowCodePaid(r, code)).length}
                   </td>
                 ))}
               </tr>

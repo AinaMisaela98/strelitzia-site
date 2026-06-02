@@ -37,6 +37,63 @@ type SchoolYear = { id: number; name: string; active: boolean };
 type Serie = { id: number; name: string; classRoomId: number; schoolYearName: string };
 type ClassRoom = { id: number; name: string; schoolYearName: string; series: Serie[] };
 
+type TarifsSpeciaux = Record<string, number | string | null | undefined>;
+
+type TrainingFee = {
+  id: number;
+  libelle?: string | null;
+  label?: string | null;
+  name?: string | null;
+  code?: string | null;
+  montant?: number | string | null;
+  montantPrincipal?: number | string | null;
+  amount?: number | string | null;
+  classe?: string | null;
+  classRoomName?: string | null;
+  section?: string | null;
+  serie?: string | null;
+  serieName?: string | null;
+  schoolYearName?: string | null;
+  anneeScolaire?: string | null;
+  specials?: TarifsSpeciaux | FeeSpecialTariff[] | string | null;
+  tarifsSpeciaux?: TarifsSpeciaux | string | null;
+};
+
+
+
+type FeeSpecialTariff = {
+  id?: number;
+  feeTariffId?: number;
+  name: string;
+  amount: number | string;
+};
+
+type FeeTariff = {
+  id: number;
+  feeModelId?: number;
+  libelle?: string | null;
+  label?: string | null;
+  name?: string | null;
+  code?: string | null;
+  montant?: number | string | null;
+  amount?: number | string | null;
+  specials?: FeeSpecialTariff[] | TarifsSpeciaux | string | null;
+  tarifsSpeciaux?: TarifsSpeciaux | string | null;
+};
+
+type FeeModel = {
+  id: number;
+  title?: string | null;
+  name?: string | null;
+  libelle?: string | null;
+  classe?: string | null;
+  classRoomName?: string | null;
+  schoolYearName?: string | null;
+  anneeScolaire?: string | null;
+  tariffs?: FeeTariff[];
+  fees?: FeeTariff[];
+};
+
 type FormData = {
   matricule: string;
   nom: string;
@@ -63,7 +120,14 @@ type FormData = {
   tuteurAdresse: string;
   niveau: string;
   fraisInscription: string;
+  reinscriptionFeeId: string;
+  fraisReinscriptionLibelle: string;
+  fraisReinscriptionDetails: string;
   fraisScolarite: string;
+  tarifReinscription: string;
+  trainingFeeIds: string;
+  trainingFeesTotal: string;
+  trainingFeesDetails: string;
   activite: string;
   remarque: string;
 };
@@ -94,7 +158,14 @@ const emptyForm: FormData = {
   tuteurAdresse: "",
   niveau: "",
   fraisInscription: "",
+  reinscriptionFeeId: "",
+  fraisReinscriptionLibelle: "",
+  fraisReinscriptionDetails: "",
   fraisScolarite: "",
+  tarifReinscription: "",
+  trainingFeeIds: "",
+  trainingFeesTotal: "",
+  trainingFeesDetails: "",
   activite: "",
   remarque: "",
 };
@@ -120,6 +191,10 @@ function ReinscriptionPage() {
 
   const [schoolYears, setSchoolYears] = useState<SchoolYear[]>([]);
   const [classRooms, setClassRooms] = useState<ClassRoom[]>([]);
+  const [trainingFees, setTrainingFees] = useState<TrainingFee[]>([]);
+  const [feeModels, setFeeModels] = useState<FeeModel[]>([]);
+  const [selectedFeeIds, setSelectedFeeIds] = useState<number[]>([]);
+  const [feesLoading, setFeesLoading] = useState(false);
   const [form, setForm] = useState<FormData>(emptyForm);
 
   const [message, setMessage] = useState("");
@@ -135,8 +210,185 @@ function ReinscriptionPage() {
     return selectedClass?.series?.filter((s) => s.schoolYearName === form.anneeScolaire) || [];
   }, [classes, form.classe, form.anneeScolaire]);
 
+  const selectedFeeModel = useMemo(() => {
+    const id = Number(form.reinscriptionFeeId || 0);
+    return feeModels.find((model) => model.id === id) || null;
+  }, [feeModels, form.reinscriptionFeeId]);
+
+  const selectedFeeModelTariffs = useMemo(() => {
+    if (!selectedFeeModel) return [] as TrainingFee[];
+
+    const rows = selectedFeeModel.tariffs || selectedFeeModel.fees || [];
+
+    return rows.map((tariff) => ({
+      id: tariff.id,
+      libelle: tariff.libelle || tariff.label || tariff.name || "Frais",
+      label: tariff.label || tariff.libelle || tariff.name || "Frais",
+      name: tariff.name || tariff.libelle || tariff.label || "Frais",
+      code: tariff.code || "",
+      montant: tariff.montant ?? tariff.amount ?? 0,
+      amount: tariff.amount ?? tariff.montant ?? 0,
+      specials: normalizeModelSpecials(tariff.specials),
+      tarifsSpeciaux: tariff.tarifsSpeciaux || null,
+      schoolYearName: selectedFeeModel.schoolYearName || selectedFeeModel.anneeScolaire || form.anneeScolaire,
+      classe: selectedFeeModel.classe || selectedFeeModel.classRoomName || form.classe,
+    }));
+  }, [selectedFeeModel, form.anneeScolaire, form.classe]);
+
+  const availableTarifs = useMemo(() => {
+    const names = new Set<string>(["Principal"]);
+
+    selectedFeeModelTariffs.forEach((fee) => {
+      const specials = getSpecialTarifs(fee);
+      Object.keys(specials).forEach((key) => {
+        const clean = key.trim();
+        if (clean) names.add(clean);
+      });
+    });
+
+    return Array.from(names);
+  }, [selectedFeeModelTariffs]);
+
+  const selectedFeeModelTariffsForSelectedTarif = useMemo(() => {
+    if (!form.tarifReinscription) return [] as TrainingFee[];
+
+    return selectedFeeModelTariffs.filter((fee) =>
+      hasAmountForTarif(fee, form.tarifReinscription)
+    );
+  }, [selectedFeeModelTariffs, form.tarifReinscription]);
+
+  const selectedTrainingFees = useMemo(
+    () => trainingFees.filter((fee) => selectedFeeIds.includes(fee.id)),
+    [trainingFees, selectedFeeIds]
+  );
+
+  const fraisReinscriptionAmount = useMemo(
+    () =>
+      selectedFeeModelTariffsForSelectedTarif.reduce(
+        (sum, fee) => sum + getFeeAmountByTarif(fee, form.tarifReinscription),
+        0
+      ),
+    [selectedFeeModelTariffsForSelectedTarif, form.tarifReinscription]
+  );
+
+  const totalTrainingFees = useMemo(
+    () =>
+      selectedTrainingFees.reduce(
+        (sum, fee) => sum + getFeeAmountByTarif(fee, form.tarifReinscription || "Principal"),
+        0
+      ),
+    [selectedTrainingFees, form.tarifReinscription]
+  );
+
   function update(name: keyof FormData, value: string) {
     setForm((prev) => ({ ...prev, [name]: value }));
+  }
+
+  async function loadTrainingFees() {
+    if (!form.anneeScolaire || !form.classe) {
+      setTrainingFees([]);
+      setSelectedFeeIds([]);
+      setForm((prev) => ({ ...prev, reinscriptionFeeId: "", fraisInscription: "", fraisReinscriptionLibelle: "", fraisReinscriptionDetails: "" }));
+      return;
+    }
+
+    setFeesLoading(true);
+
+    try {
+      const params = new URLSearchParams({
+        schoolYearName: form.anneeScolaire,
+        anneeScolaire: form.anneeScolaire,
+        classe: form.classe,
+        classRoomName: form.classe,
+      });
+
+      if (form.section) {
+        params.set("section", form.section);
+        params.set("serie", form.section);
+        params.set("serieName", form.section);
+      }
+
+      const res = await fetch(`/api/training-fees?${params.toString()}`, { cache: "no-store" });
+      const data = await res.json();
+      const rawFees: TrainingFee[] = Array.isArray(data) ? data : data.trainingFees || data.fees || [];
+
+      const filtered = rawFees.filter((fee) => {
+        const sameYear = !fee.schoolYearName && !fee.anneeScolaire ? true : (fee.schoolYearName || fee.anneeScolaire) === form.anneeScolaire;
+        const sameClass = !fee.classe && !fee.classRoomName ? true : (fee.classe || fee.classRoomName) === form.classe;
+        const feeSerie = fee.section || fee.serie || fee.serieName || "";
+        const sameSerie = !form.section || !feeSerie || feeSerie === form.section;
+        return sameYear && sameClass && sameSerie;
+      });
+
+      setTrainingFees(filtered);
+      setSelectedFeeIds(filtered.map((fee) => fee.id));
+
+      // Ne pas modifier reinscriptionFeeId ici : ce champ correspond au modèle créé dans /api/fee-models.
+      // Les training-fees restent seulement pour la liste des frais de scolarité sélectionnables.
+    } catch {
+      setTrainingFees([]);
+      setSelectedFeeIds([]);
+      setMessage("Impossible de charger les frais de formation de cette classe.");
+    } finally {
+      setFeesLoading(false);
+    }
+  }
+
+  async function loadFeeModels() {
+    if (!form.anneeScolaire || !form.classe) {
+      setFeeModels([]);
+      setForm((prev) => ({
+        ...prev,
+        reinscriptionFeeId: "",
+        fraisInscription: "",
+        fraisReinscriptionLibelle: "",
+        fraisReinscriptionDetails: "",
+        tarifReinscription: "",
+      }));
+      return;
+    }
+
+    try {
+      const params = new URLSearchParams({
+        schoolYearName: form.anneeScolaire,
+        anneeScolaire: form.anneeScolaire,
+        classe: form.classe,
+        classRoomName: form.classe,
+      });
+
+      const res = await fetch(`/api/fee-models?${params.toString()}`, { cache: "no-store" });
+      const data = await res.json();
+      const rawModels: FeeModel[] = Array.isArray(data) ? data : data.models || data.feeModels || [];
+
+      const filtered = rawModels.filter((model) => {
+        const modelYear = model.schoolYearName || model.anneeScolaire || "";
+        const modelClass = model.classe || model.classRoomName || "";
+        const sameYear = !modelYear || modelYear === form.anneeScolaire;
+        const sameClass = !modelClass || modelClass === "GENERAL" || modelClass === form.classe;
+        return sameYear && sameClass;
+      });
+
+      setFeeModels(filtered);
+
+      setForm((prev) => {
+        const currentStillExists = filtered.some((model) => String(model.id) === prev.reinscriptionFeeId);
+        const defaultModel = currentStillExists ? prev.reinscriptionFeeId : String(findBestFeeModel(filtered)?.id || "");
+        return {
+          ...prev,
+          reinscriptionFeeId: defaultModel,
+          tarifReinscription: currentStillExists ? prev.tarifReinscription : "",
+        };
+      });
+    } catch {
+      setFeeModels([]);
+      setMessage("Impossible de charger les modèles de frais créés dans fee-models.");
+    }
+  }
+
+  function toggleTrainingFee(id: number) {
+    setSelectedFeeIds((prev) =>
+      prev.includes(id) ? prev.filter((feeId) => feeId !== id) : [...prev, id]
+    );
   }
 
   async function loadOptions() {
@@ -231,8 +483,96 @@ function ReinscriptionPage() {
   }, [form.anneeScolaire]);
 
   useEffect(() => {
-    setForm((p) => ({ ...p, section: "" }));
+    setForm((p) => ({ ...p, section: "", tarifReinscription: "", reinscriptionFeeId: "", fraisInscription: "", fraisReinscriptionLibelle: "", fraisReinscriptionDetails: "" }));
   }, [form.classe]);
+
+  useEffect(() => {
+    loadTrainingFees();
+    loadFeeModels();
+  }, [form.anneeScolaire, form.classe, form.section]);
+
+  useEffect(() => {
+    if (!form.tarifReinscription) return;
+
+    if (!availableTarifs.includes(form.tarifReinscription)) {
+      setForm((p) => ({ ...p, tarifReinscription: "" }));
+    }
+  }, [availableTarifs, form.tarifReinscription]);
+
+  useEffect(() => {
+    const model = selectedFeeModel;
+
+    if (!model || !form.tarifReinscription) {
+      setForm((p) => ({
+        ...p,
+        fraisInscription: "",
+        fraisReinscriptionLibelle: model ? getFeeModelTitle(model) : "",
+        fraisReinscriptionDetails: "",
+      }));
+      return;
+    }
+
+    // IMPORTANT : tsy asiana duplication intsony.
+    // Raha "Ancien" no voafidy dia montant Ancien ihany no atao rows.
+    // Raha "Principal" no voafidy dia montant Principal ihany no atao rows.
+    const rows = selectedFeeModelTariffsForSelectedTarif.map((fee) => ({
+      id: fee.id,
+      trainingFeeId: fee.id,
+      sourceTrainingFeeId: fee.id,
+      code: fee.code || "",
+      libelle: getFeeLabel(fee),
+      tarif: form.tarifReinscription,
+      montant: getFeeAmountByTarif(fee, form.tarifReinscription),
+      montantTotal: getFeeAmountByTarif(fee, form.tarifReinscription),
+      amount: getFeeAmountByTarif(fee, form.tarifReinscription),
+    }));
+
+    const detail = {
+      modelId: model.id,
+      modelTitle: getFeeModelTitle(model),
+      tarif: form.tarifReinscription,
+      total: fraisReinscriptionAmount,
+      rows,
+    };
+
+    setForm((p) => ({
+      ...p,
+      fraisInscription: fraisReinscriptionAmount ? String(fraisReinscriptionAmount) : "",
+      fraisScolarite: fraisReinscriptionAmount ? String(fraisReinscriptionAmount) : "",
+      trainingFeeIds: "",
+      trainingFeesTotal: fraisReinscriptionAmount ? String(fraisReinscriptionAmount) : "",
+      trainingFeesDetails: JSON.stringify(rows),
+      fraisReinscriptionLibelle: getFeeModelTitle(model),
+      fraisReinscriptionDetails: JSON.stringify(detail),
+    }));
+  }, [
+    selectedFeeModel,
+    selectedFeeModelTariffsForSelectedTarif,
+    fraisReinscriptionAmount,
+    form.tarifReinscription,
+  ]);
+
+  useEffect(() => {
+    // Rehefa misy modèle + tarif voafidy dia ilay modèle/tarif ihany no ampiasaina.
+    // Tsy averina intsony ny frais principal ao amin'ny liste training-fees, mba tsy hiteraka duplication.
+    if (selectedFeeModel && form.tarifReinscription) return;
+
+    const details = selectedTrainingFees.map((fee) => ({
+      id: fee.id,
+      code: fee.code || "",
+      libelle: getFeeLabel(fee),
+      tarif: form.tarifReinscription || "Principal",
+      montant: getFeeAmountByTarif(fee, form.tarifReinscription || "Principal"),
+    }));
+
+    setForm((p) => ({
+      ...p,
+      fraisScolarite: totalTrainingFees ? String(totalTrainingFees) : "",
+      trainingFeeIds: selectedFeeIds.join(","),
+      trainingFeesTotal: totalTrainingFees ? String(totalTrainingFees) : "",
+      trainingFeesDetails: JSON.stringify(details),
+    }));
+  }, [selectedFeeModel, selectedTrainingFees, selectedFeeIds, totalTrainingFees, form.tarifReinscription]);
 
   function validateStep() {
     setMessage("");
@@ -259,6 +599,16 @@ function ReinscriptionPage() {
         setMessage("Choisissez une année scolaire différente de l’ancienne.");
         return false;
       }
+
+      if (feeModels.length > 0 && !form.reinscriptionFeeId) {
+        setMessage("Veuillez sélectionner le modèle de frais de réinscription créé dans fee-models.");
+        return false;
+      }
+
+      if (form.reinscriptionFeeId && !form.tarifReinscription) {
+        setMessage("Veuillez choisir le tarif à appliquer pour la réinscription.");
+        return false;
+      }
     }
 
     return true;
@@ -267,6 +617,174 @@ function ReinscriptionPage() {
   function nextStep() {
     if (!validateStep()) return;
     setStep((s) => Math.min(4, s + 1));
+  }
+
+  function buildReinscriptionStudentFeeRows() {
+    // Source unique des frais à créer pour le nouvel étudiant réinscrit.
+    // Si un modèle + tarif est sélectionné, on n'utilise QUE les lignes de ce tarif.
+    // Exemple: tarif "Ancien" => seuls les montants Ancien sont envoyés.
+    // Exemple: tarif "Principal" => seuls les montants Principal sont envoyés.
+    const selectedTarif = form.tarifReinscription || "Principal";
+
+    if (selectedFeeModel && selectedTarif) {
+      return selectedFeeModelTariffsForSelectedTarif
+        .map((fee) => {
+          const amount = getFeeAmountByTarif(fee, selectedTarif);
+
+          return {
+            id: fee.id,
+            sourceTrainingFeeId: fee.id,
+            code: fee.code || "",
+            libelle: getFeeLabel(fee),
+            tarif: selectedTarif,
+            feeModelId: selectedFeeModel.id,
+            feeModelTitle: getFeeModelTitle(selectedFeeModel),
+            montant: amount,
+            montantTotal: amount,
+            amount,
+          };
+        })
+        .filter((row) => Number(row.montantTotal) > 0);
+    }
+
+    return selectedTrainingFees
+      .map((fee) => {
+        const amount = getFeeAmountByTarif(fee, selectedTarif);
+
+        return {
+          id: fee.id,
+          trainingFeeId: fee.id,
+          sourceTrainingFeeId: fee.id,
+          code: fee.code || "",
+          libelle: getFeeLabel(fee),
+          tarif: selectedTarif,
+          montant: amount,
+          montantTotal: amount,
+          amount,
+        };
+      })
+      .filter((row) => Number(row.montantTotal) > 0);
+  }
+
+  async function createStudentFeesFromSelectedTarif(newStudentId: number | string) {
+    const rows = buildReinscriptionStudentFeeRows();
+    if (!newStudentId || rows.length === 0) return;
+
+    const schoolYearName = form.anneeScolaire || "2025-2026";
+    const selectedTarif = form.tarifReinscription || "Principal";
+    const modelId = selectedFeeModel?.id || "NO_MODEL";
+
+    const feesPayload = rows
+      .map((row) => {
+        const amount = Number(row.montantTotal || row.montant || row.amount || 0);
+        if (!amount || amount <= 0) return null;
+
+        return {
+          // Raha avy amin'ny /api/training-fees dia misy trainingFeeId.
+          // Raha avy amin'ny /api/fee-models dia tsy terena eto ny trainingFeeId,
+          // fa ny /api/student-fees no mitady fallback amin'ny code/classe/année.
+          trainingFeeId: row.trainingFeeId || undefined,
+          sourceTrainingFeeId: row.sourceTrainingFeeId || row.trainingFeeId || row.id || undefined,
+
+          feeModelId: row.feeModelId || selectedFeeModel?.id || undefined,
+          feeModelTitle: row.feeModelTitle || (selectedFeeModel ? getFeeModelTitle(selectedFeeModel) : ""),
+
+          code: row.code || row.libelle || "FRAIS",
+          libelle: row.libelle || row.code || "Frais de formation",
+
+          // Montant de la ligne du tarif choisi uniquement.
+          // Ancien => montant Ancien, Principal => montant Principal, etc.
+          montant: amount,
+          amount,
+          montantTotal: amount,
+          reste: amount,
+          montantPaye: 0,
+
+          tarifName: selectedTarif,
+          tarifReinscription: selectedTarif,
+          selectedTarif,
+          appliedTarif: selectedTarif,
+          selectedTarifAmount: amount,
+          appliedAmount: amount,
+          montantTarifSelectionne: amount,
+          montantChoisi: amount,
+          montantApplique: amount,
+
+          status: "NON_PAYE",
+          statut: "NON_PAYE",
+          paid: false,
+          isPaid: false,
+
+          schoolYearName,
+          anneeScolaire: schoolYearName,
+          classe: form.classe,
+          className: form.classe,
+          classRoomName: form.classe,
+          section: form.section,
+          serie: form.section,
+          serieName: form.section,
+          source: "REINSCRIPTION",
+        };
+      })
+      .filter(Boolean);
+
+    if (feesPayload.length === 0) {
+      throw new Error("Aucun frais valide trouvé pour le tarif sélectionné.");
+    }
+
+    const idempotencyKey = [
+      "REINSCRIPTION_STUDENT_FEES_ROWS",
+      newStudentId,
+      modelId,
+      selectedTarif,
+      schoolYearName,
+    ]
+      .map((item) => String(item ?? "").trim())
+      .join("|");
+
+    const feeRes = await fetch("/api/student-fees", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: JSON.stringify({
+        idempotencyKey,
+        studentId: newStudentId,
+        action: "SYNC_REINSCRIPTION",
+        source: "REINSCRIPTION",
+
+        schoolYearName,
+        anneeScolaire: schoolYearName,
+        classe: form.classe,
+        className: form.classe,
+        classRoomName: form.classe,
+        section: form.section,
+        serie: form.section,
+        serieName: form.section,
+
+        feeModelId: selectedFeeModel?.id || undefined,
+        feeModelTitle: selectedFeeModel ? getFeeModelTitle(selectedFeeModel) : "",
+
+        tarifName: selectedTarif,
+        tarifReinscription: selectedTarif,
+        selectedTarif,
+        appliedTarif: selectedTarif,
+
+        // Logique vaovao: tsy miankina amin'ny montantTotal global intsony.
+        // Ny API student-fees no mamorona StudentFee isaky ny ligne ato.
+        fees: feesPayload,
+      }),
+    });
+
+    if (!feeRes.ok) {
+      const errorData = await feeRes.json().catch(() => ({}));
+      throw new Error(
+        errorData?.message ||
+          errorData?.error ||
+          "Impossible de synchroniser les frais du tarif sélectionné."
+      );
+    }
   }
 
   async function submitReinscription() {
@@ -279,7 +797,29 @@ function ReinscriptionPage() {
       const res = await fetch("/api/students/reinscription", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ studentId: selected?.id, data: form }),
+        body: JSON.stringify({
+          studentId: selected?.id,
+          data: {
+            ...form,
+            tarifReinscription: form.tarifReinscription,
+            fraisInscription: fraisReinscriptionAmount ? String(fraisReinscriptionAmount) : form.fraisInscription,
+            fraisScolarite: fraisReinscriptionAmount ? String(fraisReinscriptionAmount) : form.fraisScolarite,
+            trainingFeesTotal: fraisReinscriptionAmount ? String(fraisReinscriptionAmount) : form.trainingFeesTotal,
+            trainingFeeIds: selectedFeeModel ? "" : form.trainingFeeIds,
+            trainingFeesDetails: selectedFeeModel
+              ? JSON.stringify(buildReinscriptionStudentFeeRows())
+              : form.trainingFeesDetails,
+            fraisReinscriptionDetails: selectedFeeModel
+              ? JSON.stringify({
+                  modelId: selectedFeeModel.id,
+                  modelTitle: getFeeModelTitle(selectedFeeModel),
+                  tarif: form.tarifReinscription,
+                  total: fraisReinscriptionAmount,
+                  rows: buildReinscriptionStudentFeeRows(),
+                })
+              : form.fraisReinscriptionDetails,
+          },
+        }),
       });
 
       const data = await res.json();
@@ -289,7 +829,14 @@ function ReinscriptionPage() {
         return;
       }
 
-      window.location.href = `/user/student/${data.student.id}`;
+      const newStudent = data.student || data;
+      const newStudentId = newStudent?.id;
+
+      // Sécurité finale: mamorona StudentFee amin'ilay tarif sélectionné ihany
+      // mba ao amin'ny StudentDetails > FRAIS DE FORMATION dia io montant io no hiseho.
+      await createStudentFeesFromSelectedTarif(newStudentId);
+
+      window.location.href = `/user/student/${newStudentId}`;
     } catch {
       setMessage("Erreur serveur pendant la réinscription.");
     } finally {
@@ -420,7 +967,7 @@ function ReinscriptionPage() {
               )}
 
               {step === 2 && (
-                <Card title="Niveau & Frais de formations">
+                <Card title="Niveau & Frais de réinscription">
                   <div className="grid gap-3 md:grid-cols-2">
                     <SelectObject
                       label="Année scolaire"
@@ -447,9 +994,83 @@ function ReinscriptionPage() {
                     />
 
                     <Input label="Niveau" value={form.niveau} onChange={(v) => update("niveau", v)} />
-                    <Input label="Frais d’inscription" value={form.fraisInscription} onChange={(v) => update("fraisInscription", v)} />
-                    <Input label="Frais de scolarité" value={form.fraisScolarite} onChange={(v) => update("fraisScolarite", v)} />
+
+                    <div className="rounded-2xl border border-indigo-100 bg-indigo-50/70 p-3 md:col-span-2">
+                      <SelectObject
+                        label="Frais de réinscription à sélectionner"
+                        value={form.reinscriptionFeeId}
+                        onChange={(v) => {
+                          update("reinscriptionFeeId", v);
+                          update("tarifReinscription", "");
+                        }}
+                        options={feeModels.map((model) => ({
+                          value: String(model.id),
+                          label: getFeeModelTitle(model),
+                        }))}
+                      />
+
+                      {selectedFeeModel ? (
+                        <>
+                          <div className="mt-3">
+                            <SelectObject
+                              label="Choix tarif"
+                              value={form.tarifReinscription}
+                              onChange={(v) => update("tarifReinscription", v)}
+                              options={availableTarifs.map((tarif) => ({ value: tarif, label: tarif }))}
+                            />
+                          </div>
+
+                          {form.tarifReinscription ? (
+                            <>
+                              <div className="mt-3 rounded-xl bg-white px-3 py-3 text-sm font-black text-indigo-900 shadow-sm">
+                                Montant du tarif sélectionné : {formatAr(fraisReinscriptionAmount)}
+                              </div>
+
+                              <div className="mt-3 overflow-hidden rounded-xl border bg-white">
+                                {selectedFeeModelTariffsForSelectedTarif.map((fee) => (
+                                  <div key={fee.id} className="flex items-center justify-between border-b px-3 py-2 text-xs font-bold last:border-b-0">
+                                    <span className="text-slate-700">{getFeeLabel(fee)}{fee.code ? ` — ${fee.code}` : ""}</span>
+                                    <span className="font-black text-indigo-800">{formatAr(getFeeAmountByTarif(fee, form.tarifReinscription))}</span>
+                                  </div>
+                                ))}
+
+                                {selectedFeeModelTariffsForSelectedTarif.length === 0 && (
+                                  <div className="px-3 py-3 text-xs font-black text-red-600">
+                                    Aucun frais trouvé pour le tarif « {form.tarifReinscription} ». Vérifiez le modèle dans fee-models.
+                                  </div>
+                                )}
+                              </div>
+                            </>
+                          ) : (
+                            <div className="mt-3 rounded-xl bg-white px-3 py-3 text-xs font-black text-slate-500 shadow-sm">
+                              Choisissez un tarif pour afficher les frais du modèle sélectionné.
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="mt-3 rounded-xl bg-white px-3 py-3 text-xs font-black text-amber-700 shadow-sm">
+                          Aucun modèle trouvé. Créez d’abord un modèle dans Modèles de frais / fee-models pour cette classe.
+                        </div>
+                      )}
+                    </div>
                   </div>
+
+                  {!selectedFeeModel && (
+                    <div className="mt-5 rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                      <TrainingFeesChooser
+                        fees={trainingFees}
+                        selectedFeeIds={selectedFeeIds}
+                        selectedTarif={form.tarifReinscription || "Principal"}
+                        loading={feesLoading}
+                        onToggle={toggleTrainingFee}
+                      />
+
+                      <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-right">
+                        <div className="text-[11px] font-black uppercase tracking-wide text-emerald-700">Total frais sélectionnés</div>
+                        <div className="mt-1 text-2xl font-black text-emerald-900">{formatAr(totalTrainingFees)}</div>
+                      </div>
+                    </div>
+                  )}
                 </Card>
               )}
 
@@ -472,6 +1093,9 @@ function ReinscriptionPage() {
                       </div>
                       <div className="text-xs font-bold text-emerald-700">
                         {form.matricule} • {form.anneeScolaire} • {form.classe} • {form.section}
+                      </div>
+                      <div className="mt-1 text-xs font-black text-emerald-800">
+                        Tarif choisi : {form.tarifReinscription || "Non choisi"} • Frais à créer : {formatAr(fraisReinscriptionAmount || totalTrainingFees)}
                       </div>
                     </div>
                   </div>
@@ -519,6 +1143,201 @@ function ReinscriptionPage() {
       </main>
     </div>
   );
+}
+
+
+function TrainingFeesChooser({
+  fees,
+  selectedFeeIds,
+  selectedTarif,
+  loading,
+  onToggle,
+}: {
+  fees: TrainingFee[];
+  selectedFeeIds: number[];
+  selectedTarif: string;
+  loading: boolean;
+  onToggle: (id: number) => void;
+}) {
+  if (loading) {
+    return <div className="mt-4 rounded-2xl border bg-white p-4 text-sm font-black text-slate-500">Chargement des frais...</div>;
+  }
+
+  if (!fees.length) {
+    return (
+      <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-black text-amber-800">
+        Aucun frais de formation trouvé pour cette classe. Vérifiez la configuration dans Frais de formation.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 overflow-hidden rounded-2xl border bg-white">
+      <div className="hidden grid-cols-[60px_1fr_130px_130px] border-b bg-slate-100 px-4 py-3 text-[11px] font-black uppercase text-slate-500 md:grid">
+        <div>Choix</div>
+        <div>Frais</div>
+        <div className="text-right">Principal</div>
+        <div className="text-right">Montant choisi</div>
+      </div>
+
+      {fees.map((fee) => {
+        const checked = selectedFeeIds.includes(fee.id);
+        const principal = getPrincipalAmount(fee);
+        const selectedAmount = getFeeAmountByTarif(fee, selectedTarif);
+
+        return (
+          <label key={fee.id} className="grid cursor-pointer gap-3 border-b px-4 py-4 last:border-b-0 hover:bg-slate-50 md:grid-cols-[60px_1fr_130px_130px] md:items-center">
+            <div>
+              <input type="checkbox" checked={checked} onChange={() => onToggle(fee.id)} className="h-5 w-5 rounded border-slate-300" />
+            </div>
+
+            <div>
+              <div className="text-sm font-black text-slate-900">{getFeeLabel(fee)}</div>
+              {fee.code && <div className="mt-1 text-[11px] font-bold text-slate-500">Code : {fee.code}</div>}
+            </div>
+
+            <div className="text-left text-sm font-black text-slate-600 md:text-right">
+              <span className="md:hidden">Principal : </span>{formatAr(principal)}
+            </div>
+
+            <div className="text-left text-sm font-black text-emerald-700 md:text-right">
+              <span className="md:hidden">Montant choisi : </span>{formatAr(selectedAmount)}
+            </div>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
+function getFeeModelTitle(model: FeeModel) {
+  return model.title || model.name || model.libelle || `Modèle #${model.id}`;
+}
+
+function getFeeModelRows(model: FeeModel): TrainingFee[] {
+  const rows = model.tariffs || model.fees || [];
+
+  return rows.map((tariff) => ({
+    id: tariff.id,
+    libelle: tariff.libelle || tariff.label || tariff.name || "Frais",
+    label: tariff.label || tariff.libelle || tariff.name || "Frais",
+    name: tariff.name || tariff.libelle || tariff.label || "Frais",
+    code: tariff.code || "",
+    montant: tariff.montant ?? tariff.amount ?? 0,
+    amount: tariff.amount ?? tariff.montant ?? 0,
+    specials: normalizeModelSpecials(tariff.specials),
+    tarifsSpeciaux: tariff.tarifsSpeciaux || null,
+  }));
+}
+
+function getFeeModelTotal(model: FeeModel, tarif: string) {
+  return getFeeModelRows(model).reduce((sum, fee) => sum + getFeeAmountByTarif(fee, tarif), 0);
+}
+
+function findBestFeeModel(models: FeeModel[]) {
+  return (
+    models.find((model) => {
+      const text = getFeeModelTitle(model).toLowerCase();
+      return text.includes("reinscription") || text.includes("réinscription") || text.includes("ancien");
+    }) || models[0] || null
+  );
+}
+
+function normalizeModelSpecials(raw: FeeTariff["specials"]): TarifsSpeciaux {
+  if (Array.isArray(raw)) {
+    return raw.reduce<TarifsSpeciaux>((acc, item) => {
+      if (item.name?.trim()) acc[item.name.trim()] = item.amount;
+      return acc;
+    }, {});
+  }
+
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  return raw && typeof raw === "object" ? raw : {};
+}
+
+function findBestReinscriptionFee(fees: TrainingFee[]) {
+  return (
+    fees.find((fee) => {
+      const text = `${getFeeLabel(fee)} ${fee.code || ""}`.toLowerCase();
+      return text.includes("reinscription") || text.includes("réinscription") || text.includes("ancien");
+    }) || fees[0] || null
+  );
+}
+
+function getFeeLabel(fee: TrainingFee) {
+  return fee.libelle || fee.label || fee.name || "Frais";
+}
+
+function parseAmount(value: number | string | null | undefined) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const cleaned = value.replace(/\s/g, "").replace(/,/g, ".");
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
+
+function getPrincipalAmount(fee: TrainingFee) {
+  return parseAmount(fee.montantPrincipal ?? fee.montant ?? fee.amount);
+}
+
+function getSpecialTarifs(fee: TrainingFee): TarifsSpeciaux {
+  const raw = fee.tarifsSpeciaux ?? fee.specials ?? {};
+
+  if (Array.isArray(raw)) {
+    return raw.reduce<TarifsSpeciaux>((acc, item: any) => {
+      if (item?.name?.trim()) acc[item.name.trim()] = item.amount;
+      return acc;
+    }, {});
+  }
+
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  return raw && typeof raw === "object" ? raw : {};
+}
+
+function hasAmountForTarif(fee: TrainingFee, tarif: string) {
+  if (!tarif) return false;
+  if (tarif === "Principal") return getPrincipalAmount(fee) > 0;
+
+  const specials = getSpecialTarifs(fee);
+  return Object.prototype.hasOwnProperty.call(specials, tarif);
+}
+
+function getFeeAmountByTarif(fee: TrainingFee, tarif: string) {
+  if (!tarif) return 0;
+  if (tarif === "Principal") return getPrincipalAmount(fee);
+
+  const specials = getSpecialTarifs(fee);
+
+  // TENA ZAVA-DEHIBE:
+  // Raha "Ancien" na tarif hafa no voafidy dia io montant io ihany no ampiasaina.
+  // Tsy miverina automatique amin'ny Principal intsony, mba tsy hiditra montant diso.
+  if (Object.prototype.hasOwnProperty.call(specials, tarif)) {
+    return parseAmount(specials[tarif]);
+  }
+
+  return 0;
+}
+
+function formatAr(value: number) {
+  return `${Math.round(value || 0).toLocaleString("fr-FR")} Ar`;
 }
 
 function StudentPhoto({ student }: { student: Student }) {
