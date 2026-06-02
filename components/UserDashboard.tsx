@@ -33,6 +33,25 @@ type Student = {
   mereNom?: string | null;
 };
 
+type StudentFeeRecap = {
+  id?: number | string;
+  code?: string | null;
+  label?: string | null;
+  libelle?: string | null;
+  name?: string | null;
+  amount?: number | string | null;
+  montant?: number | string | null;
+  montantTotal?: number | string | null;
+  total?: number | string | null;
+  amountPaid?: number | string | null;
+  paid?: number | string | null;
+  montantPaye?: number | string | null;
+  reste?: number | string | null;
+  remaining?: number | string | null;
+  status?: string | null;
+  paidAt?: string | null;
+};
+
 type AcademicLevel = {
   id: number;
   name: string;
@@ -174,6 +193,10 @@ const [fontScale, setFontScale] = useState<number>(1);
 
 const [students, setStudents] = useState<Student[]>([]);
 const [loadingStudents, setLoadingStudents] = useState(false);
+const [studentRecapOpen, setStudentRecapOpen] = useState(false);
+const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+const [studentFees, setStudentFees] = useState<StudentFeeRecap[]>([]);
+const [loadingRecap, setLoadingRecap] = useState(false);
 
 const [successMessage, setSuccessMessage] = useState("");
 const [highlightId, setHighlightId] = useState<string | null>(null);
@@ -488,6 +511,100 @@ useEffect(() => {
     const parsed = new Date(date);
     if (isNaN(parsed.getTime())) return "-";
     return parsed.toLocaleDateString("fr-FR");
+  }
+
+  function toNumber(value: unknown) {
+    if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+    if (typeof value === "string") {
+      const cleaned = value.replace(/\s/g, "").replace(/,/g, ".");
+      const parsed = Number(cleaned);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+  }
+
+  function formatMoney(value: unknown) {
+    return `${toNumber(value).toLocaleString("fr-FR")} Ar`;
+  }
+
+  function feeLabel(fee: StudentFeeRecap) {
+    return fee.label || fee.libelle || fee.name || "Frais";
+  }
+
+  function feeAmount(fee: StudentFeeRecap) {
+    return fee.amount ?? fee.montantTotal ?? fee.montant ?? fee.total ?? 0;
+  }
+
+  function feePaid(fee: StudentFeeRecap) {
+    return fee.amountPaid ?? fee.montantPaye ?? fee.paid ?? 0;
+  }
+
+  function feeRemaining(fee: StudentFeeRecap) {
+    if (fee.remaining !== undefined && fee.remaining !== null) return fee.remaining;
+    if (fee.reste !== undefined && fee.reste !== null) return fee.reste;
+    return Math.max(0, toNumber(feeAmount(fee)) - toNumber(feePaid(fee)));
+  }
+
+  function normalizeFeeStatus(fee: StudentFeeRecap) {
+    const raw = String(fee.status || "").toUpperCase();
+
+    if (raw.includes("PAYE") || raw.includes("PAID")) return "PAYE";
+    if (raw.includes("PARTIEL") || raw.includes("PARTIAL")) return "PARTIEL";
+
+    const remaining = toNumber(feeRemaining(fee));
+    const paid = toNumber(feePaid(fee));
+    const amount = toNumber(feeAmount(fee));
+
+    if (amount > 0 && remaining <= 0) return "PAYE";
+    if (paid > 0 && remaining > 0) return "PARTIEL";
+    return "NON_PAYE";
+  }
+
+  const recapTotals = useMemo(() => {
+    return studentFees.reduce(
+      (acc, fee) => {
+        acc.total += toNumber(feeAmount(fee));
+        acc.paid += toNumber(feePaid(fee));
+        acc.remaining += toNumber(feeRemaining(fee));
+        return acc;
+      },
+      { total: 0, paid: 0, remaining: 0 }
+    );
+  }, [studentFees]);
+
+  async function openStudentRecap(student: Student) {
+    setSelectedStudent(student);
+    setStudentRecapOpen(true);
+    setStudentFees([]);
+    setLoadingRecap(true);
+
+    try {
+      const res = await fetch(
+        `/api/student-fees?studentId=${student.id}&_ts=${Date.now()}`,
+        { cache: "no-store" }
+      );
+
+      if (!res.ok) {
+        setStudentFees([]);
+        return;
+      }
+
+      const data = await res.json();
+      const fees = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.fees)
+        ? data.fees
+        : Array.isArray(data?.studentFees)
+        ? data.studentFees
+        : [];
+
+      setStudentFees(fees);
+    } catch (error) {
+      console.error(error);
+      setStudentFees([]);
+    } finally {
+      setLoadingRecap(false);
+    }
   }
 
   async function logout() {
@@ -1164,8 +1281,15 @@ if (item === "Mouvements de Trésorerie") {
                             : "odd:bg-white even:bg-slate-50/70"
                         }`}
                       >
-                        <td className="border-b border-r border-slate-200 px-2 py-1.5 font-black text-red-500 whitespace-nowrap">
-                          {s.matricule}
+                        <td className="border-b border-r border-slate-200 px-2 py-1.5 whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={() => openStudentRecap(s)}
+                            className="rounded-lg px-1.5 py-0.5 font-black text-blue-700 transition hover:bg-blue-50 hover:text-blue-900 hover:underline"
+                            title="Voir le récapitulatif étudiant"
+                          >
+                            {s.matricule}
+                          </button>
                         </td>
                         <td className="mobile-hide border-b border-r border-slate-200 px-2 py-1.5 whitespace-nowrap">
                           {s.site}
@@ -1685,6 +1809,163 @@ if (item === "Mouvements de Trésorerie") {
                   >
                     Valider le thème
                   </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+
+        {studentRecapOpen && selectedStudent && (
+          <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-slate-950/70 p-2 md:p-4">
+            <div className="flex max-h-[94vh] w-full max-w-[1160px] flex-col overflow-hidden rounded-[28px] border border-white/20 bg-white shadow-[0_24px_70px_rgba(2,6,23,.45)]">
+              <div className="theme-sidebar relative overflow-hidden p-4 text-white md:p-5">
+                <div className="absolute -right-20 -top-24 h-52 w-52 rounded-full bg-white/10" />
+                <div className="relative flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black uppercase tracking-[.26em] text-white/55">Récapitulatif étudiant</p>
+                    <h2 className="mt-1 truncate text-[22px] font-black md:text-[28px]">
+                      {selectedStudent.nom} {selectedStudent.prenoms}
+                    </h2>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <span className="rounded-full bg-white/15 px-3 py-1 text-[11px] font-black text-white">M° {selectedStudent.matricule}</span>
+                      <span className="rounded-full bg-white/15 px-3 py-1 text-[11px] font-black text-white">{selectedStudent.classe || "Classe -"}</span>
+                      <span className="rounded-full bg-white/15 px-3 py-1 text-[11px] font-black text-white">{selectedStudent.section || "Série -"}</span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setStudentRecapOpen(false)}
+                    className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl border border-white/15 bg-white/10 text-[18px] font-black text-white transition hover:bg-white/20"
+                    aria-label="Fermer le récapitulatif"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              <div className="min-h-0 overflow-y-auto bg-slate-50 p-3 md:p-5">
+                <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
+                  <div className="space-y-4">
+                    <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
+                      <div className="border-b border-slate-200 bg-white px-4 py-3">
+                        <h3 className="text-[15px] font-black text-slate-950">Informations étudiant</h3>
+                        <p className="text-[11px] font-bold text-slate-500">Identité, classe et contact.</p>
+                      </div>
+
+                      <div className="grid gap-2 p-4 text-[12px]">
+                        {[
+                          ["Matricule", selectedStudent.matricule],
+                          ["Site", selectedStudent.site],
+                          ["Année scolaire", selectedStudent.anneeScolaire],
+                          ["Date inscription", formatDate(selectedStudent.dateInscription)],
+                          ["Nom", selectedStudent.nom],
+                          ["Prénom(s)", selectedStudent.prenoms],
+                          ["Sexe", selectedStudent.sexe],
+                          ["Classe", selectedStudent.classe],
+                          ["Série / Section", selectedStudent.section],
+                          ["Contact", selectedStudent.contact || "-"],
+                          ["Date de naissance", formatDate(selectedStudent.dateNaissance)],
+                          ["Lieu de naissance", selectedStudent.lieuNaissance || "-"],
+                          ["Père", selectedStudent.pereNom || "-"],
+                          ["Mère", selectedStudent.mereNom || "-"],
+                        ].map(([label, value]) => (
+                          <div key={label} className="grid grid-cols-[120px_1fr] gap-2 rounded-2xl bg-slate-50 px-3 py-2">
+                            <span className="font-black text-slate-500">{label}</span>
+                            <span className="font-bold text-slate-950">{value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+                      <div className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm">
+                        <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">Total frais</p>
+                        <p className="mt-1 text-[18px] font-black text-slate-950">{formatMoney(recapTotals.total)}</p>
+                      </div>
+                      <div className="rounded-[22px] border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
+                        <p className="text-[10px] font-black uppercase tracking-wide text-emerald-600">Total payé</p>
+                        <p className="mt-1 text-[18px] font-black text-emerald-700">{formatMoney(recapTotals.paid)}</p>
+                      </div>
+                      <div className="rounded-[22px] border border-red-200 bg-red-50 p-4 shadow-sm">
+                        <p className="text-[10px] font-black uppercase tracking-wide text-red-600">Reste à payer</p>
+                        <p className="mt-1 text-[18px] font-black text-red-700">{formatMoney(recapTotals.remaining)}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
+                    <div className="flex flex-col gap-2 border-b border-slate-200 bg-white px-4 py-3 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <h3 className="text-[15px] font-black text-slate-950">Frais de scolarité / formation</h3>
+                        <p className="text-[11px] font-bold text-slate-500">Statut automatique : payé, partiel ou non payé.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => openStudentRecap(selectedStudent)}
+                        className="w-fit rounded-xl theme-button px-3 py-2 text-[11px] font-black text-white shadow-sm"
+                      >
+                        ⟳ Recharger les frais
+                      </button>
+                    </div>
+
+                    {loadingRecap ? (
+                      <div className="flex min-h-[260px] items-center justify-center p-8">
+                        <div className="text-center">
+                          <div className="mx-auto student-loading-spinner" />
+                          <p className="mt-3 text-[12px] font-black text-slate-700">Chargement des frais...</p>
+                        </div>
+                      </div>
+                    ) : studentFees.length === 0 ? (
+                      <div className="flex min-h-[260px] items-center justify-center p-8 text-center">
+                        <div>
+                          <div className="mx-auto grid h-14 w-14 place-items-center rounded-3xl bg-slate-100 text-[26px]">📄</div>
+                          <p className="mt-3 text-[13px] font-black text-slate-700">Aucun frais trouvé</p>
+                          <p className="mt-1 text-[11px] font-bold text-slate-500">Vérifiez si les frais de formation sont déjà créés pour cet étudiant.</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="max-h-[58vh] overflow-auto">
+                        <table className="w-full min-w-[760px] border-separate border-spacing-0 text-[11px]">
+                          <thead className="sticky top-0 z-10 theme-dark-btn text-white">
+                            <tr>
+                              {["Code", "Libellé", "Montant", "Payé", "Reste", "Statut"].map((h) => (
+                                <th key={h} className="border-r border-white/10 px-3 py-2 text-left text-[10px] font-black uppercase tracking-wide">
+                                  {h}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {studentFees.map((fee, index) => {
+                              const status = normalizeFeeStatus(fee);
+                              return (
+                                <tr key={fee.id || `${fee.code || "fee"}-${index}`} className="odd:bg-white even:bg-slate-50 hover:bg-blue-50">
+                                  <td className="border-b border-r border-slate-200 px-3 py-2 font-black text-blue-700">{fee.code || "-"}</td>
+                                  <td className="border-b border-r border-slate-200 px-3 py-2 font-bold text-slate-900">{feeLabel(fee)}</td>
+                                  <td className="border-b border-r border-slate-200 px-3 py-2 font-black text-slate-700">{formatMoney(feeAmount(fee))}</td>
+                                  <td className="border-b border-r border-slate-200 px-3 py-2 font-black text-emerald-700">{formatMoney(feePaid(fee))}</td>
+                                  <td className="border-b border-r border-slate-200 px-3 py-2 font-black text-red-700">{formatMoney(feeRemaining(fee))}</td>
+                                  <td className="border-b border-slate-200 px-3 py-2">
+                                    {status === "PAYE" && (
+                                      <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 text-[10px] font-black text-emerald-700">✅ Payé</span>
+                                    )}
+                                    {status === "PARTIEL" && (
+                                      <span className="inline-flex rounded-full bg-amber-100 px-3 py-1 text-[10px] font-black text-amber-700">🟡 Partiel</span>
+                                    )}
+                                    {status === "NON_PAYE" && (
+                                      <span className="inline-flex rounded-full bg-red-100 px-3 py-1 text-[10px] font-black text-red-700">🔴 Non payé</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
