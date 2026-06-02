@@ -153,7 +153,7 @@ const [menuSearch, setMenuSearch] = useState("");
 const [themeKey, setThemeKey] = useState<AppThemeKey>("navy");
 const [themePanelOpen, setThemePanelOpen] = useState(false);
 const [themeSettingsTab, setThemeSettingsTab] = useState<"themes" | "preview" | "studentView" | "font">("themes");
-const [fontScale, setFontScale] = useState<"small" | "normal" | "large" | "xlarge">("normal");
+const [fontScale, setFontScale] = useState<number>(1);
 
 const [students, setStudents] = useState<Student[]>([]);
 const [loadingStudents, setLoadingStudents] = useState(false);
@@ -179,14 +179,23 @@ const autoRefreshRef = useRef(0);
 
 const currentTheme = appThemes.find((theme) => theme.key === themeKey) || appThemes[0];
 
-const fontScales = [
-  { key: "small", name: "Compact", label: "Texte plus petit, idéal pour afficher beaucoup d’étudiants", value: 0.92, preview: "Aa" },
-  { key: "normal", name: "Standard", label: "Taille normale recommandée", value: 1, preview: "Aa" },
-  { key: "large", name: "Grand", label: "Texte plus confortable à lire", value: 1.13, preview: "Aa" },
-  { key: "xlarge", name: "Très grand", label: "Affichage agrandi pour écran ou projection", value: 1.25, preview: "Aa" },
-] as const;
+const MIN_FONT_SCALE = 0.85;
+const MAX_FONT_SCALE = 1.45;
+const FONT_SCALE_STEP = 0.05;
+const fontPercent = Math.round(fontScale * 100);
 
-const activeFontScale = fontScales.find((item) => item.key === fontScale) || fontScales[1];
+function clampFontScale(value: number) {
+  return Math.min(MAX_FONT_SCALE, Math.max(MIN_FONT_SCALE, Math.round(value * 100) / 100));
+}
+
+function getFontScaleName(value: number) {
+  if (value <= 0.9) return "Compact";
+  if (value < 1.08) return "Standard";
+  if (value < 1.25) return "Grand";
+  return "Très grand";
+}
+
+const activeFontScaleName = getFontScaleName(fontScale);
 
 const filteredMenus = useMemo(() => {
   const q = menuSearch.trim().toLowerCase();
@@ -205,14 +214,17 @@ const filteredMenus = useMemo(() => {
 
 useEffect(() => {
   const savedTheme = localStorage.getItem("strelitzia-theme") as AppThemeKey | null;
-  const savedFontScale = localStorage.getItem("strelitzia-font-scale") as typeof fontScale | null;
+  const savedFontScale = localStorage.getItem("strelitzia-font-scale");
 
   if (savedTheme && appThemes.some((theme) => theme.key === savedTheme)) {
     setThemeKey(savedTheme);
   }
 
-  if (savedFontScale && fontScales.some((item) => item.key === savedFontScale)) {
-    setFontScale(savedFontScale);
+  if (savedFontScale) {
+    const parsedFontScale = Number(savedFontScale);
+    if (!Number.isNaN(parsedFontScale)) {
+      setFontScale(clampFontScale(parsedFontScale));
+    }
   }
 }, []);
 
@@ -221,9 +233,18 @@ function applyTheme(nextTheme: AppThemeKey) {
   localStorage.setItem("strelitzia-theme", nextTheme);
 }
 
-function applyFontScale(nextScale: typeof fontScale) {
-  setFontScale(nextScale);
-  localStorage.setItem("strelitzia-font-scale", nextScale);
+function applyFontScale(nextScale: number) {
+  const safeScale = clampFontScale(nextScale);
+  setFontScale(safeScale);
+  localStorage.setItem("strelitzia-font-scale", String(safeScale));
+}
+
+function increaseFontScale() {
+  applyFontScale(fontScale + FONT_SCALE_STEP);
+}
+
+function decreaseFontScale() {
+  applyFontScale(fontScale - FONT_SCALE_STEP);
 }
 
 async function loadSchoolYears() {
@@ -556,7 +577,7 @@ if (item === "Mouvements de Trésorerie") {
         ["--theme-card" as any]: currentTheme.card,
         ["--theme-soft" as any]: currentTheme.soft,
         ["--theme-text" as any]: currentTheme.text,
-        ["--font-scale" as any]: activeFontScale.value,
+        ["--font-scale" as any]: fontScale,
       }}
     >
       <style>{`
@@ -571,7 +592,21 @@ if (item === "Mouvements de Trésorerie") {
         .crisp-ui input, .crisp-ui select, .crisp-ui button, .crisp-ui table {
           text-rendering: optimizeLegibility;
         }
-        .font-scale-label { font-size: calc(11px * var(--font-scale)); }
+        .crisp-ui { font-size: calc(11px * var(--font-scale)); }
+        .crisp-ui h1 { font-size: calc(22px * var(--font-scale)) !important; }
+        .crisp-ui h2 { font-size: calc(28px * var(--font-scale)) !important; }
+        .crisp-ui h3 { font-size: calc(20px * var(--font-scale)) !important; }
+        .crisp-ui p,
+        .crisp-ui span,
+        .crisp-ui button,
+        .crisp-ui input,
+        .crisp-ui select,
+        .crisp-ui div,
+        .crisp-ui td,
+        .crisp-ui th,
+        .crisp-ui footer {
+          font-size: calc(1em * var(--font-scale));
+        }
         .student-table { font-size: calc(10.5px * var(--font-scale)) !important; }
         .student-table th { font-size: calc(10px * var(--font-scale)) !important; }
         .student-table td { font-size: calc(10.5px * var(--font-scale)) !important; }
@@ -1489,71 +1524,116 @@ if (item === "Mouvements de Trésorerie") {
                     <div>
                       <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
                         <div>
-                          <h3 className="text-[20px] font-black text-slate-950">Taille de police</h3>
+                          <h3 className="text-[20px] font-black text-slate-950">Taille de police globale</h3>
                           <p className="mt-1 text-[12px] font-bold text-slate-500">
-                            Agrandissez ou réduisez les textes de la vue étudiants sans modifier la logique.
+                            Appuyez sur + ou - pour agrandir/réduire tous les textes de l’interface : sidebar, boutons, filtres, tableau et aperçu étudiants.
                           </p>
                         </div>
                         <span className="w-fit rounded-full bg-slate-900 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-white">
-                          Actuel : {activeFontScale.name}
+                          Actuel : {activeFontScaleName} • {fontPercent}%
                         </span>
                       </div>
 
-                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                        {fontScales.map((item) => {
-                          const active = item.key === fontScale;
-                          return (
+                      <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
+                        <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+                          <p className="text-[11px] font-black uppercase tracking-wide text-slate-400">Réglage rapide</p>
+                          <div className="mt-4 flex items-center justify-center gap-4">
                             <button
-                              key={item.key}
-                              onClick={() => applyFontScale(item.key)}
-                              className={`rounded-[24px] border bg-white p-4 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-xl ${
-                                active ? "border-slate-950 ring-4 ring-slate-950/10" : "border-slate-200"
-                              }`}
+                              type="button"
+                              onClick={decreaseFontScale}
+                              disabled={fontScale <= MIN_FONT_SCALE}
+                              className="grid h-16 w-16 place-items-center rounded-3xl border border-slate-200 bg-white text-[28px] font-black text-slate-900 shadow-lg transition hover:-translate-y-0.5 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                              aria-label="Réduire la police"
                             >
-                              <div className="flex items-center justify-between gap-3">
-                                <span
-                                  className="grid h-16 w-16 place-items-center rounded-2xl bg-slate-950 font-black text-white"
-                                  style={{ fontSize: `${18 * item.value}px` }}
-                                >
-                                  {item.preview}
-                                </span>
-                                {active ? (
-                                  <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black text-emerald-700">ACTIF</span>
-                                ) : (
-                                  <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-black text-slate-500">CHOISIR</span>
-                                )}
-                              </div>
-                              <p className="mt-4 text-[14px] font-black text-slate-950">{item.name}</p>
-                              <p className="mt-1 text-[11px] font-bold leading-relaxed text-slate-500">{item.label}</p>
+                              −
                             </button>
-                          );
-                        })}
-                      </div>
 
-                      <div className="mt-5 overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-sm">
-                        <div className="theme-dark-btn px-4 py-3 text-[11px] font-black uppercase text-white">
-                          Aperçu direct
+                            <div className="min-w-[130px] rounded-3xl border border-slate-200 bg-slate-950 px-5 py-4 text-center text-white shadow-xl">
+                              <div className="text-[30px] font-black leading-none">{fontPercent}%</div>
+                              <div className="mt-1 text-[11px] font-black uppercase tracking-wide text-white/55">{activeFontScaleName}</div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={increaseFontScale}
+                              disabled={fontScale >= MAX_FONT_SCALE}
+                              className="grid h-16 w-16 place-items-center rounded-3xl border border-slate-200 theme-button text-[28px] font-black text-white shadow-lg transition hover:-translate-y-0.5 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+                              aria-label="Agrandir la police"
+                            >
+                              +
+                            </button>
+                          </div>
+
+                          <input
+                            type="range"
+                            min={MIN_FONT_SCALE}
+                            max={MAX_FONT_SCALE}
+                            step={FONT_SCALE_STEP}
+                            value={fontScale}
+                            onChange={(e) => applyFontScale(Number(e.target.value))}
+                            className="mt-6 w-full accent-slate-950"
+                          />
+
+                          <div className="mt-3 flex items-center justify-between text-[10px] font-black text-slate-400">
+                            <span>Petit</span>
+                            <span>Normal</span>
+                            <span>Grand</span>
+                          </div>
+
+                          <div className="mt-5 grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => applyFontScale(1)}
+                              className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-[12px] font-black text-slate-800 transition hover:bg-white"
+                            >
+                              Réinitialiser
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => applyFontScale(1.25)}
+                              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-[12px] font-black text-slate-800 shadow-sm transition hover:bg-slate-50"
+                            >
+                              Mode lecture
+                            </button>
+                          </div>
                         </div>
-                        <div className="p-4">
-                          <div className="overflow-x-auto rounded-2xl border border-slate-200">
-                            <table className="student-table w-full min-w-[650px] border-separate border-spacing-0">
-                              <thead className="theme-dark-btn text-white">
-                                <tr>
-                                  <th className="px-3 py-2 text-left">Matricule</th>
-                                  <th className="px-3 py-2 text-left">Nom</th>
-                                  <th className="px-3 py-2 text-left">Classe</th>
-                                  <th className="px-3 py-2 text-left">Contact</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                <tr className="bg-white">
-                                  <td className="border-t border-slate-200 px-3 py-2 font-black text-red-500">MAT-001</td>
-                                  <td className="border-t border-slate-200 px-3 py-2 font-black text-slate-900">Exemple Étudiant</td>
-                                  <td className="border-t border-slate-200 px-3 py-2 font-bold text-slate-700">GRADE 1</td>
-                                  <td className="border-t border-slate-200 px-3 py-2 text-slate-700">034 00 000 00</td>
-                                </tr>
-                              </tbody>
-                            </table>
+
+                        <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
+                          <div className="theme-dark-btn flex items-center justify-between px-4 py-3 text-white">
+                            <span className="text-[11px] font-black uppercase tracking-wide">Aperçu direct de toute l’interface</span>
+                            <span className="rounded-full bg-white/15 px-3 py-1 text-[10px] font-black">{fontPercent}%</span>
+                          </div>
+                          <div className="p-4">
+                            <div className="mb-3 flex flex-wrap gap-2">
+                              <button className="theme-button rounded-xl px-3 py-2 text-[11px] font-black text-white">Bouton principal</button>
+                              <button className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-black text-slate-800">Bouton secondaire</button>
+                              <input className="rounded-xl border border-slate-200 px-3 py-2 text-[11px] font-bold outline-none" value="Recherche étudiant" readOnly />
+                            </div>
+
+                            <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                              <table className="student-table w-full min-w-[650px] border-separate border-spacing-0">
+                                <thead className="theme-dark-btn text-white">
+                                  <tr>
+                                    <th className="px-3 py-2 text-left">Matricule</th>
+                                    <th className="px-3 py-2 text-left">Nom</th>
+                                    <th className="px-3 py-2 text-left">Classe</th>
+                                    <th className="px-3 py-2 text-left">Contact</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  <tr className="bg-white">
+                                    <td className="border-t border-slate-200 px-3 py-2 font-black text-red-500">MAT-001</td>
+                                    <td className="border-t border-slate-200 px-3 py-2 font-black text-slate-900">Exemple Étudiant</td>
+                                    <td className="border-t border-slate-200 px-3 py-2 font-bold text-slate-700">GRADE 1</td>
+                                    <td className="border-t border-slate-200 px-3 py-2 text-slate-700">034 00 000 00</td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </div>
+
+                            <p className="mt-4 text-[12px] font-bold leading-relaxed text-slate-500">
+                              Ce réglage est sauvegardé automatiquement et s’applique à toute la page, pas seulement au tableau.
+                            </p>
                           </div>
                         </div>
                       </div>
@@ -1564,11 +1644,11 @@ if (item === "Mouvements de Trésorerie") {
 
               <div className="flex flex-col gap-2 border-t border-slate-200 bg-white px-5 py-4 md:flex-row md:items-center md:justify-between">
                 <p className="text-[12px] font-bold text-slate-500">
-                  Thème actif : <b className="text-slate-900">{currentTheme.name}</b> — Police : <b className="text-slate-900">{activeFontScale.name}</b> — sauvegarde automatique.
+                  Thème actif : <b className="text-slate-900">{currentTheme.name}</b> — Police : <b className="text-slate-900">{activeFontScaleName} ({fontPercent}%)</b> — sauvegarde automatique.
                 </p>
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <button
-                    onClick={() => applyFontScale("normal")}
+                    onClick={() => applyFontScale(1)}
                     className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-[12px] font-black text-slate-900 shadow-lg hover:bg-slate-50"
                   >
                     Police standard
