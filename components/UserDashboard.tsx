@@ -145,6 +145,23 @@ const appThemes: AppTheme[] = [
   { key: "teal", name: "Teal Modern", label: "Élégant, doux et très lisible", icon: "🟦", primary: "#0f766e", primary2: "#2dd4bf", dark: "#042f2e", dark2: "#021817", page: "#f0fdfa", card: "#ffffff", soft: "#ccfbf1", text: "#134e4a" },
 ];
 
+const STUDENT_CACHE_PREFIX = "strelitzia-students-cache-";
+const STUDENT_CACHE_VERSION = "v1";
+
+function getStudentsCacheKey(year: string) {
+  return `${STUDENT_CACHE_PREFIX}${STUDENT_CACHE_VERSION}-${year}`;
+}
+
+function clearAllStudentsCache() {
+  if (typeof window === "undefined") return;
+
+  Object.keys(sessionStorage).forEach((key) => {
+    if (key.startsWith(STUDENT_CACHE_PREFIX)) {
+      sessionStorage.removeItem(key);
+    }
+  });
+}
+
 export default function UserDashboard({ user }: { user: AuthUser }) {
 const [sidebarOpen, setSidebarOpen] = useState(false);
 const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -175,7 +192,6 @@ const [serie, setSerie] = useState("TOUT");
 const loadingStudentsRef = useRef(false);
 const loadingAcademicsRef = useRef(false);
 const initializedRef = useRef(false);
-const autoRefreshRef = useRef(0);
 
 const currentTheme = appThemes.find((theme) => theme.key === themeKey) || appThemes[0];
 
@@ -215,6 +231,11 @@ const filteredMenus = useMemo(() => {
 useEffect(() => {
   const savedTheme = localStorage.getItem("strelitzia-theme") as AppThemeKey | null;
   const savedFontScale = localStorage.getItem("strelitzia-font-scale");
+  const navigationEntry = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+
+  if (navigationEntry?.type === "reload") {
+    clearAllStudentsCache();
+  }
 
   if (savedTheme && appThemes.some((theme) => theme.key === savedTheme)) {
     setThemeKey(savedTheme);
@@ -302,16 +323,36 @@ async function loadAcademics(yearParam?: string) {
   }
 }
 
-async function loadStudents(yearParam?: string) {
+async function loadStudents(yearParam?: string, forceRefresh = false) {
+  const yearToUse = yearParam || selectedYear;
+
+  if (!yearToUse) return;
+
+  const cacheKey = getStudentsCacheKey(yearToUse);
+
+  if (!forceRefresh && typeof window !== "undefined") {
+    const cachedStudents = sessionStorage.getItem(cacheKey);
+
+    if (cachedStudents) {
+      try {
+        const parsed = JSON.parse(cachedStudents);
+
+        if (Array.isArray(parsed)) {
+          setStudents(parsed);
+          setLoadingStudents(false);
+          return;
+        }
+      } catch {
+        sessionStorage.removeItem(cacheKey);
+      }
+    }
+  }
+
   if (loadingStudentsRef.current) return;
 
   try {
     loadingStudentsRef.current = true;
     setLoadingStudents(true);
-
-    const yearToUse = yearParam || selectedYear;
-
-    if (!yearToUse) return;
 
     const res = await fetch(
       `/api/students?year=${encodeURIComponent(yearToUse)}&_ts=${Date.now()}`,
@@ -322,11 +363,15 @@ async function loadStudents(yearParam?: string) {
 
     const data = await res.json();
 
-    setStudents(
-      Array.isArray(data)
-        ? data
-        : data.students || []
-    );
+    const studentList = Array.isArray(data)
+      ? data
+      : data.students || [];
+
+    setStudents(studentList);
+
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem(cacheKey, JSON.stringify(studentList));
+    }
 
   } catch (error) {
     console.error(error);
@@ -334,8 +379,7 @@ async function loadStudents(yearParam?: string) {
     loadingStudentsRef.current = false;
     setLoadingStudents(false);
   }
-}
-  
+}  
  useEffect(() => {
   async function initDashboard() {
     const params = new URLSearchParams(window.location.search);
@@ -394,55 +438,8 @@ useEffect(() => {
   ]);
 }, [selectedYear]);
 
-useEffect(() => {
-  let mounted = true;
 
-  async function refreshWhenVisible() {
-    if (!mounted) return;
-    if (!initializedRef.current) return;
 
-    const now = Date.now();
-
-    if (now - autoRefreshRef.current < 800) return;
-    autoRefreshRef.current = now;
-
-    const yearToUse = selectedYear || (await loadSchoolYears());
-
-    if (!yearToUse) return;
-
-    await Promise.all([
-      loadStudents(yearToUse),
-      loadAcademics(yearToUse),
-    ]);
-  }
-
-  function handleVisibilityChange() {
-    if (document.visibilityState === "visible") {
-      refreshWhenVisible();
-    }
-  }
-
-  function handlePageShow() {
-    refreshWhenVisible();
-  }
-
-  function handlePopState() {
-    refreshWhenVisible();
-  }
-
-  window.addEventListener("focus", refreshWhenVisible);
-  window.addEventListener("pageshow", handlePageShow);
-  window.addEventListener("popstate", handlePopState);
-  document.addEventListener("visibilitychange", handleVisibilityChange);
-
-  return () => {
-    mounted = false;
-    window.removeEventListener("focus", refreshWhenVisible);
-    window.removeEventListener("pageshow", handlePageShow);
-    window.removeEventListener("popstate", handlePopState);
-    document.removeEventListener("visibilitychange", handleVisibilityChange);
-  };
-}, [selectedYear]);
 
  
 
@@ -510,7 +507,11 @@ useEffect(() => {
       return;
     }
 
-    loadStudents(selectedYear);
+    if (selectedYear) {
+      sessionStorage.removeItem(getStudentsCacheKey(selectedYear));
+    }
+
+    loadStudents(selectedYear, true);
   }
 
   function handleMenuClick(item: string) {
@@ -858,8 +859,12 @@ if (item === "Mouvements de Trésorerie") {
                 <div className="top-actions flex flex-wrap gap-2">
                   <button
                     onClick={() => {
+                      if (selectedYear) {
+                        sessionStorage.removeItem(getStudentsCacheKey(selectedYear));
+                      }
+
                       loadSchoolYears();
-                      loadStudents(selectedYear);
+                      loadStudents(selectedYear, true);
                       loadAcademics(selectedYear);
                     }}
                     className="h-8 rounded-lg theme-dark-btn px-3 text-[12px] font-black text-white shadow-lg shadow-slate-300 transition hover:-translate-y-0.5 hover:brightness-110"
