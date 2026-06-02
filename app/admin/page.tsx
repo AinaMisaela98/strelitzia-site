@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 type RoleItem = {
   id: number;
@@ -24,7 +24,7 @@ type User = {
 const menus = [
   {
     title: "Tableau de bord",
-    items: ["Dashboard admin", "Liste des étudiants", "Années scolaires", "Niveaux / Classes / Séries"],
+    items: ["Dashboard admin", "Liste des utilisateurs", "Années scolaires", "Niveaux / Classes / Séries"],
   },
   {
     title: "Utilisateurs & accès",
@@ -46,15 +46,39 @@ function normalizeRoleName(value: string) {
     .replace(/^_+|_+$/g, "");
 }
 
+function menuIcon(item: string) {
+  if (item.includes("Dashboard")) return "⌂";
+  if (item.includes("utilisateur")) return "🎓";
+  if (item.includes("Années")) return "📅";
+  if (item.includes("Niveaux")) return "▦";
+  if (item.includes("Utilisateurs")) return "👥";
+  if (item.includes("Créer")) return "+";
+  if (item.includes("Rôles")) return "🛡";
+  if (item.includes("Paramètres")) return "⚙";
+  if (item.includes("Journal")) return "☷";
+  return "•";
+}
+
+function roleBadgeClass(label: string) {
+  const normalized = normalizeRoleName(label);
+  if (normalized.includes("ADMIN")) return "bg-emerald-500/15 text-emerald-300 ring-emerald-500/20";
+  if (normalized.includes("DIRECTEUR")) return "bg-violet-500/15 text-violet-300 ring-violet-500/20";
+  if (normalized.includes("SECRETAIRE")) return "bg-blue-500/15 text-blue-300 ring-blue-500/20";
+  if (normalized.includes("COMPT") || normalized.includes("CAISS")) return "bg-amber-500/15 text-amber-300 ring-amber-500/20";
+  return "bg-slate-400/15 text-slate-200 ring-slate-400/20";
+}
+
 export default function AdminPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<RoleItem[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activePage, setActivePage] = useState("Utilisateurs");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editingRoleId, setEditingRoleId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [roleLoading, setRoleLoading] = useState(false);
+  const [deletingUserId, setDeletingUserId] = useState<number | null>(null);
 
   const [form, setForm] = useState({
     name: "",
@@ -105,6 +129,21 @@ export default function AdminPage() {
     loadRoles();
   }, []);
 
+  useEffect(() => {
+    document.body.style.overflow = sidebarOpen ? "hidden" : "";
+
+    function closeWithEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setSidebarOpen(false);
+    }
+
+    window.addEventListener("keydown", closeWithEscape);
+
+    return () => {
+      document.body.style.overflow = "";
+      window.removeEventListener("keydown", closeWithEscape);
+    };
+  }, [sidebarOpen]);
+
   function getRoleByUser(user: User) {
     return (
       user.roleRef ||
@@ -149,10 +188,10 @@ export default function AdminPage() {
   }
 
   function handleMenu(item: string) {
-    if (item === "Liste des étudiants") {
-      window.location.href = "/user";
-      return;
-    }
+if (item === "Liste des utilisateurs") {
+  window.location.href = `/user?_ts=${Date.now()}`;
+  return;
+}
 
     if (item === "Années scolaires") {
       window.location.href = "/user/school-years";
@@ -168,7 +207,7 @@ export default function AdminPage() {
     setSidebarOpen(false);
   }
 
-  async function saveUser(e: React.FormEvent) {
+  async function saveUser(e: FormEvent) {
     e.preventDefault();
 
     if (!form.name || !form.email) {
@@ -227,21 +266,41 @@ export default function AdminPage() {
     });
   }
 
-  async function deleteUser(id: number) {
-    if (!confirm("Voulez-vous vraiment supprimer cet utilisateur ?")) return;
+  async function deleteUser(user: User) {
+    const roleDisplay = getRoleDisplay(user);
 
-    const res = await fetch(`/api/users/${id}`, { method: "DELETE" });
-    const data = await res.json();
-
-    if (!res.ok) {
-      alert(data.error || "Erreur suppression");
+    if (isAdminUser(user)) {
+      alert("Impossible de supprimer un compte ADMIN pour protéger l’accès au système.");
       return;
     }
 
-    loadUsers();
+    if (!confirm(`Voulez-vous vraiment supprimer l’utilisateur ${user.name} (${roleDisplay}) ?`)) return;
+
+    try {
+      setDeletingUserId(user.id);
+
+      const res = await fetch(`/api/users/${user.id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        alert(data.error || "Erreur suppression utilisateur");
+        return;
+      }
+
+      setUsers((prev) => prev.filter((item) => item.id !== user.id));
+      await loadUsers();
+    } catch {
+      alert("Erreur réseau pendant la suppression utilisateur");
+    } finally {
+      setDeletingUserId(null);
+    }
   }
 
-  async function saveRole(e: React.FormEvent) {
+  async function saveRole(e: FormEvent) {
     e.preventDefault();
 
     const name = normalizeRoleName(roleForm.name || roleForm.label);
@@ -315,63 +374,101 @@ export default function AdminPage() {
   }
 
   async function logout() {
-    await fetch("/api/logout", { method: "POST" });
-    window.location.href = "/";
+    try {
+      const res = await fetch("/api/logout", { method: "POST" });
+      if (!res.ok) {
+        await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
+      }
+    } finally {
+      window.location.href = "/";
+    }
   }
 
   return (
-    <main className="fixed inset-0 bg-[#eef2f7] flex overflow-hidden text-[12px] text-slate-900">
-      <aside
-        className={`fixed lg:relative z-50 h-full w-[230px] shrink-0 bg-[#4a4a4a] text-white flex flex-col border-r border-slate-600 transition-transform duration-300 ${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
-        }`}
+    <main className="fixed inset-0 flex overflow-hidden bg-[#07101d] text-[13px] text-slate-100">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(239,68,68,0.14),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(59,130,246,0.12),transparent_32%)]" />
+
+      <button
+        type="button"
+        onClick={() => setSidebarOpen((open) => !open)}
+        aria-label={sidebarOpen ? "Fermer le menu" : "Ouvrir le menu"}
+        className="fixed left-4 top-4 z-[70] flex h-11 w-11 items-center justify-center rounded-2xl border border-white/15 bg-[#0b1626]/95 text-xl font-black text-white shadow-2xl shadow-black/40 backdrop-blur-xl transition active:scale-95 lg:hidden"
       >
-        <div className="h-[68px] bg-white flex items-center px-3 border-b">
-          <div>
-            <div className="text-[19px] font-black text-red-600 leading-none">STRELITZIA</div>
-            <div className="text-[13px] font-black text-green-600">SCHOOL</div>
+        {sidebarOpen ? "✕" : "☰"}
+      </button>
+
+      <aside
+        className={`fixed lg:relative z-50 flex h-full shrink-0 flex-col border-r border-white/10 bg-[#08111f]/95 text-white shadow-2xl shadow-black/40 backdrop-blur-xl transition-all duration-300 ease-out
+          ${sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
+          ${sidebarCollapsed ? "lg:w-[86px]" : "lg:w-[280px]"}
+          w-[280px]`}
+      >
+        <div className={`flex h-[76px] items-center border-b border-white/10 transition-all duration-300 ${sidebarCollapsed ? "lg:justify-center lg:px-3" : "gap-3 px-6"}`}>
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-4 border-red-600 text-xl shadow-lg shadow-red-900/30">
+            ✿
+          </div>
+          <div className={`min-w-0 overflow-hidden leading-none transition-all duration-300 ${sidebarCollapsed ? "lg:w-0 lg:opacity-0" : "w-auto opacity-100"}`}>
+            <div className="whitespace-nowrap text-[21px] font-black tracking-wide text-white">STRELITZIA</div>
+            <div className="mt-1 whitespace-nowrap text-[16px] font-black tracking-wide text-red-500">SCHOOL</div>
           </div>
         </div>
 
-        <div className="bg-[#303030] px-3 py-3 flex gap-2 items-center">
-          <div className="w-11 h-11 rounded-full bg-orange-300 flex items-center justify-center text-xl">
-            👑
-          </div>
-          <div>
-            <p className="font-bold">Administrateur</p>
-            <p className="text-[10px] text-green-400">● En ligne</p>
-          </div>
-        </div>
-
-        <nav className="flex-1 overflow-y-auto pb-3">
+        <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-5 scrollbar-thin scrollbar-track-white/5 scrollbar-thumb-white/20 hover:scrollbar-thumb-white/30">
           {menus.map((menu) => (
-            <div key={menu.title}>
-              <div className="bg-[#2f3540] px-2 py-2 font-semibold flex justify-between">
-                <span>▣ {menu.title}</span>
-                <span>⌃</span>
+            <div key={menu.title} className="mb-4">
+              <div className={`mb-2 px-3 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 transition-all duration-300 ${sidebarCollapsed ? "lg:h-0 lg:overflow-hidden lg:opacity-0" : "opacity-100"}`}>
+                {menu.title}
               </div>
 
-              {menu.items.map((item) => (
-                <button
-                  key={item}
-                  onClick={() => handleMenu(item)}
-                  className={`w-full text-left pl-8 pr-2 py-[8px] hover:bg-[#b7b7b7] transition ${
-                    activePage === item ? "bg-[#b7b7b7]" : ""
-                  }`}
-                >
-                  - {item}
-                </button>
-              ))}
+              <div className="space-y-1">
+                {menu.items.map((item) => (
+                  <button
+                    key={item}
+                    onClick={() => handleMenu(item)}
+                    title={item}
+                    className={`group relative flex w-full items-center rounded-xl py-3 text-left font-semibold transition ${
+                      sidebarCollapsed ? "lg:justify-center lg:gap-0 lg:px-2" : "gap-3 px-4"
+                    } ${
+                      activePage === item
+                        ? "bg-gradient-to-r from-red-700 to-red-600 text-white shadow-lg shadow-red-950/30"
+                        : "text-slate-300 hover:bg-white/8 hover:text-white"
+                    }`}
+                  >
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center text-[15px]">{menuIcon(item)}</span>
+                    <span className={`min-w-0 whitespace-nowrap transition-all duration-300 ${sidebarCollapsed ? "lg:w-0 lg:overflow-hidden lg:opacity-0" : "w-auto opacity-100"}`}>{item}</span>
+                    {sidebarCollapsed && (
+                      <span className="pointer-events-none absolute left-full top-1/2 z-[80] ml-3 hidden -translate-y-1/2 whitespace-nowrap rounded-xl border border-white/10 bg-[#0b1626] px-3 py-2 text-xs font-bold text-white opacity-0 shadow-2xl shadow-black/40 transition group-hover:opacity-100 lg:block">
+                        {item}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
             </div>
           ))}
         </nav>
 
-        <div className="p-2">
+        <div className={`shrink-0 space-y-3 border-t border-white/10 bg-[#08111f]/95 p-4 transition-all duration-300 ${sidebarCollapsed ? "lg:px-3" : ""}`}>
+          <div className="rounded-xl border border-white/10 bg-white/[0.05] p-3 shadow-xl shadow-black/20">
+            <div className={`flex items-center transition-all duration-300 ${sidebarCollapsed ? "lg:justify-center lg:gap-0" : "gap-3"}`}>
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-slate-700 text-xl ring-2 ring-white/10">
+                👑
+              </div>
+              <div className={`min-w-0 flex-1 overflow-hidden transition-all duration-300 ${sidebarCollapsed ? "lg:w-0 lg:flex-none lg:opacity-0" : "opacity-100"}`}>
+                <p className="truncate font-black">Administrateur</p>
+                <p className="text-[12px] text-slate-400">Admin Strelitzia</p>
+              </div>
+              <span className={`text-slate-400 transition-all duration-300 ${sidebarCollapsed ? "lg:hidden" : ""}`}>⌄</span>
+            </div>
+          </div>
+
           <button
             onClick={logout}
-            className="w-full bg-red-600 hover:bg-red-700 py-2 rounded-sm font-bold"
+            title="Déconnexion"
+            className={`flex w-full items-center rounded-xl border border-white/10 bg-white/[0.05] py-4 font-bold text-white transition hover:bg-red-600 ${sidebarCollapsed ? "lg:justify-center lg:px-2" : "gap-3 px-4"}`}
           >
-            Déconnexion
+            <span className="text-lg">⇥</span>
+            <span className={`whitespace-nowrap transition-all duration-300 ${sidebarCollapsed ? "lg:w-0 lg:overflow-hidden lg:opacity-0" : "opacity-100"}`}>Déconnexion</span>
           </button>
         </div>
       </aside>
@@ -379,52 +476,70 @@ export default function AdminPage() {
       {sidebarOpen && (
         <div
           onClick={() => setSidebarOpen(false)}
-          className="fixed inset-0 bg-black/40 z-40 lg:hidden"
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
         />
       )}
 
-      <section className="flex-1 min-w-0 h-full flex flex-col overflow-hidden">
-        <header className="h-[52px] bg-white border-b flex items-center justify-between px-4">
-          <div className="flex items-center gap-3">
+      <section className="relative z-10 flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="flex h-[76px] items-center justify-between border-b border-white/10 bg-[#08111f]/60 px-5 backdrop-blur-xl lg:px-9">
+          <div className="flex items-center gap-4">
             <button
-              onClick={() => setSidebarOpen(true)}
-              className="lg:hidden bg-slate-900 text-white px-3 py-2 rounded-lg"
+              type="button"
+              onClick={() => setSidebarOpen((open) => !open)}
+              aria-label={sidebarOpen ? "Fermer le menu" : "Ouvrir le menu"}
+              className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xl text-white transition active:scale-95 lg:hidden"
             >
-              ☰
+              {sidebarOpen ? "✕" : "☰"}
             </button>
-
-            <div>
-              <h1 className="text-[17px] font-black">Administration</h1>
-              <p className="text-[11px] text-slate-500">Gestion des utilisateurs, rôles et accès</p>
-            </div>
+            <button
+              type="button"
+              onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+              aria-label={sidebarCollapsed ? "Ouvrir la sidebar" : "Fermer la sidebar"}
+              className="hidden rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-2xl text-slate-200 transition hover:bg-white/10 active:scale-95 lg:block"
+              title={sidebarCollapsed ? "Ouvrir la sidebar" : "Fermer la sidebar"}
+            >
+              {sidebarCollapsed ? "☰" : "✕"}
+            </button>
           </div>
 
-          <div className="flex gap-2">
-            <button
-              onClick={() => {
-                resetRoleForm();
-                setActivePage("Rôles utilisateurs");
-              }}
-              className="hidden sm:block bg-slate-800 hover:bg-black text-white px-4 py-2 rounded-xl font-bold"
-            >
-              ⚙ Rôles
+          <div className="flex items-center gap-4">
+            <button className="relative rounded-xl p-2 text-xl text-slate-200 hover:bg-white/10">
+              ♡
+              <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-[#08111f]" />
             </button>
-
+            <div className="hidden items-center gap-3 sm:flex">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-700 ring-2 ring-white/10">👑</div>
+              <span className="font-bold">Admin Strelitzia</span>
+            </div>
             <button
-              onClick={() => {
-                resetUserForm();
-                setActivePage("Créer utilisateur");
-              }}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl font-bold"
+              onClick={logout}
+              className="hidden rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2 font-black text-red-200 transition hover:bg-red-600 hover:text-white md:block"
             >
-              + Créer utilisateur
+              ⇥ Déconnexion
             </button>
           </div>
         </header>
 
-        <div className="flex-1 overflow-auto p-5">
+        <div className="flex-1 overflow-auto p-5 lg:p-8">
+          <div className="mb-8">
+            <h1 className="text-3xl font-black tracking-tight text-white lg:text-4xl">
+              {activePage === "Créer utilisateur"
+                ? editingId
+                  ? "Modifier utilisateur"
+                  : "Créer utilisateur"
+                : activePage === "Rôles utilisateurs"
+                ? "Gestion des rôles"
+                : activePage === "Dashboard admin"
+                ? "Dashboard admin"
+                : "Gestion des utilisateurs"}
+            </h1>
+            <p className="mt-3 text-base text-slate-400">
+              Accueil <span className="mx-2 text-slate-600">›</span> {activePage}
+            </p>
+          </div>
+
           {activePage === "Dashboard admin" && (
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-4">
               <Card title="Utilisateurs" value={users.length} icon="👥" />
               <Card title="Actifs" value={users.filter((u) => u.active).length} icon="✅" />
               <Card title="Administrateurs" value={users.filter(isAdminUser).length} icon="👑" />
@@ -433,73 +548,100 @@ export default function AdminPage() {
           )}
 
           {activePage === "Utilisateurs" && (
-            <div className="bg-white rounded-2xl shadow border overflow-hidden">
-              <div className="p-5 border-b flex flex-wrap gap-3 justify-between items-center">
+            <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/25 backdrop-blur-xl lg:p-7">
+              <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
                 <div>
-                  <h2 className="text-xl font-black">Liste des utilisateurs</h2>
-                  <p className="text-slate-500">Création, modification et suppression des comptes</p>
+                  <h2 className="text-2xl font-black text-white">Liste des utilisateurs</h2>
+                  <p className="mt-1 text-slate-400">Création, modification et suppression des comptes</p>
                 </div>
 
-                <button
-                  onClick={() => {
-                    resetRoleForm();
-                    setActivePage("Rôles utilisateurs");
-                  }}
-                  className="rounded-xl border border-slate-300 px-4 py-2 font-bold hover:bg-slate-50"
-                >
-                  Gérer les rôles
-                </button>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    onClick={() => {
+                      resetRoleForm();
+                      setActivePage("Rôles utilisateurs");
+                    }}
+                    className="rounded-xl border border-white/10 px-4 py-3 font-bold text-slate-200 transition hover:bg-white/10"
+                  >
+                    ⚙ Rôles
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      resetUserForm();
+                      setActivePage("Créer utilisateur");
+                    }}
+                    className="rounded-xl bg-gradient-to-r from-red-700 to-red-600 px-5 py-3 font-black text-white shadow-lg shadow-red-950/30 transition hover:from-red-600 hover:to-red-500"
+                  >
+                    ⊕ Ajouter
+                  </button>
+                </div>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto rounded-xl border border-white/10">
                 <table className="w-full min-w-[850px] border-collapse">
-                  <thead className="bg-slate-900 text-white">
+                  <thead className="bg-white/[0.07] text-slate-100">
                     <tr>
-                      <th className="p-3 text-left">Nom</th>
-                      <th className="p-3 text-left">Email</th>
-                      <th className="p-3 text-left">Rôle</th>
-                      <th className="p-3 text-left">Statut</th>
-                      <th className="p-3 text-center">Actions</th>
+                      <th className="p-4 text-left">Nom</th>
+                      <th className="p-4 text-left">Email</th>
+                      <th className="p-4 text-left">Rôle</th>
+                      <th className="p-4 text-left">Statut</th>
+                      <th className="p-4 text-left">Actions</th>
                     </tr>
                   </thead>
 
                   <tbody>
-                    {users.map((u) => (
-                      <tr key={u.id} className="odd:bg-slate-50 hover:bg-blue-50">
-                        <td className="p-3 border-b font-bold">{u.name}</td>
-                        <td className="p-3 border-b">{u.email}</td>
-                        <td className="p-3 border-b">
-                          <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full font-bold text-xs">
-                            {getRoleDisplay(u)}
-                          </span>
-                        </td>
-                        <td className="p-3 border-b">
-                          {u.active ? (
-                            <span className="text-green-600 font-bold">Actif</span>
-                          ) : (
-                            <span className="text-red-600 font-bold">Bloqué</span>
-                          )}
-                        </td>
-                        <td className="p-3 border-b text-center">
-                          <button
-                            onClick={() => editUser(u)}
-                            className="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-2 rounded-lg mr-2"
-                          >
-                            Modifier
-                          </button>
-                          <button
-                            onClick={() => deleteUser(u.id)}
-                            className="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg"
-                          >
-                            Supprimer
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    {users.map((u) => {
+                      const roleDisplay = getRoleDisplay(u);
+                      return (
+                        <tr key={u.id} className="border-t border-white/10 transition hover:bg-white/[0.04]">
+                          <td className="p-4 font-bold text-white">
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-700 text-sm ring-2 ring-white/10">
+                                {String(u.name || "U").slice(0, 1).toUpperCase()}
+                              </div>
+                              <span>{u.name}</span>
+                            </div>
+                          </td>
+                          <td className="p-4 text-slate-200">{u.email}</td>
+                          <td className="p-4">
+                            <span className={`rounded-lg px-3 py-1.5 font-bold ring-1 ${roleBadgeClass(roleDisplay)}`}>
+                              {roleDisplay}
+                            </span>
+                          </td>
+                          <td className="p-4">
+                            {u.active ? (
+                              <span className="rounded-lg bg-emerald-500/15 px-3 py-1.5 font-bold text-emerald-300 ring-1 ring-emerald-500/20">
+                                Actif
+                              </span>
+                            ) : (
+                              <span className="rounded-lg bg-red-500/15 px-3 py-1.5 font-bold text-red-300 ring-1 ring-red-500/20">
+                                Bloqué
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-4">
+                            <div className="flex flex-wrap gap-4">
+                              <button onClick={() => editUser(u)} className="font-bold text-blue-400 hover:text-blue-300">
+                                ✎ Modifier
+                              </button>
+                              <button
+                                onClick={() => deleteUser(u)}
+                                disabled={deletingUserId === u.id || isAdminUser(u)}
+                                title={isAdminUser(u) ? "Compte ADMIN protégé" : "Supprimer utilisateur"}
+                                className="font-bold text-red-400 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                {deletingUserId === u.id ? "Suppression..." : "🗑 Supprimer"}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
 
                     {users.length === 0 && (
                       <tr>
-                        <td colSpan={5} className="text-center p-8 text-slate-500">
+                        <td colSpan={5} className="p-10 text-center text-slate-400">
                           Aucun utilisateur
                         </td>
                       </tr>
@@ -507,19 +649,17 @@ export default function AdminPage() {
                   </tbody>
                 </table>
               </div>
-            </div>
+            </section>
           )}
 
           {activePage === "Créer utilisateur" && (
-            <div className="max-w-3xl bg-white rounded-2xl shadow border p-6">
-              <h2 className="text-2xl font-black mb-1">
+            <section className="max-w-4xl rounded-2xl border border-white/10 bg-white/[0.04] p-6 shadow-2xl shadow-black/25 backdrop-blur-xl">
+              <h2 className="text-2xl font-black text-white">
                 {editingId ? "Modifier utilisateur" : "Créer utilisateur"}
               </h2>
-              <p className="text-slate-500 mb-6">
-                Mamorona login sy mot de passe ho an’ny utilisateur.
-              </p>
+              <p className="mb-6 mt-1 text-slate-400">Mamorona login sy mot de passe ho an’ny utilisateur.</p>
 
-              <form onSubmit={saveUser} className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <form onSubmit={saveUser} className="grid grid-cols-1 gap-5 md:grid-cols-2">
                 <Field label="Nom complet" value={form.name} onChange={(v: string) => setForm({ ...form, name: v })} />
                 <Field label="Email login" type="email" value={form.email} onChange={(v: string) => setForm({ ...form, email: v })} />
 
@@ -531,7 +671,7 @@ export default function AdminPage() {
                 />
 
                 <label>
-                  <span className="text-slate-600 font-semibold">Rôle</span>
+                  <span className="font-semibold text-slate-300">Rôle</span>
                   <select
                     value={form.roleId}
                     onChange={(e) => {
@@ -542,7 +682,7 @@ export default function AdminPage() {
                         role: selectedRole?.name || form.role,
                       });
                     }}
-                    className="mt-2 w-full border rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
+                    className="mt-2 w-full rounded-xl border border-white/10 bg-[#0b1626] px-4 py-3 text-white outline-none focus:ring-2 focus:ring-red-600"
                   >
                     <option value="">-- Choisir un rôle --</option>
                     {activeRoles.map((role) => (
@@ -553,55 +693,39 @@ export default function AdminPage() {
                   </select>
 
                   {activeRoles.length === 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setActivePage("Rôles utilisateurs")}
-                      className="mt-2 text-blue-600 font-bold underline"
-                    >
+                    <button type="button" onClick={() => setActivePage("Rôles utilisateurs")} className="mt-2 font-bold text-blue-400 underline">
                       Créer les rôles utilisateurs
                     </button>
                   )}
                 </label>
 
-                <label className="md:col-span-2 flex items-center gap-3 bg-slate-50 p-4 rounded-xl border">
-                  <input
-                    type="checkbox"
-                    checked={form.active}
-                    onChange={(e) => setForm({ ...form, active: e.target.checked })}
-                  />
-                  <span className="font-semibold">Compte actif</span>
+                <label className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] p-4 md:col-span-2">
+                  <input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />
+                  <span className="font-semibold text-slate-200">Compte actif</span>
                 </label>
 
-                <div className="md:col-span-2 flex gap-3">
+                <div className="flex flex-wrap gap-3 md:col-span-2">
                   <button
                     type="submit"
                     disabled={loading}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 rounded-xl font-bold disabled:opacity-60"
+                    className="rounded-xl bg-gradient-to-r from-red-700 to-red-600 px-5 py-3 font-black text-white shadow-lg shadow-red-950/30 disabled:opacity-60"
                   >
                     {loading ? "Enregistrement..." : editingId ? "Enregistrer modification" : "Créer utilisateur"}
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={resetUserForm}
-                    className="bg-slate-200 hover:bg-slate-300 px-5 py-3 rounded-xl font-bold"
-                  >
+                  <button type="button" onClick={resetUserForm} className="rounded-xl border border-white/10 px-5 py-3 font-bold text-slate-200 hover:bg-white/10">
                     Annuler
                   </button>
                 </div>
               </form>
-            </div>
+            </section>
           )}
 
           {activePage === "Rôles utilisateurs" && (
-            <div className="grid grid-cols-1 xl:grid-cols-[420px_1fr] gap-5">
-              <div className="bg-white rounded-2xl shadow border p-6">
-                <h2 className="text-2xl font-black mb-1">
-                  {editingRoleId ? "Modifier rôle" : "Créer rôle"}
-                </h2>
-                <p className="text-slate-500 mb-6">
-                  Admin afaka mamorona rôle personnalisé: Administration, Comptable, Caissier, Surveillant...
-                </p>
+            <div className="grid grid-cols-1 gap-5 xl:grid-cols-[420px_1fr]">
+              <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 shadow-2xl shadow-black/25 backdrop-blur-xl">
+                <h2 className="text-2xl font-black text-white">{editingRoleId ? "Modifier rôle" : "Créer rôle"}</h2>
+                <p className="mb-6 mt-1 text-slate-400">Admin afaka mamorona rôle personnalisé: Administration, Comptable, Caissier, Surveillant...</p>
 
                 <form onSubmit={saveRole} className="grid gap-4">
                   <Field
@@ -626,92 +750,66 @@ export default function AdminPage() {
                   />
 
                   <label>
-                    <span className="text-slate-600 font-semibold">Description</span>
+                    <span className="font-semibold text-slate-300">Description</span>
                     <textarea
                       value={roleForm.description}
                       onChange={(e) => setRoleForm({ ...roleForm, description: e.target.value })}
                       rows={4}
-                      className="mt-2 w-full border rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
+                      className="mt-2 w-full rounded-xl border border-white/10 bg-[#0b1626] px-4 py-3 text-white outline-none focus:ring-2 focus:ring-red-600"
                     />
                   </label>
 
-                  <label className="flex items-center gap-3 bg-slate-50 p-4 rounded-xl border">
-                    <input
-                      type="checkbox"
-                      checked={roleForm.active}
-                      onChange={(e) => setRoleForm({ ...roleForm, active: e.target.checked })}
-                    />
-                    <span className="font-semibold">Rôle actif</span>
+                  <label className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] p-4">
+                    <input type="checkbox" checked={roleForm.active} onChange={(e) => setRoleForm({ ...roleForm, active: e.target.checked })} />
+                    <span className="font-semibold text-slate-200">Rôle actif</span>
                   </label>
 
-                  <div className="flex gap-3">
-                    <button
-                      type="submit"
-                      disabled={roleLoading}
-                      className="bg-slate-900 hover:bg-black text-white px-5 py-3 rounded-xl font-bold disabled:opacity-60"
-                    >
+                  <div className="flex flex-wrap gap-3">
+                    <button type="submit" disabled={roleLoading} className="rounded-xl bg-gradient-to-r from-red-700 to-red-600 px-5 py-3 font-black text-white disabled:opacity-60">
                       {roleLoading ? "Enregistrement..." : editingRoleId ? "Modifier rôle" : "Créer rôle"}
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={resetRoleForm}
-                      className="bg-slate-200 hover:bg-slate-300 px-5 py-3 rounded-xl font-bold"
-                    >
+                    <button type="button" onClick={resetRoleForm} className="rounded-xl border border-white/10 px-5 py-3 font-bold text-slate-200 hover:bg-white/10">
                       Annuler
                     </button>
                   </div>
                 </form>
-              </div>
+              </section>
 
-              <div className="bg-white rounded-2xl shadow border overflow-hidden">
-                <div className="p-5 border-b">
-                  <h2 className="text-xl font-black">Liste des rôles</h2>
-                  <p className="text-slate-500">
-                    Les rôles actifs sont disponibles dans le formulaire utilisateur.
-                  </p>
+              <section className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] shadow-2xl shadow-black/25 backdrop-blur-xl">
+                <div className="border-b border-white/10 p-5">
+                  <h2 className="text-xl font-black text-white">Liste des rôles</h2>
+                  <p className="text-slate-400">Les rôles actifs sont disponibles dans le formulaire utilisateur.</p>
                 </div>
 
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[760px] border-collapse">
-                    <thead className="bg-slate-900 text-white">
+                    <thead className="bg-white/[0.07] text-slate-100">
                       <tr>
-                        <th className="p-3 text-left">Nom</th>
-                        <th className="p-3 text-left">Libellé</th>
-                        <th className="p-3 text-left">Description</th>
-                        <th className="p-3 text-left">Statut</th>
-                        <th className="p-3 text-center">Actions</th>
+                        <th className="p-4 text-left">Nom</th>
+                        <th className="p-4 text-left">Libellé</th>
+                        <th className="p-4 text-left">Description</th>
+                        <th className="p-4 text-left">Statut</th>
+                        <th className="p-4 text-center">Actions</th>
                       </tr>
                     </thead>
 
                     <tbody>
                       {roles.map((role) => (
-                        <tr key={role.id} className="odd:bg-slate-50 hover:bg-blue-50">
-                          <td className="p-3 border-b font-black">{role.name}</td>
-                          <td className="p-3 border-b">{role.label}</td>
-                          <td className="p-3 border-b">{role.description || "-"}</td>
-                          <td className="p-3 border-b">
+                        <tr key={role.id} className="border-t border-white/10 hover:bg-white/[0.04]">
+                          <td className="p-4 font-black text-white">{role.name}</td>
+                          <td className="p-4 text-slate-200">{role.label}</td>
+                          <td className="p-4 text-slate-300">{role.description || "-"}</td>
+                          <td className="p-4">
                             {role.active ? (
-                              <span className="text-green-600 font-bold">Actif</span>
+                              <span className="rounded-lg bg-emerald-500/15 px-3 py-1.5 font-bold text-emerald-300 ring-1 ring-emerald-500/20">Actif</span>
                             ) : (
-                              <span className="text-red-600 font-bold">Inactif</span>
+                              <span className="rounded-lg bg-red-500/15 px-3 py-1.5 font-bold text-red-300 ring-1 ring-red-500/20">Inactif</span>
                             )}
                           </td>
-                          <td className="p-3 border-b text-center">
-                            <button
-                              onClick={() => editRole(role)}
-                              className="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-2 rounded-lg mr-2"
-                            >
-                              Modifier
-                            </button>
-                            <button
-                              onClick={() => toggleRole(role)}
-                              className={`text-white px-3 py-2 rounded-lg ${
-                                role.active
-                                  ? "bg-red-600 hover:bg-red-700"
-                                  : "bg-green-600 hover:bg-green-700"
-                              }`}
-                            >
+                          <td className="p-4 text-center">
+                            <button onClick={() => editRole(role)} className="mr-3 font-bold text-blue-400 hover:text-blue-300">✎ Modifier</button>
+                            <button onClick={() => toggleRole(role)} className={role.active ? "font-bold text-red-400 hover:text-red-300" : "font-bold text-emerald-400 hover:text-emerald-300"}>
                               {role.active ? "Désactiver" : "Activer"}
                             </button>
                           </td>
@@ -720,7 +818,7 @@ export default function AdminPage() {
 
                       {roles.length === 0 && (
                         <tr>
-                          <td colSpan={5} className="text-center p-8 text-slate-500">
+                          <td colSpan={5} className="p-10 text-center text-slate-400">
                             Aucun rôle. Créez ADMIN, DIRECTEUR, SECRETAIRE et vos rôles personnalisés.
                           </td>
                         </tr>
@@ -728,14 +826,14 @@ export default function AdminPage() {
                     </tbody>
                   </table>
                 </div>
-              </div>
+              </section>
             </div>
           )}
 
-          {!["Dashboard admin", "Utilisateurs", "Créer utilisateur", "Rôles utilisateurs"].includes(activePage) && (
-            <div className="bg-white rounded-2xl shadow border p-8 text-center">
-              <h2 className="text-2xl font-black">{activePage}</h2>
-              <p className="text-slate-500 mt-2">Page bientôt disponible.</p>
+          {!['Dashboard admin', 'Utilisateurs', 'Créer utilisateur', 'Rôles utilisateurs'].includes(activePage) && (
+            <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-8 text-center shadow-2xl shadow-black/25 backdrop-blur-xl">
+              <h2 className="text-2xl font-black text-white">{activePage}</h2>
+              <p className="mt-2 text-slate-400">Page bientôt disponible.</p>
             </div>
           )}
         </div>
@@ -746,10 +844,10 @@ export default function AdminPage() {
 
 function Card({ title, value, icon }: any) {
   return (
-    <div className="bg-white rounded-2xl shadow border p-6">
-      <div className="text-3xl mb-3">{icon}</div>
-      <p className="text-slate-500">{title}</p>
-      <h3 className="text-3xl font-black">{value}</h3>
+    <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 shadow-2xl shadow-black/20 backdrop-blur-xl">
+      <div className="mb-3 text-3xl">{icon}</div>
+      <p className="text-slate-400">{title}</p>
+      <h3 className="mt-2 text-3xl font-black text-white">{value}</h3>
     </div>
   );
 }
@@ -757,12 +855,12 @@ function Card({ title, value, icon }: any) {
 function Field({ label, value, onChange, type = "text" }: any) {
   return (
     <label>
-      <span className="text-slate-600 font-semibold">{label}</span>
+      <span className="font-semibold text-slate-300">{label}</span>
       <input
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-2 w-full border rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
+        className="mt-2 w-full rounded-xl border border-white/10 bg-[#0b1626] px-4 py-3 text-white outline-none placeholder:text-slate-600 focus:ring-2 focus:ring-red-600"
       />
     </label>
   );

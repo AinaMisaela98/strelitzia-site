@@ -94,11 +94,65 @@ const menus = [
     title: "Accessoire",
     items: ["Liste des accessoires", "Liste des commandes"],
   },
+  {
+    title: "Paramètres",
+    items: ["Thème"],
+  },
+];
+
+
+type AppThemeKey =
+  | "navy"
+  | "black"
+  | "midnight"
+  | "obsidian"
+  | "platinum"
+  | "emerald"
+  | "violet"
+  | "royal"
+  | "graphite"
+  | "sky"
+  | "ruby"
+  | "teal";
+
+type AppTheme = {
+  key: AppThemeKey;
+  name: string;
+  label: string;
+  icon: string;
+  primary: string;
+  primary2: string;
+  dark: string;
+  dark2: string;
+  page: string;
+  card: string;
+  soft: string;
+  text: string;
+};
+
+const appThemes: AppTheme[] = [
+  { key: "navy", name: "Bleu Premium", label: "Professionnel scolaire", icon: "🔵", primary: "#2563eb", primary2: "#06b6d4", dark: "#071427", dark2: "#020817", page: "#eef3f9", card: "#ffffff", soft: "#eff6ff", text: "#0f172a" },
+  { key: "black", name: "Noir Élégant", label: "Sidebar noir luxe + vue étudiants lisible", icon: "⚫", primary: "#f59e0b", primary2: "#facc15", dark: "#030712", dark2: "#000000", page: "#f4f6fb", card: "#ffffff", soft: "#f8fafc", text: "#0f172a" },
+  { key: "midnight", name: "Midnight Business", label: "Bleu nuit ultra net, style ERP haut de gamme", icon: "🌑", primary: "#3b82f6", primary2: "#06b6d4", dark: "#020617", dark2: "#000000", page: "#f8fafc", card: "#ffffff", soft: "#e2e8f0", text: "#0f172a" },
+  { key: "obsidian", name: "Obsidian Black", label: "Noir profond + or premium, texte étudiant très lisible", icon: "🖤", primary: "#f59e0b", primary2: "#fde047", dark: "#000000", dark2: "#020617", page: "#ffffff", card: "#ffffff", soft: "#f1f5f9", text: "#0f172a" },
+  { key: "platinum", name: "Platinum 8K", label: "Clair, net, contrasté, sans effet flou", icon: "💎", primary: "#1d4ed8", primary2: "#0f172a", dark: "#0f172a", dark2: "#020617", page: "#f8fafc", card: "#ffffff", soft: "#eef2ff", text: "#0f172a" },
+  { key: "emerald", name: "Vert Institution", label: "École moderne et stable", icon: "🟢", primary: "#059669", primary2: "#22c55e", dark: "#052e2b", dark2: "#021b18", page: "#ecfdf5", card: "#ffffff", soft: "#d1fae5", text: "#064e3b" },
+  { key: "violet", name: "Violet Executive", label: "Créatif et haut de gamme", icon: "🟣", primary: "#7c3aed", primary2: "#ec4899", dark: "#1e103d", dark2: "#0f0826", page: "#f5f3ff", card: "#ffffff", soft: "#ede9fe", text: "#1e1b4b" },
+  { key: "royal", name: "Royal Gold", label: "Style école privée premium", icon: "🟡", primary: "#b45309", primary2: "#f59e0b", dark: "#111827", dark2: "#020617", page: "#fffbeb", card: "#ffffff", soft: "#fef3c7", text: "#1f2937" },
+  { key: "graphite", name: "Graphite Pro", label: "Sombre sobre, très logiciel pro", icon: "⬛", primary: "#475569", primary2: "#94a3b8", dark: "#0f172a", dark2: "#020617", page: "#f1f5f9", card: "#ffffff", soft: "#e2e8f0", text: "#0f172a" },
+  { key: "sky", name: "Sky Campus", label: "Clair, moderne et agréable", icon: "🔷", primary: "#0284c7", primary2: "#38bdf8", dark: "#082f49", dark2: "#031a2d", page: "#f0f9ff", card: "#ffffff", soft: "#e0f2fe", text: "#0c4a6e" },
+  { key: "ruby", name: "Ruby Prestige", label: "Premium rouge sombre", icon: "🔴", primary: "#be123c", primary2: "#fb7185", dark: "#3f0d18", dark2: "#1f0710", page: "#fff1f2", card: "#ffffff", soft: "#ffe4e6", text: "#3f0d18" },
+  { key: "teal", name: "Teal Modern", label: "Élégant, doux et très lisible", icon: "🟦", primary: "#0f766e", primary2: "#2dd4bf", dark: "#042f2e", dark2: "#021817", page: "#f0fdfa", card: "#ffffff", soft: "#ccfbf1", text: "#134e4a" },
 ];
 
 export default function UserDashboard({ user }: { user: AuthUser }) {
 const [sidebarOpen, setSidebarOpen] = useState(false);
+const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 const [openActionId, setOpenActionId] = useState<string | number | null>(null);
+const [menuSearch, setMenuSearch] = useState("");
+const [themeKey, setThemeKey] = useState<AppThemeKey>("navy");
+const [themePanelOpen, setThemePanelOpen] = useState(false);
+const [themeSettingsTab, setThemeSettingsTab] = useState<"themes" | "preview" | "studentView">("themes");
 
 const [students, setStudents] = useState<Student[]>([]);
 const [loadingStudents, setLoadingStudents] = useState(false);
@@ -121,6 +175,35 @@ const loadingStudentsRef = useRef(false);
 const loadingAcademicsRef = useRef(false);
 const initializedRef = useRef(false);
 const autoRefreshRef = useRef(0);
+
+const currentTheme = appThemes.find((theme) => theme.key === themeKey) || appThemes[0];
+
+const filteredMenus = useMemo(() => {
+  const q = menuSearch.trim().toLowerCase();
+  if (!q) return menus;
+
+  return menus
+    .map((menu) => {
+      const titleMatch = menu.title.toLowerCase().includes(q);
+      const items = titleMatch
+        ? menu.items
+        : menu.items.filter((item) => item.toLowerCase().includes(q));
+      return { ...menu, items };
+    })
+    .filter((menu) => menu.items.length > 0 || menu.title.toLowerCase().includes(q));
+}, [menuSearch]);
+
+useEffect(() => {
+  const savedTheme = localStorage.getItem("strelitzia-theme") as AppThemeKey | null;
+  if (savedTheme && appThemes.some((theme) => theme.key === savedTheme)) {
+    setThemeKey(savedTheme);
+  }
+}, []);
+
+function applyTheme(nextTheme: AppThemeKey) {
+  setThemeKey(nextTheme);
+  localStorage.setItem("strelitzia-theme", nextTheme);
+}
 
 async function loadSchoolYears() {
   try {
@@ -389,6 +472,11 @@ useEffect(() => {
   }
 
   function handleMenuClick(item: string) {
+    if (item === "Thème") {
+      setThemePanelOpen(true);
+      return;
+    }
+
     if (item === "Liste des inscrits") {
       window.location.href = `/user?_ts=${Date.now()}`;
       return;
@@ -435,639 +523,955 @@ if (item === "Mouvements de Trésorerie") {
   }
 
   return (
-    <main className="fixed inset-0 bg-[#eef2f7] flex overflow-hidden text-[12px] text-slate-900">
+    <main
+      className="crisp-ui fixed inset-0 flex overflow-hidden text-[11px] text-slate-900"
+      style={{
+        background: currentTheme.dark2,
+        ["--theme-primary" as any]: currentTheme.primary,
+        ["--theme-primary-2" as any]: currentTheme.primary2,
+        ["--theme-dark" as any]: currentTheme.dark,
+        ["--theme-dark-2" as any]: currentTheme.dark2,
+        ["--theme-page" as any]: currentTheme.page,
+        ["--theme-card" as any]: currentTheme.card,
+        ["--theme-soft" as any]: currentTheme.soft,
+        ["--theme-text" as any]: currentTheme.text,
+      }}
+    >
       <style>{`
-        .school-scroll::-webkit-scrollbar { width: 8px; }
-        .school-scroll::-webkit-scrollbar-thumb { background: #a3a3a3; border-radius: 10px; }
-        .school-scroll::-webkit-scrollbar-track { background: #3f3f3f; }
 
-        .table-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
-        .table-scroll::-webkit-scrollbar-thumb { background: #9ca3af; border-radius: 10px; }
-        .table-scroll::-webkit-scrollbar-track { background: #e5e7eb; }
-        .student-table-wrap { margin: 0 !important; border-radius: 0 !important; }
+        .crisp-ui, .crisp-ui * {
+          text-rendering: geometricPrecision;
+          -webkit-font-smoothing: antialiased;
+          -moz-osx-font-smoothing: grayscale;
+          font-synthesis-weight: none;
+          letter-spacing: -0.005em;
+        }
+        .crisp-ui input, .crisp-ui select, .crisp-ui button, .crisp-ui table {
+          text-rendering: optimizeLegibility;
+        }
+        .no-blur-shadow { box-shadow: 0 10px 24px rgba(15, 23, 42, 0.10); }
+        .erp-toolbar { position: sticky; top: 0; z-index: 20; background: #fff; }
+        .theme-gradient { background: linear-gradient(135deg, var(--theme-primary), var(--theme-primary-2)); }
+        .theme-sidebar { background: linear-gradient(180deg, var(--theme-dark), color-mix(in srgb, var(--theme-dark) 82%, var(--theme-primary) 18%) 52%, var(--theme-dark-2)); }
+        .theme-page { background: var(--theme-page); color: var(--theme-text); }
+        .theme-button { background: linear-gradient(135deg, var(--theme-primary), var(--theme-primary-2)); }
+        .theme-dark-btn { background: var(--theme-dark); }
+
+        .school-scroll::-webkit-scrollbar { width: 7px; }
+        .school-scroll::-webkit-scrollbar-thumb { background: rgba(148,163,184,.45); border-radius: 999px; }
+        .school-scroll::-webkit-scrollbar-track { background: transparent; }
+
+        .table-scroll::-webkit-scrollbar { width: 9px; height: 9px; }
+        .table-scroll::-webkit-scrollbar-thumb { background: #64748b; border-radius: 999px; border: 2px solid #e2e8f0; }
+        .table-scroll::-webkit-scrollbar-track { background: #e2e8f0; border-radius: 999px; }
+
+
+
+        .student-card, .controls-card, .search-card, .topbar { color: #0f172a; }
+        .top-actions { flex-wrap: nowrap !important; overflow-x: auto; overflow-y: hidden; max-width: 100%; padding-bottom: 2px; scrollbar-width: thin; }
+        .top-actions::-webkit-scrollbar { height: 5px; }
+        .top-actions::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 999px; }
+        .top-actions button { height: 28px; min-width: max-content; border-radius: 10px; padding-left: 10px; padding-right: 10px; font-size: 9.5px; box-shadow: 0 6px 14px rgba(15,23,42,.10); white-space: nowrap; }
+        .mobile-filter-grid select, .mobile-filter-grid div, .search-card input, .search-card button { height: 30px; border-radius: 10px; font-size: 10px; }
+        .student-toolbar-scroll { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+        .student-toolbar-scroll::-webkit-scrollbar { height: 5px; }
+        .student-toolbar-scroll::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 999px; }
+        .student-toolbar-inner { min-width: 980px; }
+        @media (max-width: 640px) {
+          .student-shell { padding: 8px; }
+          .student-card { border-radius: 18px; }
+          .top-actions { display: flex; width: 100%; gap: 6px; }
+          .top-actions button { height: 28px; padding-left: 8px; padding-right: 8px; font-size: 9px; white-space: nowrap; }
+          .mobile-filter-grid { grid-template-columns: repeat(4, minmax(150px, 1fr)) !important; gap: 6px; }
+          .controls-card, .search-card { padding: 6px; }
+          .search-card .flex.flex-1 { display: flex; min-width: 560px; gap: 6px; }
+          .search-card .relative { max-width: 260px; }
+        }
+
+        .premium-select {
+          background-image:
+            linear-gradient(45deg, transparent 50%, #94a3b8 50%),
+            linear-gradient(135deg, #94a3b8 50%, transparent 50%);
+          background-position:
+            calc(100% - 16px) 50%,
+            calc(100% - 11px) 50%;
+          background-size: 5px 5px, 5px 5px;
+          background-repeat: no-repeat;
+          appearance: none;
+        }
+
         .sticky-action-col {
           position: sticky;
           right: 0;
           z-index: 25;
-          box-shadow: -2px 0 6px rgba(15, 23, 42, 0.12);
+          box-shadow: -8px 0 18px rgba(15, 23, 42, 0.08);
         }
         thead .sticky-action-col { z-index: 45; }
+
+        @media (max-width: 1024px) {
+          .student-table { min-width: 1020px !important; }
+        }
+
         @media (max-width: 768px) {
-          header.student-header { padding: 8px 6px !important; }
-          .student-table-wrap { width: 100%; }
-          .student-table { min-width: 1120px !important; font-size: 11.8px !important; }
-          .student-table th, .student-table td { padding-top: 5px !important; padding-bottom: 5px !important; }
-          .mobile-action-btn {
-            min-width: 38px;
-            height: 28px;
-            font-size: 13px !important;
-            font-weight: 900;
-          }
+          .student-shell { padding: 8px !important; }
+          .student-card { border-radius: 16px !important; }
+          .student-table { min-width: 760px !important; font-size: 10px !important; }
+          .student-table th,
+          .student-table td { padding: 5px 6px !important; }
+          .mobile-hide { display: none !important; }
+          .mobile-action-btn { min-width: 32px; height: 28px; }
+          .mobile-filter-grid { grid-template-columns: repeat(4, minmax(150px, 1fr)) !important; }
         }
 
         @media print {
-          aside, .top-actions, .search-zone, footer { display: none !important; }
-          main { position: static !important; }
-          section { width: 100% !important; }
+          aside, .topbar, .controls-card, .search-card, footer, .mobile-overlay { display: none !important; }
+          main { position: static !important; display: block !important; background: white !important; }
+          section { height: auto !important; overflow: visible !important; }
+          .table-scroll { overflow: visible !important; }
+          .student-table { min-width: 100% !important; font-size: 10px !important; }
         }
       `}</style>
 
       <aside
-        className={`fixed lg:relative z-50 h-full w-[215px] shrink-0 bg-[#4a4a4a] text-white flex flex-col border-r border-slate-600 transition-transform duration-300 ${
+        className={`fixed inset-y-0 left-0 z-50 flex h-full w-[255px] shrink-0 flex-col border-r border-white/10 theme-sidebar text-white shadow-2xl transition-all duration-300 lg:relative ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
-        }`}
+        } ${sidebarCollapsed ? "lg:w-[84px]" : "lg:w-[255px]"}`}
       >
-        <div className="h-[68px] shrink-0 bg-white flex items-center justify-between px-2 border-b">
-          <div className="leading-none">
-            <div className="text-[19px] font-black text-red-600">STRELITZIA</div>
-            <div className="text-[13px] font-black text-green-600">SCHOOL</div>
+        <div className={`flex h-[68px] shrink-0 items-center justify-between border-b border-white/10 px-4 ${sidebarCollapsed ? "lg:justify-center lg:px-3" : ""}`}>
+          <div className="flex items-center gap-3">
+            <div className="grid h-11 w-11 place-items-center rounded-2xl border border-cyan-400/30 bg-cyan-400/10 text-[23px] shadow-lg shadow-cyan-950/40">
+              🎓
+            </div>
+            <div className={`leading-none ${sidebarCollapsed ? "lg:hidden" : ""}`}>
+              <div className="text-[18px] font-black tracking-wide text-white">STRELITZIA</div>
+              <div className="mt-1 text-[13px] font-black text-cyan-400">SCHOOL</div>
+            </div>
           </div>
 
           <button
             onClick={() => setSidebarOpen(false)}
-            className="lg:hidden text-slate-700 text-xl"
+            className="grid h-9 w-9 place-items-center rounded-xl border border-white/10 bg-white/5 text-lg hover:bg-white/10 lg:hidden"
+            aria-label="Fermer le menu"
           >
-            ☰
+            ✕
           </button>
         </div>
 
-        <div className="shrink-0 bg-[#303030] px-3 py-3 flex gap-2 items-center">
-          <div className="w-11 h-11 rounded-full bg-orange-300 flex items-center justify-center text-xl">
-            👤
-          </div>
+        <div className={`mx-4 mt-4 shrink-0 rounded-2xl border border-white/10 bg-white/[0.06] p-3 shadow-inner ${sidebarCollapsed ? "lg:mx-3" : ""}`}>
+          <div className="flex items-center gap-3">
+            <div className="relative grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-amber-300 to-orange-500 text-xl shadow-lg">
+              👤
+              <span className="absolute -bottom-1 -right-1 h-3.5 w-3.5 rounded-full border-2 border-[#071d35] bg-emerald-400" />
+            </div>
 
-          <div className="min-w-0">
-            <p className="font-bold truncate">{user.name}</p>
-            <p className="text-[10px]">{user.role}</p>
-            <p className="text-[10px] text-slate-300 truncate">{user.email}</p>
+            <div className={`min-w-0 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
+              <p className="truncate text-[12px] font-black">{user.name}</p>
+              <p className="text-[10px] font-bold uppercase tracking-wide text-cyan-300">{user.role}</p>
+              <p className="truncate text-[10px] text-slate-300">{user.email}</p>
+            </div>
           </div>
         </div>
 
-        <div className="shrink-0 bg-[#707070] px-2 py-2 flex items-center gap-1">
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-transparent outline-none text-white placeholder:text-slate-300"
-            placeholder="Rechercher..."
-          />
-          <span>🔍</span>
+        <div className={`mx-4 mt-4 shrink-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
+          <div className="flex items-center gap-2">
+            <span className="text-slate-400">🔎</span>
+            <input
+              value={menuSearch}
+              onChange={(e) => setMenuSearch(e.target.value)}
+              className="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-slate-500"
+              placeholder="Rechercher menu..."
+            />
+          </div>
         </div>
 
-        <nav className="flex-1 min-h-0 overflow-y-auto school-scroll pb-3">
-          {menus.map((menu) => (
-            <div key={menu.title}>
-              <div className="bg-[#2f3540] px-2 py-2 font-semibold flex justify-between">
-                <span>▣ {menu.title}</span>
-                <span>⌃</span>
+        <nav className={`school-scroll mt-4 flex-1 overflow-y-auto px-2 pb-3 ${sidebarCollapsed ? "lg:px-3" : ""}`}>
+          {filteredMenus.map((menu) => (
+            <div key={menu.title} className="mb-2">
+              <div className={`mb-1 flex items-center justify-between rounded-xl px-3 py-2 text-[11px] font-black uppercase tracking-wide text-slate-300 ${sidebarCollapsed ? "lg:justify-center lg:px-1" : ""}`}>
+                <span className="flex items-center gap-2">
+                  <span className="text-cyan-400">{menu.title === "Étudiants" ? "🎓" : menu.title === "Liste Trésorerie" ? "💳" : menu.title === "Paramètres" ? "⚙" : "▣"}</span>
+                  <span className={`${sidebarCollapsed ? "lg:hidden" : ""}`}>{menu.title}</span>
+                </span>
+                <span className={`text-slate-500 ${sidebarCollapsed ? "lg:hidden" : ""}`}>⌃</span>
               </div>
 
               {menu.items.map((item) => (
                 <button
                   key={item}
-                  onClick={() => handleMenuClick(item)}
-                  className={`w-full text-left pl-8 pr-2 py-[7px] hover:bg-[#b7b7b7] transition ${
-                    item === "Liste des inscrits" ? "bg-[#b7b7b7]" : ""
+                  onClick={() => {
+                    handleMenuClick(item);
+                    setSidebarOpen(false);
+                  }}
+                  className={`group mb-1 flex w-full items-center gap-2 rounded-xl border-l-4 border-transparent px-3 py-2 text-left text-[12px] font-semibold transition-all duration-200 hover:translate-x-1 ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""} ${
+                    (item === "Liste des inscrits" || item === "Thème")
+                      ? "theme-button border-l-cyan-300 text-white shadow-md shadow-blue-950/30"
+                      : "text-slate-200 hover:bg-white/10 hover:text-white"
                   }`}
                 >
-                  - {item}
+                  <span className={`${item === "Liste des inscrits" ? "text-white" : "text-cyan-400"}`}>›</span>
+                  <span className={`truncate ${sidebarCollapsed ? "lg:hidden" : ""}`}>{item}</span>
                 </button>
               ))}
             </div>
           ))}
+
+          {filteredMenus.length === 0 && (
+            <div className="mx-2 rounded-2xl border border-white/10 bg-white/[0.06] p-4 text-center text-[12px] font-bold text-slate-300">
+              Aucun menu trouvé
+            </div>
+          )}
         </nav>
 
-        <div className="shrink-0 p-2">
+        <div className={`shrink-0 border-t border-white/10 p-4 ${sidebarCollapsed ? "lg:px-3" : ""}`}>
           <button
             onClick={logout}
-            className="w-full bg-red-600 hover:bg-red-700 py-2 rounded-sm font-bold"
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-[12px] font-black text-white transition hover:bg-red-600 hover:shadow-lg hover:shadow-red-950/30"
           >
-            Déconnexion
+            <span>⎋</span><span className={`${sidebarCollapsed ? "lg:hidden" : ""}`}>Déconnexion</span>
           </button>
         </div>
       </aside>
 
-     {sidebarOpen && (
-  <div
-    onClick={() => setSidebarOpen(false)}
-    className="fixed inset-0 bg-black/40 z-40 lg:hidden"
-  />
-)}
+      {sidebarOpen && (
+        <div
+          onClick={() => setSidebarOpen(false)}
+          className="mobile-overlay fixed inset-0 z-40 bg-slate-950/70  lg:hidden"
+        />
+      )}
 
-
-<section className="flex-1 min-w-0 h-full flex flex-col overflow-hidden">
-  <header className="student-header shrink-0 bg-[#f8fafc] border-b border-slate-200 px-2 md:px-5 py-2 md:py-4">
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 md:p-4">
-      <div className="flex items-center justify-between gap-3 mb-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="lg:hidden bg-[#2f3540] text-white px-3 py-2 rounded-xl"
-          >
-            ☰
-          </button>
-
-          <div className="min-w-0">
-            <h1 className="text-[15px] md:text-[18px] font-black text-slate-800 truncate">
-              Liste des étudiants
-            </h1>
-            <p className="text-[11px] md:text-[12px] text-slate-500 font-semibold">
-              {filtered.length} étudiant{filtered.length > 1 ? "s" : ""} inscrit
-              {filtered.length > 1 ? "s" : ""}
-            </p>
-          </div>
-        </div>
-
-        <div className="shrink-0 bg-blue-600 text-white rounded-xl px-3 py-2 text-[12px] font-black shadow-sm">
-          Total : {filtered.length}
-        </div>
-      </div>
-
-      <div className="w-full overflow-x-auto pb-1">
-        <div className="flex flex-nowrap items-center gap-2 min-w-max pr-2">
-          <button
-            onClick={() => {
-              loadSchoolYears();
-              loadStudents(selectedYear);
-              loadAcademics(selectedYear);
-            }}
-            className="h-[40px] px-4 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white text-[12px] font-bold whitespace-nowrap transition shadow-sm"
-          >
-            ⟳ Actualiser
-          </button>
-
-          <select
-            value={selectedYear}
-            onChange={(e) => {
-              setSelectedYear(e.target.value);
-              setClasse("TOUT");
-              setSerie("TOUT");
-            }}
-            className="h-[40px] min-w-[190px] rounded-xl bg-[#1f2937] text-white px-3 text-[12px] font-bold outline-none border border-slate-700"
-          >
-            {schoolYears.length === 0 && (
-              <option value="">Année scolaire</option>
-            )}
-
-            {schoolYears.map((year) => (
-              <option key={year.id} value={year.name}>
-                Année scolaire : {year.name}
-                {year.active ? " (active)" : ""}
-              </option>
-            ))}
-          </select>
-
-          <div className="h-[40px] min-w-[180px] rounded-xl bg-slate-100 border border-slate-200 text-slate-800 px-3 flex items-center text-[12px] font-bold whitespace-nowrap">
-            Sites : Strelitzia School
+      <section className="theme-page flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="topbar flex h-[54px] shrink-0 items-center justify-between border-b border-slate-200/80 bg-white px-3 shadow-sm md:px-5">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => {
+                if (typeof window !== "undefined" && window.innerWidth >= 1024) {
+                  setSidebarCollapsed((v) => !v);
+                } else {
+                  setSidebarOpen(true);
+                }
+              }}
+              className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-[20px] font-black text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-50"
+              aria-label="Ouvrir ou réduire le menu"
+              title="Ouvrir / réduire le menu"
+            >
+              {sidebarCollapsed ? "☰" : "☰"}
+            </button>
+            <div className="hidden md:block">
+              <p className="text-[11px] font-bold uppercase tracking-[.25em] text-slate-400">Administration</p>
+              <p className="text-[13px] font-black text-slate-800">Gestion des étudiants</p>
+            </div>
           </div>
 
-          <select
-            value={classe}
-            onChange={(e) => {
-              setClasse(e.target.value);
-              setSerie("TOUT");
-            }}
-            className="h-[40px] min-w-[160px] rounded-xl bg-[#1f2937] text-white px-3 text-[12px] font-bold outline-none border border-slate-700"
-          >
-            <option value="TOUT">Classe : TOUT</option>
+          <div className="flex items-center gap-2">
+            <div className="hidden rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-600 shadow-sm sm:block">
+              Connecté : <b className="text-slate-900">{user.name}</b>
+            </div>
+            <div className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-br from-amber-200 to-orange-400 text-sm shadow-sm">👤</div>
+          </div>
+        </header>
 
-            {allClasses.map((c) => (
-              <option key={c.id} value={c.name}>
-                Classe : {c.name}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={serie}
-            onChange={(e) => setSerie(e.target.value)}
-            className="h-[40px] min-w-[150px] rounded-xl bg-[#1f2937] text-white px-3 text-[12px] font-bold outline-none border border-slate-700"
-          >
-            <option value="TOUT">Série : TOUT</option>
-
-            {availableSeries.map((s) => (
-              <option key={s.id} value={s.name}>
-                Série : {s.name}
-              </option>
-            ))}
-          </select>
-
-          <button
-            onClick={() => {
-              const rows = filtered.map((s) => ({
-                Matricule: s.matricule || "",
-                Nom: s.nom || "",
-                Prenoms: s.prenoms || "",
-                Classe: s.classe || "",
-                Serie: s.section || "",
-                Telephone: s.contact || "",
-              }));
-
-              import("xlsx").then((XLSX) => {
-                const worksheet = XLSX.utils.json_to_sheet(rows);
-                const workbook = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(workbook, worksheet, "Etudiants");
-                XLSX.writeFile(
-                  workbook,
-                  `etudiants_${selectedYear || "2025-2026"}.xlsx`
-                );
-              });
-            }}
-            className="h-[40px] px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[12px] font-bold whitespace-nowrap transition shadow-sm"
-          >
-            Export Excel
-          </button>
-
-          <button
-  onClick={() => {
-    const byClass = filtered.reduce((acc: any, s: any) => {
-      const key = s.classe || "Sans classe";
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(s);
-      return acc;
-    }, {});
-
-    const html = `
-      <html>
-        <head>
-          <title>Liste des étudiants</title>
-          <style>
-            @page { size: A4; margin: 12mm; }
-            body { font-family: Arial, sans-serif; color: #111827; }
-            .page { page-break-after: always; }
-            .header { text-align: center; border-bottom: 2px solid #111827; padding-bottom: 10px; margin-bottom: 14px; }
-            .school { font-size: 22px; font-weight: 900; color: #dc2626; }
-            .sub { font-size: 13px; color: #16a34a; font-weight: 700; }
-            .meta { margin-top: 8px; font-size: 12px; color: #374151; }
-            h2 { font-size: 18px; margin: 12px 0; }
-            table { width: 100%; border-collapse: collapse; font-size: 11px; }
-            th { background: #111827; color: white; padding: 7px; border: 1px solid #111827; text-align: left; }
-            td { padding: 6px; border: 1px solid #cbd5e1; }
-            tr:nth-child(even) { background: #f8fafc; }
-            .footer { margin-top: 12px; font-size: 11px; color: #64748b; text-align: right; }
-          </style>
-        </head>
-        <body>
-          ${Object.entries(byClass)
-            .map(([classeName, students]: any) => `
-              <div class="page">
-                <div class="header">
-                  <div class="school">STRELITZIA SCHOOL</div>
-                  <div class="sub">Liste des étudiants par classe</div>
-                  <div class="meta">
-                    Année scolaire : ${selectedYear || "2025-2026"} |
-                    Classe : ${classeName} |
-                    Effectif : ${students.length}
-                  </div>
+        <div className="student-shell flex-1 overflow-auto p-2 md:p-3">
+          <div className="student-card overflow-hidden rounded-[18px] border border-slate-200 bg-white shadow-xl shadow-slate-200/70">
+            <div className="border-b border-slate-200 bg-gradient-to-r from-white via-slate-50 to-slate-100 p-2.5 md:p-3">
+              <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+                <div>
+                  <div className="mb-2 h-1 w-12 rounded-full theme-gradient" />
+                  <h1 className="text-[18px] font-black tracking-tight text-slate-950 md:text-[22px]">
+                    Liste des étudiants
+                  </h1>
+                  <p className="mt-0.5 text-[12px] font-bold text-blue-600">
+                    {filtered.length} étudiant{filtered.length > 1 ? "s" : ""} inscrit{filtered.length > 1 ? "s" : ""}
+                    {loadingStudents ? " • Chargement..." : ""}
+                  </p>
                 </div>
 
-                <div style="
-  margin: 14px 0 18px 0;
-  padding: 12px;
-  border-radius: 12px;
-  background: linear-gradient(to right, #0f172a, #1e293b);
-  color: white;
-">
-  <div style="
-    font-size: 20px;
-    font-weight: 900;
-    margin-bottom: 6px;
-  ">
-    Classe : ${classeName}
-  </div>
+                <div className="top-actions flex flex-wrap gap-2">
+                  <button
+                    onClick={() => {
+                      loadSchoolYears();
+                      loadStudents(selectedYear);
+                      loadAcademics(selectedYear);
+                    }}
+                    className="h-8 rounded-lg theme-dark-btn px-3 text-[12px] font-black text-white shadow-lg shadow-slate-300 transition hover:-translate-y-0.5 hover:brightness-110"
+                  >
+                    ⟳ Actualiser
+                  </button>
 
-  <div style="
-    display:flex;
-    gap:12px;
-    flex-wrap:wrap;
-    font-size:12px;
-  ">
-    <div style="
-      background:#2563eb;
-      padding:6px 12px;
-      border-radius:999px;
-      font-weight:700;
-    ">
-      Série : ${
-        serie === "TOUT"
-          ? "Toutes les séries"
-          : serie
-      }
-    </div>
+                  <button
+                    onClick={() => {
+                      const rows = filtered.map((s) => ({
+                        Matricule: s.matricule || "",
+                        Nom: s.nom || "",
+                        Prenoms: s.prenoms || "",
+                        Classe: s.classe || "",
+                        Serie: s.section || "",
+                        Telephone: s.contact || "",
+                      }));
 
-    <div style="
-      background:#16a34a;
-      padding:6px 12px;
-      border-radius:999px;
-      font-weight:700;
-    ">
-      Effectif : ${students.length} étudiant(s)
-    </div>
+                      import("xlsx").then((XLSX) => {
+                        const worksheet = XLSX.utils.json_to_sheet(rows);
+                        const workbook = XLSX.utils.book_new();
+                        XLSX.utils.book_append_sheet(workbook, worksheet, "Etudiants");
+                        XLSX.writeFile(
+                          workbook,
+                          `etudiants_${selectedYear || "2025-2026"}.xlsx`
+                        );
+                      });
+                    }}
+                    className="h-8 rounded-lg bg-emerald-600 px-3 text-[12px] font-black text-white shadow-lg shadow-emerald-200 transition hover:-translate-y-0.5 hover:bg-emerald-700"
+                  >
+                    ▣ Export Excel
+                  </button>
 
-    <div style="
-      background:#dc2626;
-      padding:6px 12px;
-      border-radius:999px;
-      font-weight:700;
-    ">
-      Année : ${selectedYear || "2025-2026"}
-    </div>
-  </div>
-</div>
+                  <button
+                    onClick={() => {
+                      const byClass = filtered.reduce((acc: any, s: any) => {
+                        const key = s.classe || "Sans classe";
+                        if (!acc[key]) acc[key] = [];
+                        acc[key].push(s);
+                        return acc;
+                      }, {});
 
-                <table>
-                  <thead>
-                    <tr>
-                      <th>N°</th>
-                      <th>Matricule</th>
-                      <th>Nom</th>
-                      <th>Prénoms</th>
-                      <th>Date de naissance</th>
-                      <th>Sexe</th>
-                      <th>Série</th>
-                      <th>Téléphone</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${students.map((s: any, i: number) => `
-                      <tr>
-                        <td>${i + 1}</td>
-                        <td>${s.matricule || ""}</td>
-                        <td>${s.nom || ""}</td>
-                        <td>${s.prenoms || ""}</td>
-                        <td>
-                          ${
-                            s.dateNaissance
-                              ? new Date(s.dateNaissance).toLocaleDateString("fr-FR")
-                              : ""
-                          }
-                        </td>
-                        <td>${s.sexe || ""}</td>
-                        <td>${s.section || ""}</td>
-                        <td>${s.contact || ""}</td>
-                      </tr>
-                    `).join("")}
-                  </tbody>
-                </table>
+                      const html = `
+                        <html>
+                          <head>
+                            <title>Liste des étudiants</title>
+                            <style>
+                              @page { size: A4; margin: 12mm; }
+                              body { font-family: Arial, sans-serif; color: #111827; }
+                              .page { page-break-after: always; }
+                              .header { text-align: center; border-bottom: 2px solid #111827; padding-bottom: 10px; margin-bottom: 14px; }
+                              .school { font-size: 22px; font-weight: 900; color: #dc2626; }
+                              .sub { font-size: 13px; color: #16a34a; font-weight: 700; }
+                              .meta { margin-top: 8px; font-size: 12px; color: #374151; }
+                              table { width: 100%; border-collapse: collapse; font-size: 11px; }
+                              th { background: #111827; color: white; padding: 7px; border: 1px solid #111827; text-align: left; }
+                              td { padding: 6px; border: 1px solid #cbd5e1; }
+                              tr:nth-child(even) { background: #f8fafc; }
+                              .footer { margin-top: 12px; font-size: 11px; color: #64748b; text-align: right; }
+                            </style>
+                          </head>
+                          <body>
+                            ${Object.entries(byClass)
+                              .map(([classeName, students]: any) => `
+                                <div class="page">
+                                  <div class="header">
+                                    <div class="school">STRELITZIA SCHOOL</div>
+                                    <div class="sub">Liste des étudiants par classe</div>
+                                    <div class="meta">
+                                      Année scolaire : ${selectedYear || "2025-2026"} |
+                                      Classe : ${classeName} |
+                                      Effectif : ${students.length}
+                                    </div>
+                                  </div>
+                                  <table>
+                                    <thead>
+                                      <tr>
+                                        <th>N°</th>
+                                        <th>Matricule</th>
+                                        <th>Nom</th>
+                                        <th>Prénoms</th>
+                                        <th>Date de naissance</th>
+                                        <th>Sexe</th>
+                                        <th>Série</th>
+                                        <th>Téléphone</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      ${students.map((s: any, i: number) => `
+                                        <tr>
+                                          <td>${i + 1}</td>
+                                          <td>${s.matricule || ""}</td>
+                                          <td>${s.nom || ""}</td>
+                                          <td>${s.prenoms || ""}</td>
+                                          <td>${s.dateNaissance ? new Date(s.dateNaissance).toLocaleDateString("fr-FR") : ""}</td>
+                                          <td>${s.sexe || ""}</td>
+                                          <td>${s.section || ""}</td>
+                                          <td>${s.contact || ""}</td>
+                                        </tr>
+                                      `).join("")}
+                                    </tbody>
+                                  </table>
+                                  <div class="footer">Imprimé le ${new Date().toLocaleDateString("fr-FR")}</div>
+                                </div>
+                              `)
+                              .join("")}
+                          </body>
+                        </html>
+                      `;
 
-                <div class="footer">
-                  Imprimé le ${new Date().toLocaleDateString("fr-FR")}
+                      const win = window.open("", "_blank", "width=900,height=700");
+                      if (!win) return alert("Popup bloqué");
+
+                      win.document.write(html);
+                      win.document.close();
+                      win.focus();
+
+                      setTimeout(() => {
+                        win.print();
+                      }, 500);
+                    }}
+                    className="h-8 rounded-lg theme-button px-3 text-[12px] font-black text-white shadow-lg shadow-blue-200 transition hover:-translate-y-0.5 hover:brightness-110"
+                  >
+                    ⎙ Imprimer PDF
+                  </button>
                 </div>
               </div>
-            `)
-            .join("")}
-        </body>
-      </html>
-    `;
 
-    const win = window.open("", "_blank", "width=900,height=700");
-    if (!win) return alert("Popup bloqué");
+              {successMessage && (
+                <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-[12px] font-bold text-emerald-700">
+                  {successMessage}
+                </div>
+              )}
+            </div>
 
-    win.document.write(html);
-    win.document.close();
-    win.focus();
+            <div className="controls-card erp-toolbar border-b border-slate-200 bg-white p-1.5 md:p-2">
+              <div className="student-toolbar-scroll"><div className="student-toolbar-inner mobile-filter-grid grid grid-cols-4 gap-2">
+                <select
+                  value={selectedYear}
+                  onChange={(e) => {
+                    setSelectedYear(e.target.value);
+                    setClasse("TOUT");
+                    setSerie("TOUT");
+                  }}
+                  className="premium-select h-8 rounded-lg border border-slate-200 theme-dark-btn px-3 pr-8 text-[12px] font-black text-white outline-none ring-blue-200 transition focus:ring-4"
+                >
+                  {schoolYears.length === 0 && <option value="">Année scolaire</option>}
 
-    setTimeout(() => {
-      win.print();
-    }, 500);
-  }}
-  className="h-[40px] px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-[12px] font-bold whitespace-nowrap transition shadow-sm"
->
-  Imprimer PDF
-</button>
-        </div>
-      </div>
-    </div>
-  </header>
+                  {schoolYears.map((year) => (
+                    <option key={year.id} value={year.name}>
+                      Année scolaire : {year.name}
+                      {year.active ? " (active)" : ""}
+                    </option>
+                  ))}
+                </select>
 
-        <div className="search-zone shrink-0 bg-white px-2 py-3 border-b flex flex-wrap gap-2">
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="border border-slate-300 px-3 py-2 w-[210px] outline-none"
-            placeholder="rechercher..."
-          />
+                <div className="flex h-8 items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-[12px] font-black text-slate-800">
+                  Sites : Strelitzia School
+                </div>
 
-          <button
-            onClick={() => loadStudents(selectedYear)}
-            className="bg-[#1f2937] hover:bg-black text-white px-3 py-2 font-semibold"
-          >
-            🔍 Rechercher
-          </button>
+                <select
+                  value={classe}
+                  onChange={(e) => {
+                    setClasse(e.target.value);
+                    setSerie("TOUT");
+                  }}
+                  className="premium-select h-8 rounded-lg border border-slate-200 theme-dark-btn px-3 pr-8 text-[12px] font-black text-white outline-none ring-blue-200 transition focus:ring-4"
+                >
+                  <option value="TOUT">Classe : TOUT</option>
 
-          <button
-            onClick={resetFilters}
-            className="bg-red-500 hover:bg-red-600 text-white px-3 py-2 font-semibold"
-          >
-            ✖ Initialiser
-          </button>
+                  {allClasses.map((c) => (
+                    <option key={c.id} value={c.name}>
+                      Classe : {c.name}
+                    </option>
+                  ))}
+                </select>
 
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="bg-cyan-600 hover:bg-cyan-700 text-white px-3 py-2 lg:hidden"
-          >
-            ☰ Menu
-          </button>
-        </div>
+                <select
+                  value={serie}
+                  onChange={(e) => setSerie(e.target.value)}
+                  className="premium-select h-8 rounded-lg border border-slate-200 theme-dark-btn px-3 pr-8 text-[12px] font-black text-white outline-none ring-blue-200 transition focus:ring-4"
+                >
+                  <option value="TOUT">Série : TOUT</option>
 
-        <div className="student-table-wrap flex-1 min-h-0 overflow-auto table-scroll bg-white border-t border-slate-300">
-         <table className="student-table w-full min-w-[1120px] border-separate border-spacing-0 text-[12px]">
-            <thead className="sticky top-0 z-30 bg-[#262b34] text-white shadow-sm">
-              <tr>
-                {[
-                  "M°",
-                  "Site",
-                  "AS",
-                  "Date inscription",
-                  "Nom",
-                  "Prénom(s)",
-                  "Sexe",
-                  "Classe",
-                  "Section",
-                  "Contact",
-                  "Date Naiss.",
-                  "Lieu Naiss.",
-                  "Action",
-                ].map((h) => (
-                  <th
-                    key={h}
-                    className={`border border-slate-300 px-3 py-2 text-left whitespace-nowrap font-bold bg-[#262b34] ${
-                      h === "Action" ? "sticky-action-col text-center w-[64px] min-w-[64px]" : ""
-                    }`}
+                  {availableSeries.map((s) => (
+                    <option key={s.id} value={s.name}>
+                      Série : {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div></div>
+            </div>
+
+            <div className="search-card border-b border-slate-200 bg-white p-1.5 md:p-2">
+              <div className="student-toolbar-scroll"><div className="student-toolbar-inner flex gap-2 items-center justify-between">
+                <div className="flex flex-1 gap-2">
+                  <div className="relative w-full max-w-[260px]">
+                    <input
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      className="h-8 w-full rounded-lg border border-slate-200 bg-white px-4 pr-10 text-[12px] font-semibold outline-none shadow-sm ring-blue-200 transition placeholder:text-slate-400 focus:ring-4"
+                      placeholder="Rechercher un étudiant..."
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">🔎</span>
+                  </div>
+
+                  <button
+                    onClick={() => loadStudents(selectedYear)}
+                    className="h-8 rounded-lg theme-dark-btn px-5 text-[12px] font-black text-white shadow-sm transition hover:brightness-110"
                   >
-                    {h === "Action" ? "Action" : `${h} ↕`}
-                  </th>
-                ))}
-              </tr>
-            </thead>
+                    🔍 Rechercher
+                  </button>
 
-            <tbody>
-  {filtered.length === 0 ? (
-    <tr>
-      <td
-        colSpan={13}
-        className="p-8 text-center text-slate-500"
-      >
-        Aucun étudiant trouvé
-      </td>
-    </tr>
-  ) : (
-    filtered.map((s) => (
-      <tr
-        key={s.id}
-        className="odd:bg-[#eaf2fb] even:bg-white hover:bg-yellow-50 leading-none"
-      >
-      {/* MATRICULE */}
-      <td className="border border-slate-300 px-[4px] py-[4px] whitespace-nowrap text-[12px] text-red-500 font-medium">
-        {s.matricule}
-      </td>
+                  <button
+                    onClick={resetFilters}
+                    className="h-8 rounded-lg bg-red-500 px-5 text-[12px] font-black text-white shadow-sm transition hover:bg-red-600"
+                  >
+                    ⟳ Initialiser
+                  </button>
+                </div>
 
-      {/* SITE */}
-      <td className="border border-slate-300 px-[4px] py-[4px] whitespace-nowrap text-[12px]">
-        {s.site}
-      </td>
+                <div className="shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-black text-slate-700 shadow-sm">
+                  Total : <span className="text-blue-700">{filtered.length}</span>
+                </div>
+              </div></div>
+            </div>
 
-      {/* ANNEE */}
-      <td className="border border-slate-300 px-[4px] py-[4px] whitespace-nowrap text-[12px]">
-        {s.anneeScolaire}
-      </td>
+            <div className="table-scroll max-h-[calc(100vh-185px)] min-h-[500px] overflow-auto bg-white">
+              <table className="student-table w-full min-w-[1060px] border-separate border-spacing-0 text-[10.5px] font-medium tracking-tight">
+                <thead className="sticky top-0 z-30 theme-dark-btn text-white shadow-lg">
+                  <tr>
+                    {[
+                      "M°",
+                      "Site",
+                      "AS",
+                      "Date inscription",
+                      "Nom",
+                      "Prénom(s)",
+                      "Sexe",
+                      "Classe",
+                      "Section",
+                      "Contact",
+                      "Date Naiss.",
+                      "Lieu Naiss.",
+                      "Action",
+                    ].map((h) => (
+                      <th
+                        key={h}
+                        className={`border-b border-r border-white/10 theme-dark-btn px-2 py-1.5 text-left text-[10px] font-black uppercase tracking-wide whitespace-nowrap ${
+                          h === "Action" ? "sticky-action-col w-[58px] min-w-[58px] text-center" : ""
+                        } ${["Site", "AS", "Date Naiss.", "Lieu Naiss."].includes(h) ? "mobile-hide" : ""}`}
+                      >
+                        {h === "Action" ? "Action" : `${h} ↕`}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
 
-      {/* DATE INSCRIPTION */}
-      <td className="border border-slate-300 px-[4px] py-[4px] whitespace-nowrap text-[12px]">
-        {formatDate(s.dateInscription)}
-      </td>
+                <tbody>
+                  {filtered.length === 0 ? (
+                    <tr>
+                      <td colSpan={13} className="p-10 text-center text-[13px] font-bold text-slate-500">
+                        Aucun étudiant trouvé
+                      </td>
+                    </tr>
+                  ) : (
+                    filtered.map((s) => (
+                      <tr
+                        key={s.id}
+                        className={`border-b transition hover:bg-blue-50 ${
+                          String(s.id) === String(highlightId)
+                            ? "bg-amber-50"
+                            : "odd:bg-white even:bg-slate-50/70"
+                        }`}
+                      >
+                        <td className="border-b border-r border-slate-200 px-2 py-1.5 font-black text-red-500 whitespace-nowrap">
+                          {s.matricule}
+                        </td>
+                        <td className="mobile-hide border-b border-r border-slate-200 px-2 py-1.5 whitespace-nowrap">
+                          {s.site}
+                        </td>
+                        <td className="mobile-hide border-b border-r border-slate-200 px-2 py-1.5 whitespace-nowrap">
+                          {s.anneeScolaire}
+                        </td>
+                        <td className="border-b border-r border-slate-200 px-2 py-1.5 whitespace-nowrap">
+                          {formatDate(s.dateInscription)}
+                        </td>
+                        <td className="border-b border-r border-slate-200 px-2 py-1.5 font-black text-slate-900 whitespace-nowrap">
+                          {s.nom}
+                        </td>
+                        <td className="border-b border-r border-slate-200 px-2 py-1.5 whitespace-nowrap">
+                          {s.prenoms}
+                        </td>
+                        <td className="border-b border-r border-slate-200 px-2 py-1.5 text-center whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 font-bold text-blue-700">
+                            {s.sexe?.toLowerCase().startsWith("m") ? "♂" : s.sexe?.toLowerCase().startsWith("f") ? "♀" : ""}
+                            {s.sexe}
+                          </span>
+                        </td>
+                        <td className="border-b border-r border-slate-200 px-2 py-1.5 font-bold whitespace-nowrap">
+                          {s.classe}
+                        </td>
+                        <td className="border-b border-r border-slate-200 px-2 py-1.5 whitespace-nowrap">
+                          {s.section}
+                        </td>
+                        <td className="border-b border-r border-slate-200 px-2 py-1.5 whitespace-nowrap">
+                          {s.contact || "-"}
+                        </td>
+                        <td className="mobile-hide border-b border-r border-slate-200 px-2 py-1.5 whitespace-nowrap">
+                          {formatDate(s.dateNaissance)}
+                        </td>
+                        <td className="mobile-hide max-w-[110px] truncate border-b border-r border-slate-200 px-2 py-1.5">
+                          {s.lieuNaissance || "-"}
+                        </td>
 
-      {/* NOM */}
-      <td className="border border-slate-300 px-[4px] py-[4px] whitespace-nowrap text-[12px] font-semibold">
-        {s.nom}
-      </td>
+                        <td className="sticky-action-col border-b border-slate-200 bg-white px-2 py-1.5 text-center">
+                          <div className="relative inline-block">
+                            <button
+                              type="button"
+                              onClick={() => setOpenActionId(openActionId === s.id ? null : s.id)}
+                              className="mobile-action-btn grid h-8 w-8 place-items-center rounded-xl border border-slate-200 bg-white text-[16px] font-black text-slate-700 shadow-sm transition hover:bg-slate-100 active:scale-95"
+                            >
+                              ⋮
+                            </button>
 
-      {/* PRENOMS */}
-      <td className="border border-slate-300 px-[4px] py-[4px] whitespace-nowrap text-[12px]">
-        {s.prenoms}
-      </td>
+                            {openActionId === s.id && (
+                              <>
+                                <div onClick={() => setOpenActionId(null)} className="fixed inset-0 z-40" />
 
-      {/* SEXE */}
-      <td className="border border-slate-300 px-[4px] py-[4px] whitespace-nowrap text-[12px] text-center">
-        {s.sexe}
-      </td>
+                                <div className="absolute right-0 top-full z-[9999] mt-2 w-[225px] overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-2xl">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenActionId(null);
+                                      window.location.href = `/user/student/${s.id}`;
+                                    }}
+                                    className="w-full px-4 py-3 text-left text-[12px] font-bold transition hover:bg-slate-50"
+                                  >
+                                    🧑 Information de l’étudiant
+                                  </button>
 
-      {/* CLASSE */}
-      <td className="border border-slate-300 px-[4px] py-[4px] whitespace-nowrap text-[12px] font-medium">
-        {s.classe}
-      </td>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenActionId(null);
+                                      window.location.href = `/user/reinscription?studentId=${s.id}`;
+                                    }}
+                                    className="w-full px-4 py-3 text-left text-[12px] font-bold transition hover:bg-slate-50"
+                                  >
+                                    ↻ Réinscription
+                                  </button>
 
-      {/* SECTION */}
-      <td className="border border-slate-300 px-[4px] py-[4px] whitespace-nowrap text-[12px]">
-        {s.section}
-      </td>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenActionId(null);
+                                      alert("Marquer étudiant bientôt");
+                                    }}
+                                    className="w-full px-4 py-3 text-left text-[12px] font-bold transition hover:bg-slate-50"
+                                  >
+                                    📑 Marquer l’étudiant
+                                  </button>
 
-      {/* CONTACT */}
-      <td className="border border-slate-300 px-[4px] py-[4px] whitespace-nowrap text-[12px]">
-        {s.contact || "-"}
-      </td>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenActionId(null);
+                                      alert("Transfert bientôt");
+                                    }}
+                                    className="w-full px-4 py-3 text-left text-[12px] font-bold transition hover:bg-slate-50"
+                                  >
+                                    🔁 Transférer à un site
+                                  </button>
 
-      {/* DATE NAISSANCE */}
-      <td className="border border-slate-300 px-[4px] py-[4px] whitespace-nowrap text-[12px]">
-        {formatDate(s.dateNaissance)}
-      </td>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenActionId(null);
+                                      deleteStudent(s.id);
+                                    }}
+                                    className="w-full px-4 py-3 text-left text-[12px] font-black text-red-600 transition hover:bg-red-50"
+                                  >
+                                    🗑 Supprimer
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
 
-      {/* LIEU */}
-      <td className="border border-slate-300 px-[4px] py-[4px] text-[12px] max-w-[90px] truncate">
-        {s.lieuNaissance || "-"}
-      </td>
+            <div className="flex flex-col gap-2 border-t border-slate-200 bg-white px-3 py-2 text-[10px] font-bold text-slate-600 md:flex-row md:items-center md:justify-between">
+              <span>
+                Affichage de 1 à {filtered.length} sur {filtered.length} étudiant{filtered.length > 1 ? "s" : ""}
+              </span>
 
-{/* ACTION */}
-<td className="sticky-action-col border border-slate-300 px-[2px] py-[1px] text-center bg-white overflow-visible">
-  <div className="relative inline-block overflow-visible">
-    <button
-      type="button"
-      onClick={() =>
-        setOpenActionId(openActionId === s.id ? null : s.id)
-      }
-      className="mobile-action-btn border border-slate-400 bg-slate-100 hover:bg-slate-200 active:scale-95 transition px-[4px] py-[1px] rounded text-[10px] shadow-sm"
-    >
-      ▾
-    </button>
-
-    {openActionId === s.id && (
-      <>
-        <div
-          onClick={() => setOpenActionId(null)}
-          className="fixed inset-0 z-40"
-        />
-
-        <div className="absolute right-0 top-full mt-1 bg-white shadow-2xl border border-slate-200 rounded-xl z-[9999] w-[220px] overflow-hidden text-left animate-in fade-in zoom-in-95 duration-100">
-          <button
-            type="button"
-            onClick={() => {
-              setOpenActionId(null);
-              window.location.href = `/user/student/${s.id}`;
-            }}
-            className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium transition"
-          >
-            🧑 Information de l’étudiant
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setOpenActionId(null);
-              window.location.href = `/user/reinscription?studentId=${s.id}`;
-            }}
-            className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium transition"
-          >
-            ↻ Réinscription
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setOpenActionId(null);
-              alert("Marquer étudiant bientôt");
-            }}
-            className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium transition"
-          >
-            📑 Marquer l’étudiant
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setOpenActionId(null);
-              alert("Transfert bientôt");
-            }}
-            className="w-full text-left px-4 py-3 hover:bg-slate-100 text-[12px] font-medium transition"
-          >
-            🔁 Transférer à un site
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setOpenActionId(null);
-              deleteStudent(s.id);
-            }}
-            className="w-full text-left px-4 py-3 hover:bg-red-50 text-red-600 text-[12px] font-semibold transition"
-          >
-            🗑 Supprimer
-          </button>
+              <div className="flex items-center gap-2">
+                <span>Lignes par page</span>
+                <select className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-[12px] font-bold outline-none">
+                  <option>10</option>
+                  <option>25</option>
+                  <option>50</option>
+                </select>
+                <button className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white hover:bg-slate-50">‹</button>
+                <button className="grid h-9 w-9 place-items-center rounded-xl theme-button font-black text-white shadow-sm">1</button>
+                <button className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white hover:bg-slate-50">›</button>
+              </div>
+            </div>
+          </div>
         </div>
-      </>
-    )}
-  </div>
-</td>
 
-    </tr>
-  )))}
-            </tbody>
-          </table>
-        </div>
 
-        <footer className="shrink-0 bg-white border-t px-3 py-2 flex justify-between text-[11px]">
-          <span>
-            Connecté : <b>{user.name}</b> — {user.role}
-          </span>
-          <span>Strelitzia School © 2026</span>
+        {themePanelOpen && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/75 p-2  md:p-4">
+            <div className="flex max-h-[94vh] w-full max-w-[1060px] flex-col overflow-hidden rounded-[30px] border border-white/15 bg-white shadow-[0_18px_44px_rgba(2,6,23,.38)]">
+              <div className="theme-sidebar relative overflow-hidden p-5 text-white md:p-6">
+                <div className="absolute -right-24 -top-24 h-56 w-56 rounded-full bg-white/10" />
+                <div className="absolute -bottom-28 left-1/3 h-56 w-56 rounded-full bg-white/10" />
+
+                <div className="relative flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[11px] font-black uppercase tracking-[.30em] text-white/60">Paramètres professionnels</p>
+                    <h2 className="mt-1 text-[24px] font-black leading-tight md:text-[32px]">Thème & apparence</h2>
+                    <p className="mt-2 max-w-[700px] text-[13px] font-semibold leading-relaxed text-white/70">
+                      Gérez le style complet de l'application : couleur principale, menu latéral, boutons, filtres et vue étudiants.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setThemePanelOpen(false)}
+                    className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl border border-white/15 bg-white/10 text-lg font-black hover:bg-white/20"
+                    aria-label="Fermer paramètres thème"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="relative mt-5 grid gap-3 md:grid-cols-4">
+                  <div className="rounded-2xl border border-white/10 bg-white/10 p-4 shadow-inner">
+                    <div className="text-[10px] font-black uppercase tracking-wide text-white/55">Thème actif</div>
+                    <div className="mt-2 flex items-center gap-3">
+                      <span className="grid h-12 w-12 place-items-center rounded-2xl bg-white/15 text-[22px]">{currentTheme.icon}</span>
+                      <div>
+                        <p className="text-[14px] font-black">{currentTheme.name}</p>
+                        <p className="text-[11px] font-bold text-white/60">{currentTheme.label}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-white/10 p-4">
+                    <div className="text-[10px] font-black uppercase tracking-wide text-white/55">Couleur noire</div>
+                    <p className="mt-2 text-[13px] font-black">Noir Élégant disponible</p>
+                    <p className="mt-1 text-[11px] font-semibold text-white/60">Style sombre, luxe et premium.</p>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-white/10 p-4">
+                    <div className="text-[10px] font-black uppercase tracking-wide text-white/55">Sidebar</div>
+                    <p className="mt-2 text-[13px] font-black">Menu responsive</p>
+                    <p className="mt-1 text-[11px] font-semibold text-white/60">Recherche menu + fermeture mobile.</p>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-white/10 p-4">
+                    <div className="text-[10px] font-black uppercase tracking-wide text-white/55">Vue étudiants</div>
+                    <p className="mt-2 text-[13px] font-black">Table claire compacte</p>
+                    <p className="mt-1 text-[11px] font-semibold text-white/60">Lisible sur PC et téléphone.</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid min-h-0 flex-1 overflow-hidden bg-slate-50 md:grid-cols-[245px_1fr]">
+                <aside className="border-b border-slate-200 bg-white p-3 md:border-b-0 md:border-r md:p-4">
+                  <div className="grid grid-cols-3 gap-2 md:grid-cols-1">
+                    {[
+                      { key: "themes", icon: "🎨", title: "Couleurs", desc: "Choix des thèmes" },
+                      { key: "preview", icon: "🧭", title: "Menu", desc: "Aperçu sidebar" },
+                      { key: "studentView", icon: "👨‍🎓", title: "Vue étudiants", desc: "Table + boutons" },
+                    ].map((tab) => {
+                      const active = themeSettingsTab === tab.key;
+                      return (
+                        <button
+                          key={tab.key}
+                          onClick={() => setThemeSettingsTab(tab.key as "themes" | "preview" | "studentView")}
+                          className={`rounded-2xl border p-3 text-left transition hover:-translate-y-0.5 hover:shadow-md ${
+                            active
+                              ? "border-slate-900 bg-slate-950 text-white shadow-lg"
+                              : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-white"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-[18px]">{tab.icon}</span>
+                            <span className="text-[12px] font-black md:text-[13px]">{tab.title}</span>
+                          </div>
+                          <p className={`mt-1 hidden text-[10px] font-bold md:block ${active ? "text-white/55" : "text-slate-400"}`}>{tab.desc}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="mt-4 hidden rounded-2xl border border-slate-200 bg-slate-50 p-4 md:block">
+                    <p className="text-[11px] font-black uppercase tracking-wide text-slate-400">Sauvegarde</p>
+                    <p className="mt-2 text-[12px] font-bold leading-relaxed text-slate-600">
+                      Le thème choisi est enregistré automatiquement sur cet appareil.
+                    </p>
+                  </div>
+                </aside>
+
+                <main className="min-h-0 overflow-y-auto p-4 md:p-5">
+                  {themeSettingsTab === "themes" && (
+                    <div>
+                      <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+                        <div>
+                          <h3 className="text-[20px] font-black text-slate-950">Bibliothèque de thèmes</h3>
+                          <p className="mt-1 text-[12px] font-bold text-slate-500">Sélectionnez une couleur professionnelle pour toute l'application.</p>
+                        </div>
+                        <span className="w-fit rounded-full bg-slate-900 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-white">
+                          {appThemes.length} thèmes disponibles
+                        </span>
+                      </div>
+
+                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                        {appThemes.map((theme) => {
+                          const active = theme.key === themeKey;
+                          return (
+                            <button
+                              key={theme.key}
+                              onClick={() => applyTheme(theme.key)}
+                              className={`group overflow-hidden rounded-[24px] border bg-white p-3 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-xl ${
+                                active ? "border-slate-950 ring-4 ring-slate-950/10" : "border-slate-200"
+                              }`}
+                            >
+                              <div
+                                className="relative h-28 overflow-hidden rounded-[20px] border border-white/50 shadow-inner"
+                                style={{ background: `linear-gradient(135deg, ${theme.dark}, ${theme.primary}, ${theme.primary2})` }}
+                              >
+                                <div className="absolute left-3 top-3 h-8 w-24 rounded-xl bg-white/20" />
+                                <div className="absolute bottom-3 left-3 right-3 grid grid-cols-3 gap-2">
+                                  <div className="h-8 rounded-xl bg-white/25" />
+                                  <div className="h-8 rounded-xl bg-white/15" />
+                                  <div className="h-8 rounded-xl bg-white/10" />
+                                </div>
+                              </div>
+
+                              <div className="mt-3 flex items-start justify-between gap-3">
+                                <div>
+                                  <p className="text-[13px] font-black text-slate-950">{theme.icon} {theme.name}</p>
+                                  <p className="mt-1 text-[10px] font-bold text-slate-500">{theme.label}</p>
+                                </div>
+                                {active ? (
+                                  <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black text-emerald-700">ACTIF</span>
+                                ) : (
+                                  <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-black text-slate-500">CHOISIR</span>
+                                )}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {themeSettingsTab === "preview" && (
+                    <div>
+                      <h3 className="text-[20px] font-black text-slate-950">Aperçu du menu latéral</h3>
+                      <p className="mt-1 text-[12px] font-bold text-slate-500">Le thème choisi s'applique au sidebar, aux menus actifs et aux boutons.</p>
+
+                      <div className="mt-4 grid gap-4 lg:grid-cols-[290px_1fr]">
+                        <div className="theme-sidebar overflow-hidden rounded-[26px] p-4 text-white shadow-xl">
+                          <div className="mb-4 flex items-center gap-3">
+                            <div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/15 font-black">S</div>
+                            <div>
+                              <p className="text-[14px] font-black">Strelitzia School</p>
+                              <p className="text-[10px] font-bold uppercase tracking-wide text-white/45">Menu preview</p>
+                            </div>
+                          </div>
+                          {menus.slice(0, 4).map((menu) => (
+                            <div key={menu.title} className="mb-3">
+                              <p className="mb-2 px-2 text-[10px] font-black uppercase tracking-wide text-white/35">{menu.title}</p>
+                              {menu.items.slice(0, 3).map((item, index) => (
+                                <div
+                                  key={item}
+                                  className={`mb-1 rounded-2xl px-3 py-2 text-[12px] font-bold ${index === 0 ? "bg-white text-slate-950" : "text-white/70"}`}
+                                >
+                                  {item}
+                                </div>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="rounded-[26px] border border-slate-200 bg-white p-5 shadow-sm">
+                          <p className="text-[12px] font-black uppercase tracking-wide text-slate-400">Paramètre menu</p>
+                          <h4 className="mt-2 text-[20px] font-black text-slate-950">Sidebar professionnel</h4>
+                          <p className="mt-2 text-[13px] font-bold leading-relaxed text-slate-600">
+                            Le menu reste compact, clair, avec recherche interne des menus seulement. Sur mobile, il s'ouvre et se ferme proprement.
+                          </p>
+                          <div className="mt-5 flex flex-wrap gap-2">
+                            <span className="rounded-full bg-slate-100 px-3 py-2 text-[11px] font-black text-slate-700">Recherche menu</span>
+                            <span className="rounded-full bg-slate-100 px-3 py-2 text-[11px] font-black text-slate-700">Responsive mobile</span>
+                            <span className="rounded-full bg-slate-100 px-3 py-2 text-[11px] font-black text-slate-700">Mode noir inclus</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {themeSettingsTab === "studentView" && (
+                    <div>
+                      <h3 className="text-[20px] font-black text-slate-950">Aperçu vue étudiants</h3>
+                      <p className="mt-1 text-[12px] font-bold text-slate-500">Le thème s'applique aux actions, filtres, en-têtes et badges.</p>
+
+                      <div className="mt-4 overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-sm">
+                        <div className="theme-gradient p-4 text-white">
+                          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-[.22em] text-white/70">Liste des étudiants</p>
+                              <h4 className="text-[22px] font-black">Vue compacte professionnelle</h4>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <button className="rounded-xl bg-white/20 px-3 py-2 text-[11px] font-black">Actualiser</button>
+                              <button className="rounded-xl bg-white/20 px-3 py-2 text-[11px] font-black">Excel</button>
+                              <button className="rounded-xl bg-white px-3 py-2 text-[11px] font-black text-slate-950">Imprimer</button>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="p-4">
+                          <div className="grid gap-2 md:grid-cols-4">
+                            {["Recherche", "Année", "Classe", "Série"].map((label) => (
+                              <div key={label} className="h-11 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-[11px] font-black text-slate-400">{label}</div>
+                            ))}
+                          </div>
+                          <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
+                            <div className="theme-dark-btn grid grid-cols-4 gap-2 px-3 py-3 text-[10px] font-black uppercase text-white">
+                              <span>Matricule</span><span>Nom</span><span>Classe</span><span>Action</span>
+                            </div>
+                            {[1, 2, 3].map((row) => (
+                              <div key={row} className="grid grid-cols-4 gap-2 border-t border-slate-100 px-3 py-3 text-[11px] font-bold text-slate-700">
+                                <span>MAT-00{row}</span><span>Étudiant {row}</span><span>GRADE {row}</span><span>Détails</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </main>
+              </div>
+
+              <div className="flex flex-col gap-2 border-t border-slate-200 bg-white px-5 py-4 md:flex-row md:items-center md:justify-between">
+                <p className="text-[12px] font-bold text-slate-500">
+                  Thème actif : <b className="text-slate-900">{currentTheme.name}</b> — sauvegarde automatique.
+                </p>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <button
+                    onClick={() => applyTheme("black")}
+                    className="rounded-xl border border-slate-200 bg-slate-950 px-5 py-3 text-[12px] font-black text-white shadow-lg hover:brightness-110"
+                  >
+                    Activer Noir Élégant
+                  </button>
+                  <button
+                    onClick={() => setThemePanelOpen(false)}
+                    className="theme-button rounded-xl px-5 py-3 text-[12px] font-black text-white shadow-lg hover:brightness-110"
+                  >
+                    Valider le thème
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <footer className="shrink-0 border-t border-slate-200 bg-white px-4 py-1.5 text-[10px] text-slate-700 md:px-6">
+          <div className="flex items-center justify-between gap-2">
+            <span>
+              Connecté : <b>{user.name}</b> — {user.role}
+              <span className="ml-2 inline-block h-2 w-2 rounded-full bg-emerald-500" />
+            </span>
+            <span className="hidden sm:block">Strelitzia School © 2026</span>
+          </div>
         </footer>
       </section>
     </main>
