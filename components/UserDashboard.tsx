@@ -613,12 +613,30 @@ if (item === "Mouvements de Trésorerie") {
         .student-table td { font-size: calc(10.5px * var(--font-scale)) !important; }
         .font-scaled-input { font-size: calc(11px * var(--font-scale)) !important; }
         .student-loading-spinner {
-          width: 34px;
-          height: 34px;
-          border: 4px solid #e2e8f0;
+          width: 18px;
+          height: 18px;
+          border: 3px solid #e2e8f0;
           border-top-color: var(--theme-primary);
           border-radius: 999px;
-          animation: studentSpin .8s linear infinite;
+          animation: studentSpin .75s linear infinite;
+        }
+        .student-loading-mini {
+          position: sticky;
+          top: 8px;
+          left: 8px;
+          z-index: 60;
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          max-width: max-content;
+          border: 1px solid #e2e8f0;
+          background: rgba(255,255,255,.96);
+          color: #0f172a;
+          border-radius: 999px;
+          padding: 7px 12px;
+          font-size: 11px;
+          font-weight: 900;
+          box-shadow: 0 8px 22px rgba(15, 23, 42, .10);
         }
         @keyframes studentSpin { to { transform: rotate(360deg); } }
         .no-blur-shadow { box-shadow: 0 10px 24px rgba(15, 23, 42, 0.10); }
@@ -1093,13 +1111,10 @@ if (item === "Mouvements de Trésorerie") {
             </div>
 
             <div className="table-scroll relative max-h-[calc(100vh-185px)] min-h-[500px] overflow-auto bg-white">
-              {loadingStudents && (
-                <div className="sticky left-0 top-0 z-[60] flex min-h-[220px] w-full items-center justify-center bg-white/90">
-                  <div className="rounded-2xl border border-slate-200 bg-white px-6 py-5 text-center shadow-xl">
-                    <div className="mx-auto student-loading-spinner" />
-                    <p className="mt-3 text-[12px] font-black text-slate-800">Chargement des étudiants...</p>
-                    <p className="mt-1 text-[10px] font-bold text-slate-500">Veuillez patienter jusqu’à l’affichage de la liste.</p>
-                  </div>
+              {loadingStudents && students.length === 0 && (
+                <div className="student-loading-mini">
+                  <div className="student-loading-spinner" />
+                  <span>Chargement étudiants...</span>
                 </div>
               )}
               <table className="student-table w-full min-w-[1120px] border-separate border-spacing-0 text-[10.5px] font-medium tracking-tight">
