@@ -576,13 +576,14 @@ if (item === "Mouvements de Trésorerie") {
         .student-toolbar-scroll { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
         .student-toolbar-scroll::-webkit-scrollbar { height: 5px; }
         .student-toolbar-scroll::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 999px; }
-        .student-toolbar-inner { min-width: 980px; }
+        .student-toolbar-inner { min-width: 720px; }
+        .filter-toolbar-inner { min-width: 680px; }
         @media (max-width: 640px) {
           .student-shell { padding: 8px; }
           .student-card { border-radius: 18px; }
           .top-actions { display: flex; width: 100%; gap: 6px; }
           .top-actions button { height: 28px; padding-left: 8px; padding-right: 8px; font-size: 9px; white-space: nowrap; }
-          .mobile-filter-grid { grid-template-columns: repeat(4, minmax(150px, 1fr)) !important; gap: 6px; }
+          .mobile-filter-grid { grid-template-columns: repeat(4, minmax(125px, 1fr)) !important; gap: 6px; }
           .controls-card, .search-card { padding: 6px; }
           .search-card .flex.flex-1 { display: flex; min-width: 560px; gap: 6px; }
           .search-card .relative { max-width: 260px; }
@@ -613,14 +614,16 @@ if (item === "Mouvements de Trésorerie") {
         }
 
         @media (max-width: 768px) {
+          .student-toolbar-inner { min-width: 650px; }
+          .filter-toolbar-inner { min-width: 600px; }
           .student-shell { padding: 8px !important; }
           .student-card { border-radius: 16px !important; }
-          .student-table { min-width: 760px !important; font-size: 10px !important; }
+          .student-table { min-width: 1120px !important; font-size: 10px !important; }
           .student-table th,
           .student-table td { padding: 5px 6px !important; }
-          .mobile-hide { display: none !important; }
+          .mobile-hide { display: table-cell !important; }
           .mobile-action-btn { min-width: 32px; height: 28px; }
-          .mobile-filter-grid { grid-template-columns: repeat(4, minmax(150px, 1fr)) !important; }
+          .mobile-filter-grid { grid-template-columns: repeat(4, minmax(125px, 1fr)) !important; }
         }
 
         @media print {
@@ -702,13 +705,9 @@ if (item === "Mouvements de Trésorerie") {
                     handleMenuClick(item);
                     setSidebarOpen(false);
                   }}
-                  className={`group mb-1 flex w-full items-center gap-2 rounded-xl border-l-4 border-transparent px-3 py-2 text-left text-[12px] font-semibold transition-all duration-200 hover:translate-x-1 ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""} ${
-                    (item === "Liste des inscrits" || item === "Thème")
-                      ? "theme-button border-l-cyan-300 text-white shadow-md shadow-blue-950/30"
-                      : "text-slate-200 hover:bg-white/10 hover:text-white"
-                  }`}
+                  className={`group mb-1 flex w-full items-center gap-2 rounded-xl border-l-4 border-transparent px-3 py-2 text-left text-[12px] font-semibold text-slate-200 transition-all duration-200 hover:translate-x-1 hover:border-l-cyan-300 hover:bg-white/10 hover:text-white active:scale-[.98] ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
                 >
-                  <span className={`${item === "Liste des inscrits" ? "text-white" : "text-cyan-400"}`}>›</span>
+                  <span className="text-cyan-400 transition group-hover:text-white">›</span>
                   <span className={`truncate ${sidebarCollapsed ? "lg:hidden" : ""}`}>{item}</span>
                 </button>
               ))}
@@ -763,7 +762,7 @@ if (item === "Mouvements de Trésorerie") {
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="hidden rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-600 shadow-sm sm:block">
+            <div className="max-w-[155px] truncate rounded-full border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-slate-600 shadow-sm sm:max-w-none sm:px-3 sm:text-[11px]">
               Connecté : <b className="text-slate-900">{user.name}</b>
             </div>
             <div className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-br from-amber-200 to-orange-400 text-sm shadow-sm">👤</div>
@@ -926,7 +925,7 @@ if (item === "Mouvements de Trésorerie") {
             </div>
 
             <div className="controls-card erp-toolbar border-b border-slate-200 bg-white p-1.5 md:p-2">
-              <div className="student-toolbar-scroll"><div className="student-toolbar-inner mobile-filter-grid grid grid-cols-4 gap-2">
+              <div className="student-toolbar-scroll"><div className="student-toolbar-inner filter-toolbar-inner mobile-filter-grid grid grid-cols-4 gap-2">
                 <select
                   value={selectedYear}
                   onChange={(e) => {
@@ -934,7 +933,7 @@ if (item === "Mouvements de Trésorerie") {
                     setClasse("TOUT");
                     setSerie("TOUT");
                   }}
-                  className="premium-select h-8 rounded-lg border border-slate-200 theme-dark-btn px-3 pr-8 text-[12px] font-black text-white outline-none ring-blue-200 transition focus:ring-4"
+                  className="premium-select h-8 min-w-[125px] rounded-lg border border-slate-200 theme-dark-btn px-2.5 pr-7 text-[11px] font-black text-white outline-none ring-blue-200 transition focus:ring-4"
                 >
                   {schoolYears.length === 0 && <option value="">Année scolaire</option>}
 
@@ -946,7 +945,7 @@ if (item === "Mouvements de Trésorerie") {
                   ))}
                 </select>
 
-                <div className="flex h-8 items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-[12px] font-black text-slate-800">
+                <div className="flex h-8 min-w-[125px] items-center rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-[11px] font-black text-slate-800">
                   Sites : Strelitzia School
                 </div>
 
@@ -956,7 +955,7 @@ if (item === "Mouvements de Trésorerie") {
                     setClasse(e.target.value);
                     setSerie("TOUT");
                   }}
-                  className="premium-select h-8 rounded-lg border border-slate-200 theme-dark-btn px-3 pr-8 text-[12px] font-black text-white outline-none ring-blue-200 transition focus:ring-4"
+                  className="premium-select h-8 min-w-[125px] rounded-lg border border-slate-200 theme-dark-btn px-2.5 pr-7 text-[11px] font-black text-white outline-none ring-blue-200 transition focus:ring-4"
                 >
                   <option value="TOUT">Classe : TOUT</option>
 
@@ -970,7 +969,7 @@ if (item === "Mouvements de Trésorerie") {
                 <select
                   value={serie}
                   onChange={(e) => setSerie(e.target.value)}
-                  className="premium-select h-8 rounded-lg border border-slate-200 theme-dark-btn px-3 pr-8 text-[12px] font-black text-white outline-none ring-blue-200 transition focus:ring-4"
+                  className="premium-select h-8 min-w-[125px] rounded-lg border border-slate-200 theme-dark-btn px-2.5 pr-7 text-[11px] font-black text-white outline-none ring-blue-200 transition focus:ring-4"
                 >
                   <option value="TOUT">Série : TOUT</option>
 
@@ -1018,7 +1017,7 @@ if (item === "Mouvements de Trésorerie") {
             </div>
 
             <div className="table-scroll max-h-[calc(100vh-185px)] min-h-[500px] overflow-auto bg-white">
-              <table className="student-table w-full min-w-[1060px] border-separate border-spacing-0 text-[10.5px] font-medium tracking-tight">
+              <table className="student-table w-full min-w-[1120px] border-separate border-spacing-0 text-[10.5px] font-medium tracking-tight">
                 <thead className="sticky top-0 z-30 theme-dark-btn text-white shadow-lg">
                   <tr>
                     {[
@@ -1101,7 +1100,7 @@ if (item === "Mouvements de Trésorerie") {
                         <td className="mobile-hide border-b border-r border-slate-200 px-2 py-1.5 whitespace-nowrap">
                           {formatDate(s.dateNaissance)}
                         </td>
-                        <td className="mobile-hide max-w-[110px] truncate border-b border-r border-slate-200 px-2 py-1.5">
+                        <td className="mobile-hide border-b border-r border-slate-200 px-2 py-1.5 whitespace-nowrap">
                           {s.lieuNaissance || "-"}
                         </td>
 
