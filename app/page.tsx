@@ -44,67 +44,69 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#0f172a] flex items-center justify-center p-6">
-      <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-8">
-        <div className="text-center mb-8">
-          <div className="mx-auto w-16 h-16 rounded-2xl bg-blue-600 flex items-center justify-center text-white text-2xl font-bold">
-            S
-          </div>
+    <main className="min-h-screen bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 flex items-center justify-center p-4">
+      <div className="w-full max-w-[430px] rounded-[28px] bg-white shadow-2xl border border-white/20 p-7 sm:p-8">
+        <div className="text-center mb-7">
+          <img
+            src="/strelitzia.png"
+            alt="Strelitzia School"
+            className="mx-auto h-24 w-24 object-contain mb-4"
+          />
 
-          <h1 className="text-3xl font-bold text-gray-900 mt-5">
+          <p className="text-[12px] font-black uppercase tracking-[0.25em] text-blue-600">
+            Bienvenue
+          </p>
+
+          <h1 className="mt-2 text-3xl font-black text-slate-900">
             STRELITZIA
           </h1>
 
-          <p className="text-gray-500 mt-2">Connexion espace école</p>
+          <p className="mt-2 text-sm font-medium text-slate-500">
+            Connexion espace école
+          </p>
         </div>
 
-       <form
-  onSubmit={handleLogin}
-  autoComplete="off"
-  className="space-y-5"
->
-  <div>
-    <label className="text-sm font-semibold text-gray-700">
-      Email
-    </label>
+        <form onSubmit={handleLogin} autoComplete="off" className="space-y-5">
+          <div>
+            <label className="text-sm font-bold text-slate-700">Email</label>
 
-    <input
-      className="mt-2 w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
-      type="email"
-      value={email}
-      onChange={(e) => setEmail(e.target.value)}
-      placeholder="Email"
-      autoComplete="off"
-      autoCorrect="off"
-      autoCapitalize="off"
-      spellCheck={false}
-      name="strelitzia_email"
-      required
-    />
-  </div>
+            <input
+              className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Email"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              name="strelitzia_email"
+              required
+            />
+          </div>
 
-  <div>
-    <label className="text-sm font-semibold text-gray-700">
-      Mot de passe
-    </label>
+          <div>
+            <label className="text-sm font-bold text-slate-700">
+              Mot de passe
+            </label>
 
-    <input
-      className="mt-2 w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
-      type="password"
-      value={password}
-      onChange={(e) => setPassword(e.target.value)}
-      placeholder="Mot de passe"
-      autoComplete="new-password"
-      autoCorrect="off"
-      autoCapitalize="off"
-      spellCheck={false}
-      name="strelitzia_password"
-      required
-    />
-  </div>
+            <input
+              className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Mot de passe"
+              autoComplete="new-password"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              name="strelitzia_password"
+              required
+            />
+          </div>
 
           {error && (
-            <div className="bg-red-50 text-red-700 px-4 py-3 rounded-xl text-sm">
+            <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
               {error}
             </div>
           )}
@@ -112,7 +114,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-3 font-bold transition disabled:opacity-60"
+            className="w-full rounded-2xl bg-blue-600 py-3.5 font-black text-white shadow-lg shadow-blue-200 transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {loading ? "Connexion..." : "Se connecter"}
           </button>
