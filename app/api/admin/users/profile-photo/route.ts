@@ -1,6 +1,4 @@
 import { NextResponse } from "next/server";
-import { mkdir, writeFile, unlink } from "fs/promises";
-import path from "path";
 import { prisma } from "@/lib/prisma";
 
 export async function POST(req: Request) {
@@ -8,8 +6,8 @@ export async function POST(req: Request) {
     const formData = await req.formData();
 
     const userId = Number(formData.get("userId"));
-    const file = formData.get("photo") as File | null;
     const action = String(formData.get("action") || "upload");
+    const file = formData.get("photo") as File | null;
 
     if (!userId || Number.isNaN(userId)) {
       return NextResponse.json(
@@ -20,7 +18,7 @@ export async function POST(req: Request) {
 
     const existingUser = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, profilePhoto: true },
+      select: { id: true },
     });
 
     if (!existingUser) {
@@ -31,16 +29,6 @@ export async function POST(req: Request) {
     }
 
     if (action === "delete") {
-      if (existingUser.profilePhoto?.startsWith("/uploads/profiles/")) {
-        const oldPath = path.join(
-          process.cwd(),
-          "public",
-          existingUser.profilePhoto,
-        );
-
-        await unlink(oldPath).catch(() => {});
-      }
-
       const user = await prisma.user.update({
         where: { id: userId },
         data: { profilePhoto: null },
@@ -51,7 +39,7 @@ export async function POST(req: Request) {
         success: true,
         profilePhoto: null,
         user,
-        message: "Photo de profil supprimée avec succès",
+        message: "Photo de profil supprimée",
       });
     }
 
@@ -69,44 +57,17 @@ export async function POST(req: Request) {
       );
     }
 
-    if (file.size > 3 * 1024 * 1024) {
+    if (file.size > 2 * 1024 * 1024) {
       return NextResponse.json(
-        { error: "Photo trop lourde. Maximum 3 Mo." },
+        { error: "Photo trop lourde. Maximum 2 Mo." },
         { status: 400 },
       );
     }
 
-    const uploadDir = path.join(
-      process.cwd(),
-      "public",
-      "uploads",
-      "profiles",
-    );
-
-    await mkdir(uploadDir, { recursive: true });
-
-    const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
-    const safeExt = ["jpg", "jpeg", "png", "webp", "gif"].includes(ext)
-      ? ext
-      : "jpg";
-
-    const filename = `user-${userId}-${Date.now()}.${safeExt}`;
-    const filepath = path.join(uploadDir, filename);
-
     const bytes = await file.arrayBuffer();
-    await writeFile(filepath, Buffer.from(bytes));
-
-    const profilePhoto = `/uploads/profiles/${filename}`;
-
-    if (existingUser.profilePhoto?.startsWith("/uploads/profiles/")) {
-      const oldPath = path.join(
-        process.cwd(),
-        "public",
-        existingUser.profilePhoto,
-      );
-
-      await unlink(oldPath).catch(() => {});
-    }
+    const buffer = Buffer.from(bytes);
+    const base64 = buffer.toString("base64");
+    const profilePhoto = `data:${file.type};base64,${base64}`;
 
     const user = await prisma.user.update({
       where: { id: userId },
@@ -118,7 +79,7 @@ export async function POST(req: Request) {
       success: true,
       profilePhoto,
       user,
-      message: "Photo de profil mise à jour avec succès",
+      message: "Photo de profil mise à jour",
     });
   } catch (error) {
     console.error("ADMIN_PROFILE_PHOTO_ERROR", error);
