@@ -67,7 +67,6 @@ model User {
 
   profilePhoto String?
   mustChangePassword Boolean @default(false)
-  active             Boolean  @default(true)
 }
 
 model Permission {
