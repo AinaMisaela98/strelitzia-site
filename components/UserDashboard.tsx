@@ -291,9 +291,12 @@ useEffect(() => {
     }
   }
 
-  if (isValidHexColor(savedStudentPageColor)) {
-    setStudentPageColor(savedStudentPageColor);
-  }
+ if (
+  typeof savedStudentPageColor === "string" &&
+  isValidHexColor(savedStudentPageColor)
+) {
+  setStudentPageColor(savedStudentPageColor);
+}
 }, []);
 
 function applyTheme(nextTheme: AppThemeKey) {

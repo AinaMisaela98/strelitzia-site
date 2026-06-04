@@ -196,6 +196,7 @@ export default function AdminPage() {
   const [deletingUserId, setDeletingUserId] = useState<number | null>(null);
   const [uploadingPhotoUserId, setUploadingPhotoUserId] = useState<number | null>(null);
   const [openActionUserId, setOpenActionUserId] = useState<number | null>(null);
+  const [showPasswordPreview, setShowPasswordPreview] = useState(false);
 
   const [form, setForm] = useState({
     name: "",
@@ -318,6 +319,7 @@ export default function AdminPage() {
       activeRoles.find((role) => role.name === "SECRETAIRE") || activeRoles[0];
 
     setEditingId(null);
+    setShowPasswordPreview(false);
     setForm({
       name: "",
       email: "",
@@ -423,6 +425,7 @@ export default function AdminPage() {
     }
 
     resetUserForm();
+    setShowPasswordPreview(false);
     openInternalAdminPage("Utilisateurs");
     loadUsers();
   }
@@ -431,6 +434,7 @@ export default function AdminPage() {
     const role = getRoleByUser(user);
 
     setEditingId(user.id);
+    setShowPasswordPreview(false);
     openInternalAdminPage("Créer utilisateur");
     setForm({
       name: user.name,
@@ -1449,16 +1453,61 @@ export default function AdminPage() {
                   onChange={(v: string) => setForm({ ...form, email: v })}
                 />
 
-                <Field
-                  label={
-                    editingId
+                <label>
+                  <span className="font-semibold text-slate-300">
+                    {editingId
                       ? "Nouveau mot de passe (optionnel)"
-                      : "Mot de passe"
-                  }
-                  type="password"
-                  value={form.password}
-                  onChange={(v: string) => setForm({ ...form, password: v })}
-                />
+                      : "Mot de passe"}
+                  </span>
+
+                  <div className="mt-2 flex overflow-hidden rounded-xl border border-white/10 bg-[#0b1626] focus-within:ring-2 focus-within:ring-red-600">
+                    <input
+                      type={showPasswordPreview ? "text" : "password"}
+                      value={form.password}
+                      onChange={(e) => setForm({ ...form, password: e.target.value })}
+                      placeholder={
+                        editingId
+                          ? "Laisser vide pour garder l’ancien mot de passe"
+                          : "Saisir le mot de passe"
+                      }
+                      className="min-w-0 flex-1 bg-transparent px-4 py-3 text-base text-white outline-none placeholder:text-slate-600 sm:text-[13px]"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={() => setShowPasswordPreview((value) => !value)}
+                      className="border-l border-white/10 px-4 py-3 font-black text-slate-200 transition hover:bg-white/10"
+                      title={
+                        showPasswordPreview
+                          ? "Masquer le mot de passe"
+                          : "Afficher le mot de passe"
+                      }
+                    >
+                      {showPasswordPreview ? "🙈" : "👁"}
+                    </button>
+                  </div>
+
+                  <div
+                    className={`mt-2 rounded-xl border px-4 py-3 text-[12px] ${
+                      form.password
+                        ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-200"
+                        : "border-amber-400/20 bg-amber-500/10 text-amber-200"
+                    }`}
+                  >
+                    <p className="font-black">Aperçu avant enregistrement</p>
+                    {form.password ? (
+                      <p className="mt-1 break-all font-mono text-[13px] text-white">
+                        {showPasswordPreview ? form.password : "•".repeat(Math.min(form.password.length, 18))}
+                      </p>
+                    ) : (
+                      <p className="mt-1">
+                        {editingId
+                          ? "Aucun nouveau mot de passe saisi."
+                          : "Mot de passe mbola tsy nosoratana."}
+                      </p>
+                    )}
+                  </div>
+                </label>
 
                 <label>
                   <span className="font-semibold text-slate-300">Rôle</span>
