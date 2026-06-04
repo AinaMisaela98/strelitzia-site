@@ -64,6 +64,9 @@ model User {
   @@index([active])
   @@index([role])
   @@index([roleId])
+
+  profilePhoto String?
+  mustChangePassword Boolean @default(false)
 }
 
 model Permission {
@@ -331,3 +334,4 @@ model TreasuryMovement {
   @@index([trainingFeeId])
   @@index([studentFeeId])
 }
+

@@ -164,6 +164,24 @@ const appThemes: AppTheme[] = [
   { key: "teal", name: "Teal Modern", label: "Élégant, doux et très lisible", icon: "🟦", primary: "#0f766e", primary2: "#2dd4bf", dark: "#042f2e", dark2: "#021817", page: "#f0fdfa", card: "#ffffff", soft: "#ccfbf1", text: "#134e4a" },
 ];
 
+const STUDENT_PAGE_COLOR_STORAGE_KEY = "strelitzia-student-page-color";
+const DEFAULT_STUDENT_PAGE_COLOR = "#eef3f9";
+
+const studentPageColorPresets = [
+  { name: "Bleu administratif", value: "#eef3f9", description: "clair, scolaire et professionnel" },
+  { name: "Blanc premium", value: "#ffffff", description: "très net, style logiciel de gestion" },
+  { name: "Gris ERP", value: "#f8fafc", description: "sobre, moderne et très lisible" },
+  { name: "Vert institution", value: "#ecfdf5", description: "doux, stable et scolaire" },
+  { name: "Ciel campus", value: "#f0f9ff", description: "clair, frais et accueillant" },
+  { name: "Royal Gold", value: "#fffbeb", description: "premium, chaleureux et élégant" },
+  { name: "Violet exécutif", value: "#f5f3ff", description: "créatif et haut de gamme" },
+  { name: "Ruby discret", value: "#fff1f2", description: "prestige doux et professionnel" },
+];
+
+function isValidHexColor(value: string | null | undefined) {
+  return typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value);
+}
+
 const STUDENT_CACHE_PREFIX = "strelitzia-students-cache-";
 const STUDENT_CACHE_VERSION = "v1";
 
@@ -190,6 +208,7 @@ const [themeKey, setThemeKey] = useState<AppThemeKey>("navy");
 const [themePanelOpen, setThemePanelOpen] = useState(false);
 const [themeSettingsTab, setThemeSettingsTab] = useState<"themes" | "preview" | "studentView" | "font">("themes");
 const [fontScale, setFontScale] = useState<number>(1);
+const [studentPageColor, setStudentPageColor] = useState(DEFAULT_STUDENT_PAGE_COLOR);
 
 const [students, setStudents] = useState<Student[]>([]);
 const [loadingStudents, setLoadingStudents] = useState(false);
@@ -254,6 +273,7 @@ const filteredMenus = useMemo(() => {
 useEffect(() => {
   const savedTheme = localStorage.getItem("strelitzia-theme") as AppThemeKey | null;
   const savedFontScale = localStorage.getItem("strelitzia-font-scale");
+  const savedStudentPageColor = localStorage.getItem(STUDENT_PAGE_COLOR_STORAGE_KEY);
   const navigationEntry = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
 
   if (navigationEntry?.type === "reload") {
@@ -270,6 +290,10 @@ useEffect(() => {
       setFontScale(clampFontScale(parsedFontScale));
     }
   }
+
+  if (isValidHexColor(savedStudentPageColor)) {
+    setStudentPageColor(savedStudentPageColor);
+  }
 }, []);
 
 function applyTheme(nextTheme: AppThemeKey) {
@@ -281,6 +305,16 @@ function applyFontScale(nextScale: number) {
   const safeScale = clampFontScale(nextScale);
   setFontScale(safeScale);
   localStorage.setItem("strelitzia-font-scale", String(safeScale));
+}
+
+function applyStudentPageColor(nextColor: string) {
+  if (!isValidHexColor(nextColor)) return;
+  setStudentPageColor(nextColor);
+  localStorage.setItem(STUDENT_PAGE_COLOR_STORAGE_KEY, nextColor);
+}
+
+function resetStudentPageColor() {
+  applyStudentPageColor(currentTheme.page || DEFAULT_STUDENT_PAGE_COLOR);
 }
 
 function increaseFontScale() {
@@ -721,6 +755,7 @@ if (item === "Mouvements de Trésorerie") {
         ["--theme-card" as any]: currentTheme.card,
         ["--theme-soft" as any]: currentTheme.soft,
         ["--theme-text" as any]: currentTheme.text,
+        ["--student-page-color" as any]: studentPageColor,
         ["--font-scale" as any]: fontScale,
       }}
     >
@@ -736,7 +771,7 @@ if (item === "Mouvements de Trésorerie") {
         .crisp-ui input, .crisp-ui select, .crisp-ui button, .crisp-ui table {
           text-rendering: optimizeLegibility;
         }
-        .crisp-ui { font-size: calc(11px * var(--font-scale)); }
+        .crisp-ui { font-size: calc(13px * var(--font-scale)); }
         .crisp-ui h1 { font-size: calc(22px * var(--font-scale)) !important; }
         .crisp-ui h2 { font-size: calc(28px * var(--font-scale)) !important; }
         .crisp-ui h3 { font-size: calc(20px * var(--font-scale)) !important; }
@@ -751,10 +786,10 @@ if (item === "Mouvements de Trésorerie") {
         .crisp-ui footer {
           font-size: calc(1em * var(--font-scale));
         }
-        .student-table { font-size: calc(10.5px * var(--font-scale)) !important; }
-        .student-table th { font-size: calc(10px * var(--font-scale)) !important; }
-        .student-table td { font-size: calc(10.5px * var(--font-scale)) !important; }
-        .font-scaled-input { font-size: calc(11px * var(--font-scale)) !important; }
+        .student-table { font-size: calc(12.5px * var(--font-scale)) !important; }
+        .student-table th { font-size: calc(12px * var(--font-scale)) !important; }
+        .student-table td { font-size: calc(12.5px * var(--font-scale)) !important; }
+        .font-scaled-input { font-size: calc(13px * var(--font-scale)) !important; }
         .student-loading-spinner {
           width: 18px;
           height: 18px;
@@ -787,6 +822,7 @@ if (item === "Mouvements de Trésorerie") {
         .theme-gradient { background: linear-gradient(135deg, var(--theme-primary), var(--theme-primary-2)); }
         .theme-sidebar { background: linear-gradient(180deg, var(--theme-dark), color-mix(in srgb, var(--theme-dark) 82%, var(--theme-primary) 18%) 52%, var(--theme-dark-2)); }
         .theme-page { background: var(--theme-page); color: var(--theme-text); }
+        .student-shell { background: var(--student-page-color); transition: background-color .2s ease; }
         .theme-button { background: linear-gradient(135deg, var(--theme-primary), var(--theme-primary-2)); }
         .theme-dark-btn { background: var(--theme-dark); }
 
@@ -1002,7 +1038,7 @@ if (item === "Mouvements de Trésorerie") {
           </div>
         </header>
 
-        <div className="student-shell flex-1 overflow-auto p-2 md:p-3">
+        <div className="student-shell flex-1 overflow-auto p-2 md:p-3" style={{ backgroundColor: studentPageColor }}>
           <div className="student-card overflow-hidden rounded-[18px] border border-slate-200 bg-white shadow-xl shadow-slate-200/70">
             <div className="border-b border-slate-200 bg-gradient-to-r from-white via-slate-50 to-slate-100 p-2.5 md:p-3">
               <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
@@ -1561,6 +1597,92 @@ if (item === "Mouvements de Trésorerie") {
                         <span className="w-fit rounded-full bg-slate-900 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-white">
                           {appThemes.length} thèmes disponibles
                         </span>
+                      </div>
+
+                      <div className="mb-5 overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-sm">
+                        <div className="grid gap-0 lg:grid-cols-[1fr_330px]">
+                          <div className="p-5">
+                            <div className="flex items-start justify-between gap-4">
+                              <div>
+                                <p className="text-[11px] font-black uppercase tracking-[.24em] text-slate-400">Espace étudiants</p>
+                                <h4 className="mt-1 text-[18px] font-black text-slate-950">Couleur de la page Liste des étudiants</h4>
+                                <p className="mt-1 max-w-[620px] text-[13px] font-bold leading-relaxed text-slate-500">
+                                  Choisissez une ambiance professionnelle pour le fond de la page où s’affiche la liste des étudiants.
+                                </p>
+                              </div>
+
+                              <div
+                                className="h-14 w-14 shrink-0 rounded-2xl border border-slate-200 shadow-inner ring-4 ring-slate-100"
+                                style={{ backgroundColor: studentPageColor }}
+                                title="Couleur actuelle de l’espace étudiants"
+                              />
+                            </div>
+
+                            <div className="mt-5 grid gap-3 md:grid-cols-[1fr_92px]">
+                              <label className="block">
+                                <span className="text-[12px] font-black text-slate-700">Palette professionnelle</span>
+                                <select
+                                  value={studentPageColor}
+                                  onChange={(e) => applyStudentPageColor(e.target.value)}
+                                  className="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-[13px] font-black text-slate-900 outline-none transition focus:border-slate-900 focus:bg-white focus:ring-4 focus:ring-slate-100"
+                                >
+                                  {studentPageColorPresets.map((preset) => (
+                                    <option key={preset.value} value={preset.value}>
+                                      {preset.name} — {preset.description}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+
+                              <label className="block">
+                                <span className="text-[12px] font-black text-slate-700">Libre</span>
+                                <input
+                                  type="color"
+                                  value={studentPageColor}
+                                  onChange={(e) => applyStudentPageColor(e.target.value)}
+                                  className="mt-2 h-12 w-full cursor-pointer rounded-2xl border border-slate-200 bg-white p-1 shadow-sm"
+                                  aria-label="Choisir une couleur personnalisée pour l’espace étudiants"
+                                />
+                              </label>
+                            </div>
+
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={resetStudentPageColor}
+                                className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-[12px] font-black text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-50"
+                              >
+                                Reprendre la couleur du thème actif
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => applyStudentPageColor(DEFAULT_STUDENT_PAGE_COLOR)}
+                                className="rounded-2xl border border-slate-200 bg-slate-950 px-4 py-2.5 text-[12px] font-black text-white shadow-sm transition hover:-translate-y-0.5 hover:brightness-110"
+                              >
+                                Réinitialiser
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="border-t border-slate-200 bg-slate-50 p-5 lg:border-l lg:border-t-0">
+                            <p className="text-[11px] font-black uppercase tracking-[.22em] text-slate-400">Aperçu</p>
+                            <div
+                              className="mt-3 rounded-[22px] border border-slate-200 p-3 shadow-inner"
+                              style={{ backgroundColor: studentPageColor }}
+                            >
+                              <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+                                <div className="mb-3 h-2 w-20 rounded-full theme-gradient" />
+                                <div className="text-[14px] font-black text-slate-950">Liste des étudiants</div>
+                                <div className="mt-2 grid gap-2">
+                                  <div className="h-8 rounded-xl bg-slate-100" />
+                                  <div className="h-8 rounded-xl bg-white border border-slate-100" />
+                                  <div className="h-8 rounded-xl bg-slate-100" />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
                       </div>
 
                       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">

@@ -1,12 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const savedEmail = localStorage.getItem("strelitzia_remember_email");
+
+    if (savedEmail) {
+      setEmail(savedEmail);
+      setRememberMe(true);
+    }
+  }, []);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -18,7 +28,7 @@ export default function LoginPage() {
       const res = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, rememberMe }),
       });
 
       const data = await res.json();
@@ -27,6 +37,12 @@ export default function LoginPage() {
         setError(data.error || "Erreur login");
         setLoading(false);
         return;
+      }
+
+      if (rememberMe) {
+        localStorage.setItem("strelitzia_remember_email", email);
+      } else {
+        localStorage.removeItem("strelitzia_remember_email");
       }
 
       const role = String(data.role || "").toUpperCase();
@@ -66,7 +82,7 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <form onSubmit={handleLogin} autoComplete="off" className="space-y-5">
+        <form onSubmit={handleLogin} autoComplete="on" className="space-y-5">
           <div>
             <label className="text-sm font-bold text-slate-700">Email</label>
 
@@ -76,11 +92,11 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Email"
-              autoComplete="off"
+              autoComplete="username"
               autoCorrect="off"
               autoCapitalize="off"
               spellCheck={false}
-              name="strelitzia_email"
+              name="email"
               required
             />
           </div>
@@ -96,14 +112,23 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Mot de passe"
-              autoComplete="new-password"
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck={false}
-              name="strelitzia_password"
+              autoComplete="current-password"
+              name="password"
               required
             />
           </div>
+
+          <label className="flex cursor-pointer items-center justify-between rounded-2xl border border-slate-50 bg-slate-20 px-4 py-3 text-sm font-bold text-slate-20 transition hover:bg-slate-30">
+            <span>
+              Se souvenir de moi
+            </span>
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+              className="h-5 w-5 accent-blue-600"
+            />
+          </label>
 
           {error && (
             <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
@@ -118,6 +143,7 @@ export default function LoginPage() {
           >
             {loading ? "Connexion..." : "Se connecter"}
           </button>
+
         </form>
       </div>
     </main>

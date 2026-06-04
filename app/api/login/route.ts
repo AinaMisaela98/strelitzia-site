@@ -9,6 +9,7 @@ export async function POST(req: Request) {
 
     const email = String(body?.email || "").trim().toLowerCase();
     const password = String(body?.password || "");
+    const rememberMe = Boolean(body?.rememberMe);
 
     if (!email || !password) {
       return NextResponse.json(
@@ -55,6 +56,10 @@ export async function POST(req: Request) {
 
     const redirect = role === "ADMIN" ? "/admin" : "/user";
 
+    const maxAge = rememberMe
+      ? 60 * 60 * 24 * 30
+      : 60 * 60 * 8;
+
     const token = jwt.sign(
       {
         id: user.id,
@@ -65,7 +70,7 @@ export async function POST(req: Request) {
         roleLabel,
       },
       process.env.JWT_SECRET,
-      { expiresIn: "7d" }
+      { expiresIn: rememberMe ? "30d" : "8h" }
     );
 
     const res = NextResponse.json({
@@ -73,6 +78,7 @@ export async function POST(req: Request) {
       role,
       roleLabel,
       redirect,
+      rememberMe,
     });
 
     res.cookies.set("token", token, {
@@ -80,7 +86,7 @@ export async function POST(req: Request) {
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
-      maxAge: 60 * 60 * 24 * 7,
+      maxAge,
     });
 
     return res;
