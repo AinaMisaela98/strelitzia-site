@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 type AuthUser = {
   id: number;
   name: string;
   email: string;
   role: string;
+  roleLabel?: string | null;
+  profilePhoto?: string | null;
+  active?: boolean;
 };
 
 type SchoolYear = {
@@ -199,7 +202,27 @@ function clearAllStudentsCache() {
   });
 }
 
+
+function getUserInitials(name?: string | null, email?: string | null) {
+  const raw = String(name || email || "U").trim();
+  const parts = raw.split(/\s+/).filter(Boolean);
+  const first = parts[0]?.[0] || "U";
+  const second = parts.length > 1 ? parts[1]?.[0] || "" : "";
+  return `${first}${second}`.toUpperCase();
+}
+
 export default function UserDashboard({ user }: { user: AuthUser }) {
+const [currentUser, setCurrentUser] = useState<AuthUser>(user);
+const [profilePanelOpen, setProfilePanelOpen] = useState(false);
+const [profileName, setProfileName] = useState(user.name || "");
+const [profileMessage, setProfileMessage] = useState("");
+const [savingProfileName, setSavingProfileName] = useState(false);
+const [uploadingProfilePhoto, setUploadingProfilePhoto] = useState(false);
+const [currentPassword, setCurrentPassword] = useState("");
+const [newPassword, setNewPassword] = useState("");
+const [confirmPassword, setConfirmPassword] = useState("");
+const [showProfilePasswords, setShowProfilePasswords] = useState(false);
+const [savingProfilePassword, setSavingProfilePassword] = useState(false);
 const [sidebarOpen, setSidebarOpen] = useState(false);
 const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 const [openActionId, setOpenActionId] = useState<string | number | null>(null);
@@ -299,6 +322,10 @@ useEffect(() => {
 }
 }, []);
 
+useEffect(() => {
+  loadConnectedUserProfile();
+}, []);
+
 function applyTheme(nextTheme: AppThemeKey) {
   setThemeKey(nextTheme);
   localStorage.setItem("strelitzia-theme", nextTheme);
@@ -326,6 +353,197 @@ function increaseFontScale() {
 
 function decreaseFontScale() {
   applyFontScale(fontScale - FONT_SCALE_STEP);
+}
+
+const currentProfilePhoto = String(currentUser.profilePhoto || "").trim();
+const currentRoleLabel = currentUser.roleLabel || currentUser.role || "Utilisateur";
+
+const profilePasswordScore = useMemo(() => {
+  let score = 0;
+  if (newPassword.length >= 6) score += 1;
+  if (newPassword.length >= 8) score += 1;
+  if (/[A-Z]/.test(newPassword)) score += 1;
+  if (/[0-9]/.test(newPassword)) score += 1;
+  if (/[^A-Za-z0-9]/.test(newPassword)) score += 1;
+
+  if (!newPassword) return { label: "Vide", width: "0%", color: "bg-slate-200" };
+  if (score <= 2) return { label: "Faible", width: "35%", color: "bg-red-500" };
+  if (score <= 4) return { label: "Moyen", width: "70%", color: "bg-amber-500" };
+  return { label: "Fort", width: "100%", color: "bg-emerald-500" };
+}, [newPassword]);
+
+function showProfileMessage(text: string) {
+  setProfileMessage(text);
+  window.setTimeout(() => setProfileMessage(""), 4500);
+}
+
+async function loadConnectedUserProfile() {
+  try {
+    const res = await fetch(`/api/users/profile?_ts=${Date.now()}`, {
+      cache: "no-store",
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data?.user) return;
+
+    setCurrentUser((prev) => ({ ...prev, ...data.user }));
+    setProfileName(data.user.name || user.name || "");
+  } catch {
+    // Tsy sakanana ny dashboard raha tsy afaka maka profil.
+  }
+}
+
+async function saveConnectedUserName(e: FormEvent) {
+  e.preventDefault();
+
+  const nextName = profileName.trim();
+
+  if (!nextName) {
+    alert("Le nom est obligatoire");
+    return;
+  }
+
+  try {
+    setSavingProfileName(true);
+
+    const res = await fetch("/api/users/profile", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: nextName }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      alert(data.error || "Erreur modification profil");
+      return;
+    }
+
+    setCurrentUser((prev) => ({ ...prev, ...(data.user || {}), name: data.user?.name || nextName }));
+    setProfileName(data.user?.name || nextName);
+    showProfileMessage("Informations du profil enregistrées avec succès");
+  } catch {
+    alert("Erreur réseau pendant la modification du profil");
+  } finally {
+    setSavingProfileName(false);
+  }
+}
+
+async function uploadConnectedUserPhoto(file?: File | null) {
+  if (!file) return;
+
+  if (!file.type.startsWith("image/")) {
+    alert("Veuillez choisir une image valide");
+    return;
+  }
+
+  if (file.size > 2 * 1024 * 1024) {
+    alert("Photo trop lourde. Maximum 2 Mo.");
+    return;
+  }
+
+  try {
+    setUploadingProfilePhoto(true);
+
+    const formData = new FormData();
+    formData.append("photo", file);
+
+    const res = await fetch("/api/users/profile-photo", {
+      method: "POST",
+      body: formData,
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      alert(data.error || "Erreur upload photo profil");
+      return;
+    }
+
+    setCurrentUser((prev) => ({ ...prev, ...(data.user || {}), profilePhoto: data.profilePhoto || data.user?.profilePhoto || prev.profilePhoto }));
+    showProfileMessage("Photo de profil mise à jour avec succès");
+  } catch {
+    alert("Erreur réseau pendant l’upload photo profil");
+  } finally {
+    setUploadingProfilePhoto(false);
+  }
+}
+
+async function removeConnectedUserPhoto() {
+  if (!currentProfilePhoto) return;
+  if (!confirm("Supprimer votre photo de profil ?")) return;
+
+  try {
+    setUploadingProfilePhoto(true);
+
+    const formData = new FormData();
+    formData.append("action", "delete");
+
+    const res = await fetch("/api/users/profile-photo", {
+      method: "POST",
+      body: formData,
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      alert(data.error || "Erreur suppression photo profil");
+      return;
+    }
+
+    setCurrentUser((prev) => ({ ...prev, ...(data.user || {}), profilePhoto: null }));
+    showProfileMessage("Photo de profil supprimée");
+  } catch {
+    alert("Erreur réseau pendant la suppression photo profil");
+  } finally {
+    setUploadingProfilePhoto(false);
+  }
+}
+
+async function changeConnectedUserPassword(e: FormEvent) {
+  e.preventDefault();
+
+  if (!currentPassword || !newPassword || !confirmPassword) {
+    alert("Veuillez remplir tous les champs mot de passe");
+    return;
+  }
+
+  if (newPassword.length < 6) {
+    alert("Le nouveau mot de passe doit contenir au moins 6 caractères");
+    return;
+  }
+
+  if (newPassword !== confirmPassword) {
+    alert("La confirmation ne correspond pas au nouveau mot de passe");
+    return;
+  }
+
+  try {
+    setSavingProfilePassword(true);
+
+    const res = await fetch("/api/users/change-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      alert(data.error || "Erreur changement mot de passe");
+      return;
+    }
+
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    showProfileMessage(data.message || "Mot de passe modifié avec succès");
+  } catch {
+    alert("Erreur réseau pendant le changement de mot de passe");
+  } finally {
+    setSavingProfilePassword(false);
+  }
 }
 
 async function loadSchoolYears() {
@@ -747,7 +965,7 @@ if (item === "Mouvements de Trésorerie") {
 
   return (
     <main
-      className="crisp-ui fixed inset-0 flex overflow-hidden text-[11px] text-slate-900"
+      className="crisp-ui fixed inset-0 flex overflow-hidden text-base text-slate-900"
       style={{
         background: currentTheme.dark2,
         ["--theme-primary" as any]: currentTheme.primary,
@@ -774,25 +992,33 @@ if (item === "Mouvements de Trésorerie") {
         .crisp-ui input, .crisp-ui select, .crisp-ui button, .crisp-ui table {
           text-rendering: optimizeLegibility;
         }
-        .crisp-ui { font-size: calc(13px * var(--font-scale)); }
-        .crisp-ui h1 { font-size: calc(22px * var(--font-scale)) !important; }
-        .crisp-ui h2 { font-size: calc(28px * var(--font-scale)) !important; }
-        .crisp-ui h3 { font-size: calc(20px * var(--font-scale)) !important; }
+        .crisp-ui {
+          font-size: calc(15px * var(--font-scale));
+          font-family: Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+          font-weight: 500;
+        }
+        .crisp-ui h1 { font-size: calc(23px * var(--font-scale)) !important; font-weight: 750 !important; }
+        .crisp-ui h2 { font-size: calc(26px * var(--font-scale)) !important; font-weight: 750 !important; }
+        .crisp-ui h3 { font-size: calc(18px * var(--font-scale)) !important; font-weight: 700 !important; }
         .crisp-ui p,
         .crisp-ui span,
         .crisp-ui button,
         .crisp-ui input,
         .crisp-ui select,
-        .crisp-ui div,
-        .crisp-ui td,
-        .crisp-ui th,
+        .crisp-ui label,
         .crisp-ui footer {
-          font-size: calc(1em * var(--font-scale));
+          font-size: calc(14px * var(--font-scale)) !important;
+          line-height: 1.38;
         }
-        .student-table { font-size: calc(12.5px * var(--font-scale)) !important; }
-        .student-table th { font-size: calc(12px * var(--font-scale)) !important; }
-        .student-table td { font-size: calc(12.5px * var(--font-scale)) !important; }
-        .font-scaled-input { font-size: calc(13px * var(--font-scale)) !important; }
+        .crisp-ui td,
+        .crisp-ui th {
+          font-size: calc(13px * var(--font-scale)) !important;
+          line-height: 1.32;
+        }
+        .student-table { font-size: calc(13px * var(--font-scale)) !important; }
+        .student-table th { font-size: calc(12px * var(--font-scale)) !important; font-weight: 700 !important; }
+        .student-table td { font-size: calc(13px * var(--font-scale)) !important; font-weight: 500 !important; }
+        .font-scaled-input { font-size: calc(14px * var(--font-scale)) !important; }
         .student-loading-spinner {
           width: 18px;
           height: 18px;
@@ -815,7 +1041,7 @@ if (item === "Mouvements de Trésorerie") {
           color: #0f172a;
           border-radius: 999px;
           padding: 7px 12px;
-          font-size: 11px;
+          font-size: calc(14px * var(--font-scale));
           font-weight: 900;
           box-shadow: 0 8px 22px rgba(15, 23, 42, .10);
         }
@@ -824,10 +1050,92 @@ if (item === "Mouvements de Trésorerie") {
         .erp-toolbar { position: sticky; top: 0; z-index: 20; background: #fff; }
         .theme-gradient { background: linear-gradient(135deg, var(--theme-primary), var(--theme-primary-2)); }
         .theme-sidebar { background: linear-gradient(180deg, var(--theme-dark), color-mix(in srgb, var(--theme-dark) 82%, var(--theme-primary) 18%) 52%, var(--theme-dark-2)); }
+
+        /* Sidebar stylé: texte premium, léger, hiérarchie claire, tsy bold be */
+        .theme-sidebar {
+          font-size: calc(12.5px * var(--font-scale));
+          line-height: 1.34;
+          font-weight: 500;
+        }
+        .theme-sidebar button,
+        .theme-sidebar input,
+        .theme-sidebar p,
+        .theme-sidebar span,
+        .theme-sidebar div {
+          line-height: 1.34;
+          letter-spacing: .005em;
+        }
+        .theme-sidebar .sidebar-brand-name {
+          font-size: calc(15px * var(--font-scale)) !important;
+          font-weight: 720 !important;
+          letter-spacing: .055em;
+          line-height: 1;
+        }
+        .theme-sidebar .sidebar-brand-subtitle {
+          font-size: calc(10px * var(--font-scale)) !important;
+          font-weight: 650 !important;
+          letter-spacing: .13em;
+          line-height: 1;
+        }
+        .theme-sidebar .sidebar-profile-name {
+          font-size: calc(12px * var(--font-scale)) !important;
+          font-weight: 650 !important;
+        }
+        .theme-sidebar .sidebar-profile-role {
+          font-size: calc(9.8px * var(--font-scale)) !important;
+          font-weight: 650 !important;
+          letter-spacing: .08em;
+        }
+        .theme-sidebar .sidebar-profile-email {
+          font-size: calc(10px * var(--font-scale)) !important;
+          font-weight: 450 !important;
+        }
+        .theme-sidebar .sidebar-search-input {
+          font-size: calc(11.5px * var(--font-scale)) !important;
+          font-weight: 450 !important;
+        }
+        .theme-sidebar .sidebar-section-title {
+          font-size: calc(10px * var(--font-scale)) !important;
+          font-weight: 650 !important;
+          letter-spacing: .11em;
+          opacity: .92;
+        }
+        .theme-sidebar .sidebar-menu-item {
+          font-size: calc(12px * var(--font-scale)) !important;
+          font-weight: 480 !important;
+          line-height: 1.34;
+          letter-spacing: .01em;
+        }
+        .theme-sidebar .sidebar-menu-item:hover {
+          font-weight: 580 !important;
+        }
+        .theme-sidebar .sidebar-logout-btn {
+          font-size: calc(12px * var(--font-scale)) !important;
+          font-weight: 650 !important;
+        }
         .theme-page { background: var(--theme-page); color: var(--theme-text); }
         .student-shell { background: var(--student-page-color); transition: background-color .2s ease; }
         .theme-button { background: linear-gradient(135deg, var(--theme-primary), var(--theme-primary-2)); }
         .theme-dark-btn { background: var(--theme-dark); }
+
+
+
+        /* Typographie premium globale: moins de gras, rendu plus élégant */
+        .crisp-ui .font-black { font-weight: 650 !important; }
+        .crisp-ui .font-bold { font-weight: 560 !important; }
+        .top-actions button,
+        .student-toolbar-inner select,
+        .student-toolbar-inner input,
+        .student-toolbar-inner button,
+        .search-card button,
+        .controls-card select {
+          font-weight: 600 !important;
+          letter-spacing: .005em;
+        }
+        .student-table .font-black,
+        .student-table .font-bold {
+          font-weight: 600 !important;
+        }
 
         .school-scroll::-webkit-scrollbar { width: 7px; }
         .school-scroll::-webkit-scrollbar-thumb { background: rgba(148,163,184,.45); border-radius: 999px; }
@@ -843,22 +1151,59 @@ if (item === "Mouvements de Trésorerie") {
         .top-actions { flex-wrap: nowrap !important; overflow-x: auto; overflow-y: hidden; max-width: 100%; padding-bottom: 2px; scrollbar-width: thin; }
         .top-actions::-webkit-scrollbar { height: 5px; }
         .top-actions::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 999px; }
-        .top-actions button { height: 28px; min-width: max-content; border-radius: 10px; padding-left: 10px; padding-right: 10px; font-size: 9.5px; box-shadow: 0 6px 14px rgba(15,23,42,.10); white-space: nowrap; }
-        .mobile-filter-grid select, .mobile-filter-grid div, .search-card input, .search-card button { height: 30px; border-radius: 10px; font-size: 10px; }
+        .student-list-heading { font-size: calc(17px * var(--font-scale)) !important; font-weight: 560 !important; letter-spacing: -0.015em; }
+        .student-list-subtitle { font-size: calc(11.5px * var(--font-scale)) !important; font-weight: 450 !important; letter-spacing: .01em; }
+        .top-actions { gap: 6px !important; }
+        .top-actions button { height: 34px; min-width: max-content; border-radius: 10px; padding-left: 12px; padding-right: 12px; font-size: calc(11.5px * var(--font-scale)) !important; font-weight: 500 !important; box-shadow: 0 5px 12px rgba(15,23,42,.08); white-space: nowrap; line-height: 1; }
+        .mobile-filter-grid select, .mobile-filter-grid div, .search-card input, .search-card button { height: 34px; border-radius: 10px; font-size: calc(11.5px * var(--font-scale)) !important; font-weight: 480 !important; line-height: 1.1; }
         .student-toolbar-scroll { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
         .student-toolbar-scroll::-webkit-scrollbar { height: 5px; }
         .student-toolbar-scroll::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 999px; }
-        .student-toolbar-inner { min-width: 720px; }
-        .filter-toolbar-inner { min-width: 680px; }
+        .student-toolbar-inner { min-width: 620px; }
+        .filter-toolbar-inner { min-width: 610px; }
         @media (max-width: 640px) {
           .student-shell { padding: 8px; }
           .student-card { border-radius: 18px; }
           .top-actions { display: flex; width: 100%; gap: 6px; }
-          .top-actions button { height: 28px; padding-left: 8px; padding-right: 8px; font-size: 9px; white-space: nowrap; }
+          .top-actions button { height: 32px; padding-left: 10px; padding-right: 10px; font-size: calc(11px * var(--font-scale)) !important; white-space: nowrap; }
           .mobile-filter-grid { grid-template-columns: repeat(4, minmax(125px, 1fr)) !important; gap: 6px; }
           .controls-card, .search-card { padding: 6px; }
           .search-card .flex.flex-1 { display: flex; min-width: 560px; gap: 6px; }
           .search-card .relative { max-width: 260px; }
+        }
+
+
+        /* Police normale 100% — toolbar, filtres, recherche et boutons */
+        .student-toolbar-inner,
+        .filter-toolbar-inner,
+        .top-actions,
+        .search-card,
+        .controls-card,
+        .topbar {
+          font-size: calc(12px * var(--font-scale)) !important;
+        }
+
+        .student-toolbar-inner select,
+        .student-toolbar-inner input,
+        .student-toolbar-inner button,
+        .filter-toolbar-inner select,
+        .filter-toolbar-inner div,
+        .top-actions button,
+        .search-card input,
+        .search-card button {
+          font-size: calc(11.5px * var(--font-scale)) !important;
+          font-weight: 480 !important;
+          min-height: 34px;
+        }
+
+        .search-card input::placeholder {
+          font-size: calc(11.5px * var(--font-scale)) !important;
+          font-weight: 450;
+        }
+
+        .student-table button,
+        .student-table span {
+          font-size: calc(13px * var(--font-scale)) !important;
         }
 
         .premium-select {
@@ -886,11 +1231,11 @@ if (item === "Mouvements de Trésorerie") {
         }
 
         @media (max-width: 768px) {
-          .student-toolbar-inner { min-width: 650px; }
-          .filter-toolbar-inner { min-width: 600px; }
+          .student-toolbar-inner { min-width: 600px; }
+          .filter-toolbar-inner { min-width: 580px; }
           .student-shell { padding: 8px !important; }
           .student-card { border-radius: 16px !important; }
-          .student-table { min-width: 1120px !important; font-size: calc(10px * var(--font-scale)) !important; }
+          .student-table { min-width: 1120px !important; font-size: calc(13px * var(--font-scale)) !important; }
           .student-table th,
           .student-table td { padding: 5px 6px !important; }
           .mobile-hide { display: table-cell !important; }
@@ -903,7 +1248,7 @@ if (item === "Mouvements de Trésorerie") {
           main { position: static !important; display: block !important; background: white !important; }
           section { height: auto !important; overflow: visible !important; }
           .table-scroll { overflow: visible !important; }
-          .student-table { min-width: 100% !important; font-size: 10px !important; }
+          .student-table { min-width: 100% !important; font-size: 11px !important; }
         }
       `}</style>
 
@@ -918,8 +1263,8 @@ if (item === "Mouvements de Trésorerie") {
               🎓
             </div>
             <div className={`leading-none ${sidebarCollapsed ? "lg:hidden" : ""}`}>
-              <div className="text-[18px] font-black tracking-wide text-white">STRELITZIA</div>
-              <div className="mt-1 text-[13px] font-black text-cyan-400">SCHOOL</div>
+              <div className="sidebar-brand-name font-semibold text-white">STRELITZIA</div>
+              <div className="sidebar-brand-subtitle mt-1 font-semibold text-cyan-400">SCHOOL</div>
             </div>
           </div>
 
@@ -932,20 +1277,32 @@ if (item === "Mouvements de Trésorerie") {
           </button>
         </div>
 
-        <div className={`mx-4 mt-4 shrink-0 rounded-2xl border border-white/10 bg-white/[0.06] p-3 shadow-inner ${sidebarCollapsed ? "lg:mx-3" : ""}`}>
+        <button
+          type="button"
+          onClick={() => setProfilePanelOpen(true)}
+          className={`mx-4 mt-4 shrink-0 rounded-2xl border border-white/10 bg-white/[0.06] p-3 text-left shadow-inner transition hover:bg-white/[0.10] active:scale-[.99] ${sidebarCollapsed ? "lg:mx-3" : ""}`}
+          title="Ouvrir mon profil"
+        >
           <div className="flex items-center gap-3">
-            <div className="relative grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-amber-300 to-orange-500 text-xl shadow-lg">
-              👤
+            <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-amber-300 to-orange-500 text-xl shadow-lg ring-2 ring-white/10">
+              {currentProfilePhoto ? (
+                <img src={currentProfilePhoto} alt={currentUser.name} className="h-full w-full object-cover" />
+              ) : (
+                <div className="grid h-full w-full place-items-center text-sm font-semibold text-white">
+                  {getUserInitials(currentUser.name, currentUser.email)}
+                </div>
+              )}
               <span className="absolute -bottom-1 -right-1 h-3.5 w-3.5 rounded-full border-2 border-[#071d35] bg-emerald-400" />
             </div>
 
             <div className={`min-w-0 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
-              <p className="truncate text-[12px] font-black">{user.name}</p>
-              <p className="text-[10px] font-bold uppercase tracking-wide text-cyan-300">{user.role}</p>
-              <p className="truncate text-[10px] text-slate-300">{user.email}</p>
+              <p className="sidebar-profile-name truncate">{currentUser.name}</p>
+              <p className="sidebar-profile-role uppercase tracking-wide text-cyan-300">{currentRoleLabel}</p>
+              <p className="sidebar-profile-email truncate text-slate-300">{currentUser.email}</p>
+              
             </div>
           </div>
-        </div>
+        </button>
 
         <div className={`mx-4 mt-4 shrink-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
           <div className="flex items-center gap-2">
@@ -953,7 +1310,7 @@ if (item === "Mouvements de Trésorerie") {
             <input
               value={menuSearch}
               onChange={(e) => setMenuSearch(e.target.value)}
-              className="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-slate-500"
+              className="sidebar-search-input w-full bg-transparent text-white outline-none placeholder:text-slate-500"
               placeholder="Rechercher menu..."
             />
           </div>
@@ -962,7 +1319,7 @@ if (item === "Mouvements de Trésorerie") {
         <nav className={`school-scroll mt-4 flex-1 overflow-y-auto px-2 pb-3 ${sidebarCollapsed ? "lg:px-3" : ""}`}>
           {filteredMenus.map((menu) => (
             <div key={menu.title} className="mb-2">
-              <div className={`mb-1 flex items-center justify-between rounded-xl px-3 py-2 text-[11px] font-black uppercase tracking-wide text-slate-300 ${sidebarCollapsed ? "lg:justify-center lg:px-1" : ""}`}>
+              <div className={`mb-1 flex items-center justify-between rounded-xl px-3 py-2 sidebar-section-title uppercase text-slate-300 ${sidebarCollapsed ? "lg:justify-center lg:px-1" : ""}`}>
                 <span className="flex items-center gap-2">
                   <span className="text-cyan-400">{menu.title === "Étudiants" ? "🎓" : menu.title === "Liste Trésorerie" ? "💳" : menu.title === "Paramètres" ? "⚙" : "▣"}</span>
                   <span className={`${sidebarCollapsed ? "lg:hidden" : ""}`}>{menu.title}</span>
@@ -977,7 +1334,7 @@ if (item === "Mouvements de Trésorerie") {
                     handleMenuClick(item);
                     setSidebarOpen(false);
                   }}
-                  className={`group mb-1 flex w-full items-center gap-2 rounded-xl border-l-4 border-transparent px-3 py-2 text-left text-[12px] font-semibold text-slate-200 transition-all duration-200 hover:translate-x-1 hover:border-l-cyan-300 hover:bg-white/10 hover:text-white active:scale-[.98] ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
+                  className={`group mb-1 flex w-full items-center gap-2 rounded-xl border-l-4 border-transparent px-3 py-2 sidebar-menu-item text-left text-slate-200 transition-all duration-200 hover:translate-x-1 hover:border-l-cyan-300 hover:bg-white/10 hover:text-white active:scale-[.98] ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
                 >
                   <span className="text-cyan-400 transition group-hover:text-white">›</span>
                   <span className={`truncate ${sidebarCollapsed ? "lg:hidden" : ""}`}>{item}</span>
@@ -987,7 +1344,7 @@ if (item === "Mouvements de Trésorerie") {
           ))}
 
           {filteredMenus.length === 0 && (
-            <div className="mx-2 rounded-2xl border border-white/10 bg-white/[0.06] p-4 text-center text-[12px] font-bold text-slate-300">
+            <div className="mx-2 rounded-2xl border border-white/10 bg-white/[0.06] p-4 text-center text-[12px] font-medium text-slate-300">
               Aucun menu trouvé
             </div>
           )}
@@ -996,7 +1353,7 @@ if (item === "Mouvements de Trésorerie") {
         <div className={`shrink-0 border-t border-white/10 p-4 ${sidebarCollapsed ? "lg:px-3" : ""}`}>
           <button
             onClick={logout}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-[12px] font-black text-white transition hover:bg-red-600 hover:shadow-lg hover:shadow-red-950/30"
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 sidebar-logout-btn text-white transition hover:bg-red-600 hover:shadow-lg hover:shadow-red-950/30"
           >
             <span>⎋</span><span className={`${sidebarCollapsed ? "lg:hidden" : ""}`}>Déconnexion</span>
           </button>
@@ -1021,42 +1378,55 @@ if (item === "Mouvements de Trésorerie") {
                   setSidebarOpen(true);
                 }
               }}
-              className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-[20px] font-black text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-50"
+              className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-[20px] font-semibold text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-50"
               aria-label="Ouvrir ou réduire le menu"
               title="Ouvrir / réduire le menu"
             >
               {sidebarCollapsed ? "☰" : "☰"}
             </button>
             <div className="hidden md:block">
-              <p className="text-[11px] font-bold uppercase tracking-[.25em] text-slate-400">Administration</p>
-              <p className="text-[13px] font-black text-slate-800">Gestion des étudiants</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[.25em] text-slate-400">Administration</p>
+              <p className="text-[13px] font-semibold text-slate-800">Gestion des étudiants</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <div className="max-w-[155px] truncate rounded-full border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-slate-600 shadow-sm sm:max-w-none sm:px-3 sm:text-[11px]">
-              Connecté : <b className="text-slate-900">{user.name}</b>
+          <button
+            type="button"
+            onClick={() => setProfilePanelOpen(true)}
+            className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2 py-1.5 shadow-sm transition hover:bg-slate-50 active:scale-[.99]"
+            title="Ouvrir mon profil"
+          >
+            <div className="max-w-[155px] truncate text-[10px] font-medium text-slate-600 sm:max-w-none sm:px-1 sm:text-[11px]">
+              Connecté : <b className="text-slate-900">{currentUser.name}</b>
             </div>
-            <div className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-br from-amber-200 to-orange-400 text-sm shadow-sm">👤</div>
-          </div>
+            <div className="h-9 w-9 overflow-hidden rounded-full bg-gradient-to-br from-amber-200 to-orange-400 text-sm shadow-sm ring-2 ring-slate-100">
+              {currentProfilePhoto ? (
+                <img src={currentProfilePhoto} alt={currentUser.name} className="h-full w-full object-cover" />
+              ) : (
+                <div className="grid h-full w-full place-items-center text-[11px] font-semibold text-white">
+                  {getUserInitials(currentUser.name, currentUser.email)}
+                </div>
+              )}
+            </div>
+          </button>
         </header>
 
         <div className="student-shell flex-1 overflow-auto p-2 md:p-3" style={{ backgroundColor: studentPageColor }}>
           <div className="student-card overflow-hidden rounded-[18px] border border-slate-200 bg-white shadow-xl shadow-slate-200/70">
-            <div className="border-b border-slate-200 bg-gradient-to-r from-white via-slate-50 to-slate-100 p-2.5 md:p-3">
+            <div className="border-b border-slate-200 bg-gradient-to-r from-white via-slate-50 to-slate-100 p-2 md:p-2.5">
               <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
                 <div>
-                  <div className="mb-2 h-1 w-12 rounded-full theme-gradient" />
-                  <h1 className="text-[18px] font-black tracking-tight text-slate-950 md:text-[22px]">
+                  <div className="mb-1.5 h-0.5 w-10 rounded-full theme-gradient" />
+                  <h1 className="student-list-heading text-slate-950">
                     Liste des étudiants
                   </h1>
-                  <p className="mt-0.5 text-[12px] font-bold text-blue-600">
+                  <p className="student-list-subtitle mt-0.5 text-blue-600">
                     {filtered.length} étudiant{filtered.length > 1 ? "s" : ""} inscrit{filtered.length > 1 ? "s" : ""}
                     {loadingStudents ? " • Chargement..." : ""}
                   </p>
                 </div>
 
-                <div className="top-actions flex flex-wrap gap-2">
+                <div className="top-actions flex flex-wrap items-center gap-1.5">
                   <button
                     onClick={() => {
                       if (selectedYear) {
@@ -1067,7 +1437,7 @@ if (item === "Mouvements de Trésorerie") {
                       loadStudents(selectedYear, true);
                       loadAcademics(selectedYear);
                     }}
-                    className="h-8 rounded-lg theme-dark-btn px-3 text-[12px] font-black text-white shadow-lg shadow-slate-300 transition hover:-translate-y-0.5 hover:brightness-110"
+                    className="h-8 rounded-lg theme-dark-btn px-3 text-[11px] font-medium text-white shadow-sm shadow-slate-300 transition hover:-translate-y-0.5 hover:brightness-110"
                   >
                     ⟳ Actualiser
                   </button>
@@ -1093,7 +1463,7 @@ if (item === "Mouvements de Trésorerie") {
                         );
                       });
                     }}
-                    className="h-8 rounded-lg bg-emerald-600 px-3 text-[12px] font-black text-white shadow-lg shadow-emerald-200 transition hover:-translate-y-0.5 hover:bg-emerald-700"
+                    className="h-8 rounded-lg bg-emerald-600 px-3 text-[11px] font-medium text-white shadow-sm shadow-emerald-200 transition hover:-translate-y-0.5 hover:bg-emerald-700"
                   >
                     ▣ Export Excel
                   </button>
@@ -1186,7 +1556,7 @@ if (item === "Mouvements de Trésorerie") {
                         win.print();
                       }, 500);
                     }}
-                    className="h-8 rounded-lg theme-button px-3 text-[12px] font-black text-white shadow-lg shadow-blue-200 transition hover:-translate-y-0.5 hover:brightness-110"
+                    className="h-8 rounded-lg theme-button px-3 text-[11px] font-medium text-white shadow-sm shadow-blue-200 transition hover:-translate-y-0.5 hover:brightness-110"
                   >
                     ⎙ Imprimer PDF
                   </button>
@@ -1209,7 +1579,7 @@ if (item === "Mouvements de Trésorerie") {
                     setClasse("TOUT");
                     setSerie("TOUT");
                   }}
-                  className="premium-select h-8 min-w-[125px] rounded-lg border border-slate-200 theme-dark-btn px-2.5 pr-7 text-[11px] font-black text-white outline-none ring-blue-200 transition focus:ring-4"
+                  className="premium-select h-8 min-w-[150px] rounded-lg border border-slate-200 theme-dark-btn px-2.5 pr-7 text-[11px] font-medium text-white outline-none ring-blue-200 transition focus:ring-4"
                 >
                   {schoolYears.length === 0 && <option value="">Année scolaire</option>}
 
@@ -1221,7 +1591,7 @@ if (item === "Mouvements de Trésorerie") {
                   ))}
                 </select>
 
-                <div className="flex h-8 min-w-[125px] items-center rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-[11px] font-black text-slate-800">
+                <div className="flex h-8 min-w-[155px] items-center rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-[11px] font-medium text-slate-700">
                   Sites : Strelitzia School
                 </div>
 
@@ -1231,7 +1601,7 @@ if (item === "Mouvements de Trésorerie") {
                     setClasse(e.target.value);
                     setSerie("TOUT");
                   }}
-                  className="premium-select h-8 min-w-[125px] rounded-lg border border-slate-200 theme-dark-btn px-2.5 pr-7 text-[11px] font-black text-white outline-none ring-blue-200 transition focus:ring-4"
+                  className="premium-select h-8 min-w-[150px] rounded-lg border border-slate-200 theme-dark-btn px-2.5 pr-7 text-[11px] font-medium text-white outline-none ring-blue-200 transition focus:ring-4"
                 >
                   <option value="TOUT">Classe : TOUT</option>
 
@@ -1245,7 +1615,7 @@ if (item === "Mouvements de Trésorerie") {
                 <select
                   value={serie}
                   onChange={(e) => setSerie(e.target.value)}
-                  className="premium-select h-8 min-w-[125px] rounded-lg border border-slate-200 theme-dark-btn px-2.5 pr-7 text-[11px] font-black text-white outline-none ring-blue-200 transition focus:ring-4"
+                  className="premium-select h-8 min-w-[150px] rounded-lg border border-slate-200 theme-dark-btn px-2.5 pr-7 text-[11px] font-medium text-white outline-none ring-blue-200 transition focus:ring-4"
                 >
                   <option value="TOUT">Série : TOUT</option>
 
@@ -1265,7 +1635,7 @@ if (item === "Mouvements de Trésorerie") {
                     <input
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
-                      className="h-8 w-full rounded-lg border border-slate-200 bg-white px-4 pr-10 text-[12px] font-semibold outline-none shadow-sm ring-blue-200 transition placeholder:text-slate-400 focus:ring-4"
+                      className="h-8 w-full rounded-lg border border-slate-200 bg-white px-3 pr-9 text-[11px] font-normal outline-none shadow-sm ring-blue-200 transition placeholder:text-slate-400 focus:ring-4"
                       placeholder="Rechercher un étudiant..."
                     />
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">🔎</span>
@@ -1273,20 +1643,20 @@ if (item === "Mouvements de Trésorerie") {
 
                   <button
                     onClick={() => loadStudents(selectedYear)}
-                    className="h-8 rounded-lg theme-dark-btn px-5 text-[12px] font-black text-white shadow-sm transition hover:brightness-110"
+                    className="h-8 rounded-lg theme-dark-btn px-3.5 text-[11px] font-medium text-white shadow-sm transition hover:brightness-110"
                   >
                     🔍 Rechercher
                   </button>
 
                   <button
                     onClick={resetFilters}
-                    className="h-8 rounded-lg bg-red-500 px-5 text-[12px] font-black text-white shadow-sm transition hover:bg-red-600"
+                    className="h-8 rounded-lg bg-red-500 px-3.5 text-[11px] font-medium text-white shadow-sm transition hover:bg-red-600"
                   >
                     ⟳ Initialiser
                   </button>
                 </div>
 
-                <div className="shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-black text-slate-700 shadow-sm">
+                <div className="shrink-0 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm">
                   Total : <span className="text-blue-700">{filtered.length}</span>
                 </div>
               </div></div>
@@ -1319,7 +1689,7 @@ if (item === "Mouvements de Trésorerie") {
                     ].map((h) => (
                       <th
                         key={h}
-                        className={`border-b border-r border-white/10 theme-dark-btn px-2 py-1.5 text-left text-[10px] font-black uppercase tracking-wide whitespace-nowrap ${
+                        className={`border-b border-r border-white/10 theme-dark-btn px-2 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wide whitespace-nowrap ${
                           h === "Action" ? "sticky-action-col w-[58px] min-w-[58px] text-center" : ""
                         } ${["Site", "AS", "Date Naiss.", "Lieu Naiss."].includes(h) ? "mobile-hide" : ""}`}
                       >
@@ -1332,7 +1702,7 @@ if (item === "Mouvements de Trésorerie") {
                 <tbody>
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={13} className="p-10 text-center text-[13px] font-bold text-slate-500">
+                      <td colSpan={13} className="p-10 text-center text-[13px] font-medium text-slate-500">
                         Aucun étudiant trouvé
                       </td>
                     </tr>
@@ -1458,7 +1828,7 @@ if (item === "Mouvements de Trésorerie") {
                                       setOpenActionId(null);
                                       deleteStudent(s.id);
                                     }}
-                                    className="w-full px-4 py-3 text-left text-[12px] font-black text-red-600 transition hover:bg-red-50"
+                                    className="w-full px-4 py-3 text-left text-[12px] font-semibold text-red-600 transition hover:bg-red-50"
                                   >
                                     🗑 Supprimer
                                   </button>
@@ -1474,7 +1844,7 @@ if (item === "Mouvements de Trésorerie") {
               </table>
             </div>
 
-            <div className="flex flex-col gap-2 border-t border-slate-200 bg-white px-3 py-2 text-[10px] font-bold text-slate-600 md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-col gap-2 border-t border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 md:flex-row md:items-center md:justify-between">
               <span>
                 Affichage de 1 à {filtered.length} sur {filtered.length} étudiant{filtered.length > 1 ? "s" : ""}
               </span>
@@ -1504,7 +1874,7 @@ if (item === "Mouvements de Trésorerie") {
 
                 <div className="relative flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-[11px] font-black uppercase tracking-[.30em] text-white/60">Paramètres professionnels</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-[.30em] text-white/60">Paramètres professionnels</p>
                     <h2 className="mt-1 text-[24px] font-black leading-tight md:text-[32px]">Thème & apparence</h2>
                     <p className="mt-2 max-w-[700px] text-[13px] font-semibold leading-relaxed text-white/70">
                       Gérez le style complet de l'application : couleur principale, menu latéral, boutons, filtres et vue étudiants.
@@ -1521,30 +1891,30 @@ if (item === "Mouvements de Trésorerie") {
 
                 <div className="relative mt-5 grid gap-3 md:grid-cols-4">
                   <div className="rounded-2xl border border-white/10 bg-white/10 p-4 shadow-inner">
-                    <div className="text-[10px] font-black uppercase tracking-wide text-white/55">Thème actif</div>
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-white/55">Thème actif</div>
                     <div className="mt-2 flex items-center gap-3">
                       <span className="grid h-12 w-12 place-items-center rounded-2xl bg-white/15 text-[22px]">{currentTheme.icon}</span>
                       <div>
                         <p className="text-[14px] font-black">{currentTheme.name}</p>
-                        <p className="text-[11px] font-bold text-white/60">{currentTheme.label}</p>
+                        <p className="text-[11px] font-medium text-white/60">{currentTheme.label}</p>
                       </div>
                     </div>
                   </div>
 
                   <div className="rounded-2xl border border-white/10 bg-white/10 p-4">
-                    <div className="text-[10px] font-black uppercase tracking-wide text-white/55">Couleur noire</div>
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-white/55">Couleur noire</div>
                     <p className="mt-2 text-[13px] font-black">Noir Élégant disponible</p>
                     <p className="mt-1 text-[11px] font-semibold text-white/60">Style sombre, luxe et premium.</p>
                   </div>
 
                   <div className="rounded-2xl border border-white/10 bg-white/10 p-4">
-                    <div className="text-[10px] font-black uppercase tracking-wide text-white/55">Sidebar</div>
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-white/55">Sidebar</div>
                     <p className="mt-2 text-[13px] font-black">Menu responsive</p>
                     <p className="mt-1 text-[11px] font-semibold text-white/60">Recherche menu + fermeture mobile.</p>
                   </div>
 
                   <div className="rounded-2xl border border-white/10 bg-white/10 p-4">
-                    <div className="text-[10px] font-black uppercase tracking-wide text-white/55">Vue étudiants</div>
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-white/55">Vue étudiants</div>
                     <p className="mt-2 text-[13px] font-black">Table claire compacte</p>
                     <p className="mt-1 text-[11px] font-semibold text-white/60">Lisible sur PC et téléphone.</p>
                   </div>
@@ -1573,7 +1943,7 @@ if (item === "Mouvements de Trésorerie") {
                         >
                           <div className="flex items-center gap-2">
                             <span className="text-[18px]">{tab.icon}</span>
-                            <span className="text-[12px] font-black md:text-[13px]">{tab.title}</span>
+                            <span className="text-[12px] font-semibold md:text-[13px]">{tab.title}</span>
                           </div>
                           <p className={`mt-1 hidden text-[10px] font-bold md:block ${active ? "text-white/55" : "text-slate-400"}`}>{tab.desc}</p>
                         </button>
@@ -1582,7 +1952,7 @@ if (item === "Mouvements de Trésorerie") {
                   </div>
 
                   <div className="mt-4 hidden rounded-2xl border border-slate-200 bg-slate-50 p-4 md:block">
-                    <p className="text-[11px] font-black uppercase tracking-wide text-slate-400">Sauvegarde</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Sauvegarde</p>
                     <p className="mt-2 text-[12px] font-bold leading-relaxed text-slate-600">
                       Le thème choisi est enregistré automatiquement sur cet appareil.
                     </p>
@@ -1595,9 +1965,9 @@ if (item === "Mouvements de Trésorerie") {
                       <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
                         <div>
                           <h3 className="text-[20px] font-black text-slate-950">Bibliothèque de thèmes</h3>
-                          <p className="mt-1 text-[12px] font-bold text-slate-500">Sélectionnez une couleur professionnelle pour toute l'application.</p>
+                          <p className="mt-1 text-[12px] font-medium text-slate-500">Sélectionnez une couleur professionnelle pour toute l'application.</p>
                         </div>
-                        <span className="w-fit rounded-full bg-slate-900 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-white">
+                        <span className="w-fit rounded-full bg-slate-900 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-white">
                           {appThemes.length} thèmes disponibles
                         </span>
                       </div>
@@ -1607,7 +1977,7 @@ if (item === "Mouvements de Trésorerie") {
                           <div className="p-5">
                             <div className="flex items-start justify-between gap-4">
                               <div>
-                                <p className="text-[11px] font-black uppercase tracking-[.24em] text-slate-400">Espace étudiants</p>
+                                <p className="text-[11px] font-semibold uppercase tracking-[.24em] text-slate-400">Espace étudiants</p>
                                 <h4 className="mt-1 text-[18px] font-black text-slate-950">Couleur de la page Liste des étudiants</h4>
                                 <p className="mt-1 max-w-[620px] text-[13px] font-bold leading-relaxed text-slate-500">
                                   Choisissez une ambiance professionnelle pour le fond de la page où s’affiche la liste des étudiants.
@@ -1623,7 +1993,7 @@ if (item === "Mouvements de Trésorerie") {
 
                             <div className="mt-5 grid gap-3 md:grid-cols-[1fr_92px]">
                               <label className="block">
-                                <span className="text-[12px] font-black text-slate-700">Palette professionnelle</span>
+                                <span className="text-[12px] font-semibold text-slate-700">Palette professionnelle</span>
                                 <select
                                   value={studentPageColor}
                                   onChange={(e) => applyStudentPageColor(e.target.value)}
@@ -1638,7 +2008,7 @@ if (item === "Mouvements de Trésorerie") {
                               </label>
 
                               <label className="block">
-                                <span className="text-[12px] font-black text-slate-700">Libre</span>
+                                <span className="text-[12px] font-semibold text-slate-700">Libre</span>
                                 <input
                                   type="color"
                                   value={studentPageColor}
@@ -1653,7 +2023,7 @@ if (item === "Mouvements de Trésorerie") {
                               <button
                                 type="button"
                                 onClick={resetStudentPageColor}
-                                className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-[12px] font-black text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-50"
+                                className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-[12px] font-semibold text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-50"
                               >
                                 Reprendre la couleur du thème actif
                               </button>
@@ -1661,7 +2031,7 @@ if (item === "Mouvements de Trésorerie") {
                               <button
                                 type="button"
                                 onClick={() => applyStudentPageColor(DEFAULT_STUDENT_PAGE_COLOR)}
-                                className="rounded-2xl border border-slate-200 bg-slate-950 px-4 py-2.5 text-[12px] font-black text-white shadow-sm transition hover:-translate-y-0.5 hover:brightness-110"
+                                className="rounded-2xl border border-slate-200 bg-slate-950 px-4 py-2.5 text-[12px] font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:brightness-110"
                               >
                                 Réinitialiser
                               </button>
@@ -1669,7 +2039,7 @@ if (item === "Mouvements de Trésorerie") {
                           </div>
 
                           <div className="border-t border-slate-200 bg-slate-50 p-5 lg:border-l lg:border-t-0">
-                            <p className="text-[11px] font-black uppercase tracking-[.22em] text-slate-400">Aperçu</p>
+                            <p className="text-[11px] font-semibold uppercase tracking-[.22em] text-slate-400">Aperçu</p>
                             <div
                               className="mt-3 rounded-[22px] border border-slate-200 p-3 shadow-inner"
                               style={{ backgroundColor: studentPageColor }}
@@ -1714,12 +2084,12 @@ if (item === "Mouvements de Trésorerie") {
                               <div className="mt-3 flex items-start justify-between gap-3">
                                 <div>
                                   <p className="text-[13px] font-black text-slate-950">{theme.icon} {theme.name}</p>
-                                  <p className="mt-1 text-[10px] font-bold text-slate-500">{theme.label}</p>
+                                  <p className="mt-1 text-[10px] font-medium text-slate-500">{theme.label}</p>
                                 </div>
                                 {active ? (
-                                  <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-black text-emerald-700">ACTIF</span>
+                                  <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-semibold text-emerald-700">ACTIF</span>
                                 ) : (
-                                  <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-black text-slate-500">CHOISIR</span>
+                                  <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-500">CHOISIR</span>
                                 )}
                               </div>
                             </button>
@@ -1732,7 +2102,7 @@ if (item === "Mouvements de Trésorerie") {
                   {themeSettingsTab === "preview" && (
                     <div>
                       <h3 className="text-[20px] font-black text-slate-950">Aperçu du menu latéral</h3>
-                      <p className="mt-1 text-[12px] font-bold text-slate-500">Le thème choisi s'applique au sidebar, aux menus actifs et aux boutons.</p>
+                      <p className="mt-1 text-[12px] font-medium text-slate-500">Le thème choisi s'applique au sidebar, aux menus actifs et aux boutons.</p>
 
                       <div className="mt-4 grid gap-4 lg:grid-cols-[290px_1fr]">
                         <div className="theme-sidebar overflow-hidden rounded-[26px] p-4 text-white shadow-xl">
@@ -1740,12 +2110,12 @@ if (item === "Mouvements de Trésorerie") {
                             <div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/15 font-black">S</div>
                             <div>
                               <p className="text-[14px] font-black">Strelitzia School</p>
-                              <p className="text-[10px] font-bold uppercase tracking-wide text-white/45">Menu preview</p>
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-white/45">Menu preview</p>
                             </div>
                           </div>
                           {menus.slice(0, 4).map((menu) => (
                             <div key={menu.title} className="mb-3">
-                              <p className="mb-2 px-2 text-[10px] font-black uppercase tracking-wide text-white/35">{menu.title}</p>
+                              <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-wide text-white/35">{menu.title}</p>
                               {menu.items.slice(0, 3).map((item, index) => (
                                 <div
                                   key={item}
@@ -1759,15 +2129,15 @@ if (item === "Mouvements de Trésorerie") {
                         </div>
 
                         <div className="rounded-[26px] border border-slate-200 bg-white p-5 shadow-sm">
-                          <p className="text-[12px] font-black uppercase tracking-wide text-slate-400">Paramètre menu</p>
+                          <p className="text-[12px] font-semibold uppercase tracking-wide text-slate-400">Paramètre menu</p>
                           <h4 className="mt-2 text-[20px] font-black text-slate-950">Sidebar professionnel</h4>
                           <p className="mt-2 text-[13px] font-bold leading-relaxed text-slate-600">
                             Le menu reste compact, clair, avec recherche interne des menus seulement. Sur mobile, il s'ouvre et se ferme proprement.
                           </p>
                           <div className="mt-5 flex flex-wrap gap-2">
-                            <span className="rounded-full bg-slate-100 px-3 py-2 text-[11px] font-black text-slate-700">Recherche menu</span>
-                            <span className="rounded-full bg-slate-100 px-3 py-2 text-[11px] font-black text-slate-700">Responsive mobile</span>
-                            <span className="rounded-full bg-slate-100 px-3 py-2 text-[11px] font-black text-slate-700">Mode noir inclus</span>
+                            <span className="rounded-full bg-slate-100 px-3 py-2 text-[11px] font-semibold text-slate-700">Recherche menu</span>
+                            <span className="rounded-full bg-slate-100 px-3 py-2 text-[11px] font-semibold text-slate-700">Responsive mobile</span>
+                            <span className="rounded-full bg-slate-100 px-3 py-2 text-[11px] font-semibold text-slate-700">Mode noir inclus</span>
                           </div>
                         </div>
                       </div>
@@ -1777,34 +2147,34 @@ if (item === "Mouvements de Trésorerie") {
                   {themeSettingsTab === "studentView" && (
                     <div>
                       <h3 className="text-[20px] font-black text-slate-950">Aperçu vue étudiants</h3>
-                      <p className="mt-1 text-[12px] font-bold text-slate-500">Le thème s'applique aux actions, filtres, en-têtes et badges.</p>
+                      <p className="mt-1 text-[12px] font-medium text-slate-500">Le thème s'applique aux actions, filtres, en-têtes et badges.</p>
 
                       <div className="mt-4 overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-sm">
                         <div className="theme-gradient p-4 text-white">
                           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                             <div>
-                              <p className="text-[10px] font-black uppercase tracking-[.22em] text-white/70">Liste des étudiants</p>
+                              <p className="text-[10px] font-semibold uppercase tracking-[.22em] text-white/70">Liste des étudiants</p>
                               <h4 className="text-[22px] font-black">Vue compacte professionnelle</h4>
                             </div>
                             <div className="flex flex-wrap gap-2">
-                              <button className="rounded-xl bg-white/20 px-3 py-2 text-[11px] font-black">Actualiser</button>
-                              <button className="rounded-xl bg-white/20 px-3 py-2 text-[11px] font-black">Excel</button>
-                              <button className="rounded-xl bg-white px-3 py-2 text-[11px] font-black text-slate-950">Imprimer</button>
+                              <button className="rounded-xl bg-white/20 px-3 py-2 text-[11px] font-semibold">Actualiser</button>
+                              <button className="rounded-xl bg-white/20 px-3 py-2 text-[11px] font-semibold">Excel</button>
+                              <button className="rounded-xl bg-white px-3 py-2 text-[11px] font-semibold text-slate-950">Imprimer</button>
                             </div>
                           </div>
                         </div>
                         <div className="p-4">
                           <div className="grid gap-2 md:grid-cols-4">
                             {["Recherche", "Année", "Classe", "Série"].map((label) => (
-                              <div key={label} className="h-11 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-[11px] font-black text-slate-400">{label}</div>
+                              <div key={label} className="h-11 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-[11px] font-semibold text-slate-400">{label}</div>
                             ))}
                           </div>
                           <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
-                            <div className="theme-dark-btn grid grid-cols-4 gap-2 px-3 py-3 text-[10px] font-black uppercase text-white">
+                            <div className="theme-dark-btn grid grid-cols-4 gap-2 px-3 py-3 text-[10px] font-semibold uppercase text-white">
                               <span>Matricule</span><span>Nom</span><span>Classe</span><span>Action</span>
                             </div>
                             {[1, 2, 3].map((row) => (
-                              <div key={row} className="grid grid-cols-4 gap-2 border-t border-slate-100 px-3 py-3 text-[11px] font-bold text-slate-700">
+                              <div key={row} className="grid grid-cols-4 gap-2 border-t border-slate-100 px-3 py-3 text-[11px] font-medium text-slate-700">
                                 <span>MAT-00{row}</span><span>Étudiant {row}</span><span>GRADE {row}</span><span>Détails</span>
                               </div>
                             ))}
@@ -1820,18 +2190,18 @@ if (item === "Mouvements de Trésorerie") {
                       <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
                         <div>
                           <h3 className="text-[20px] font-black text-slate-950">Taille de police globale</h3>
-                          <p className="mt-1 text-[12px] font-bold text-slate-500">
+                          <p className="mt-1 text-[12px] font-medium text-slate-500">
                             Appuyez sur + ou - pour agrandir/réduire tous les textes de l’interface : sidebar, boutons, filtres, tableau et aperçu étudiants.
                           </p>
                         </div>
-                        <span className="w-fit rounded-full bg-slate-900 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-white">
+                        <span className="w-fit rounded-full bg-slate-900 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-white">
                           Actuel : {activeFontScaleName} • {fontPercent}%
                         </span>
                       </div>
 
                       <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
                         <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-                          <p className="text-[11px] font-black uppercase tracking-wide text-slate-400">Réglage rapide</p>
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Réglage rapide</p>
                           <div className="mt-4 flex items-center justify-center gap-4">
                             <button
                               type="button"
@@ -1845,7 +2215,7 @@ if (item === "Mouvements de Trésorerie") {
 
                             <div className="min-w-[130px] rounded-3xl border border-slate-200 bg-slate-950 px-5 py-4 text-center text-white shadow-xl">
                               <div className="text-[30px] font-black leading-none">{fontPercent}%</div>
-                              <div className="mt-1 text-[11px] font-black uppercase tracking-wide text-white/55">{activeFontScaleName}</div>
+                              <div className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-white/55">{activeFontScaleName}</div>
                             </div>
 
                             <button
@@ -1869,7 +2239,7 @@ if (item === "Mouvements de Trésorerie") {
                             className="mt-6 w-full accent-slate-950"
                           />
 
-                          <div className="mt-3 flex items-center justify-between text-[10px] font-black text-slate-400">
+                          <div className="mt-3 flex items-center justify-between text-[10px] font-semibold text-slate-400">
                             <span>Petit</span>
                             <span>Normal</span>
                             <span>Grand</span>
@@ -1879,14 +2249,14 @@ if (item === "Mouvements de Trésorerie") {
                             <button
                               type="button"
                               onClick={() => applyFontScale(1)}
-                              className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-[12px] font-black text-slate-800 transition hover:bg-white"
+                              className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-[12px] font-semibold text-slate-800 transition hover:bg-white"
                             >
                               Réinitialiser
                             </button>
                             <button
                               type="button"
                               onClick={() => applyFontScale(1.25)}
-                              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-[12px] font-black text-slate-800 shadow-sm transition hover:bg-slate-50"
+                              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-[12px] font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50"
                             >
                               Mode lecture
                             </button>
@@ -1895,13 +2265,13 @@ if (item === "Mouvements de Trésorerie") {
 
                         <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
                           <div className="theme-dark-btn flex items-center justify-between px-4 py-3 text-white">
-                            <span className="text-[11px] font-black uppercase tracking-wide">Aperçu direct de toute l’interface</span>
-                            <span className="rounded-full bg-white/15 px-3 py-1 text-[10px] font-black">{fontPercent}%</span>
+                            <span className="text-[11px] font-semibold uppercase tracking-wide">Aperçu direct de toute l’interface</span>
+                            <span className="rounded-full bg-white/15 px-3 py-1 text-[10px] font-semibold">{fontPercent}%</span>
                           </div>
                           <div className="p-4">
                             <div className="mb-3 flex flex-wrap gap-2">
-                              <button className="theme-button rounded-xl px-3 py-2 text-[11px] font-black text-white">Bouton principal</button>
-                              <button className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-black text-slate-800">Bouton secondaire</button>
+                              <button className="theme-button rounded-xl px-3 py-2 text-[11px] font-semibold text-white">Bouton principal</button>
+                              <button className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-semibold text-slate-800">Bouton secondaire</button>
                               <input className="rounded-xl border border-slate-200 px-3 py-2 text-[11px] font-bold outline-none" value="Recherche étudiant" readOnly />
                             </div>
 
@@ -1919,7 +2289,7 @@ if (item === "Mouvements de Trésorerie") {
                                   <tr className="bg-white">
                                     <td className="border-t border-slate-200 px-3 py-2 font-black text-red-500">MAT-001</td>
                                     <td className="border-t border-slate-200 px-3 py-2 font-black text-slate-900">Exemple Étudiant</td>
-                                    <td className="border-t border-slate-200 px-3 py-2 font-bold text-slate-700">GRADE 1</td>
+                                    <td className="border-t border-slate-200 px-3 py-2 font-medium text-slate-700">GRADE 1</td>
                                     <td className="border-t border-slate-200 px-3 py-2 text-slate-700">034 00 000 00</td>
                                   </tr>
                                 </tbody>
@@ -1938,25 +2308,25 @@ if (item === "Mouvements de Trésorerie") {
               </div>
 
               <div className="flex flex-col gap-2 border-t border-slate-200 bg-white px-5 py-4 md:flex-row md:items-center md:justify-between">
-                <p className="text-[12px] font-bold text-slate-500">
+                <p className="text-[12px] font-medium text-slate-500">
                   Thème actif : <b className="text-slate-900">{currentTheme.name}</b> — Police : <b className="text-slate-900">{activeFontScaleName} ({fontPercent}%)</b> — sauvegarde automatique.
                 </p>
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <button
                     onClick={() => applyFontScale(1)}
-                    className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-[12px] font-black text-slate-900 shadow-lg hover:bg-slate-50"
+                    className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-[12px] font-semibold text-slate-900 shadow-lg hover:bg-slate-50"
                   >
                     Police standard
                   </button>
                   <button
                     onClick={() => applyTheme("black")}
-                    className="rounded-xl border border-slate-200 bg-slate-950 px-5 py-3 text-[12px] font-black text-white shadow-lg hover:brightness-110"
+                    className="rounded-xl border border-slate-200 bg-slate-950 px-5 py-3 text-[12px] font-semibold text-white shadow-lg hover:brightness-110"
                   >
                     Activer Noir Élégant
                   </button>
                   <button
                     onClick={() => setThemePanelOpen(false)}
-                    className="theme-button rounded-xl px-5 py-3 text-[12px] font-black text-white shadow-lg hover:brightness-110"
+                    className="theme-button rounded-xl px-5 py-3 text-[12px] font-semibold text-white shadow-lg hover:brightness-110"
                   >
                     Valider le thème
                   </button>
@@ -1974,14 +2344,14 @@ if (item === "Mouvements de Trésorerie") {
                 <div className="absolute -right-20 -top-24 h-52 w-52 rounded-full bg-white/10" />
                 <div className="relative flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-[10px] font-black uppercase tracking-[.26em] text-white/55">Information étudiant</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-[.26em] text-white/55">Information étudiant</p>
                     <h2 className="mt-1 truncate text-[22px] font-black md:text-[28px]">
                       {selectedStudent.nom} {selectedStudent.prenoms}
                     </h2>
                     <div className="mt-2 flex flex-wrap gap-2">
-                      <span className="rounded-full bg-white/15 px-3 py-1 text-[11px] font-black text-white">M° {selectedStudent.matricule}</span>
-                      <span className="rounded-full bg-white/15 px-3 py-1 text-[11px] font-black text-white">{selectedStudent.classe || "Classe -"}</span>
-                      <span className="rounded-full bg-white/15 px-3 py-1 text-[11px] font-black text-white">{selectedStudent.section || "Série -"}</span>
+                      <span className="rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold text-white">M° {selectedStudent.matricule}</span>
+                      <span className="rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold text-white">{selectedStudent.classe || "Classe -"}</span>
+                      <span className="rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold text-white">{selectedStudent.section || "Série -"}</span>
                     </div>
                   </div>
 
@@ -2001,12 +2371,12 @@ if (item === "Mouvements de Trésorerie") {
                   <div className="flex flex-col gap-3 border-b border-slate-200 bg-white px-4 py-3 md:flex-row md:items-center md:justify-between">
                     <div>
                       <h3 className="text-[15px] font-black text-slate-950">Informations étudiant</h3>
-                      <p className="text-[11px] font-bold text-slate-500">Récapitulatif simple affiché au clic sur le matricule.</p>
+                      <p className="text-[11px] font-medium text-slate-500">Récapitulatif simple affiché au clic sur le matricule.</p>
                     </div>
                     <button
                       type="button"
                       onClick={() => printStudentInfo(selectedStudent)}
-                      className="w-fit rounded-xl theme-button px-4 py-2.5 text-[11px] font-black text-white shadow-sm transition hover:brightness-110"
+                      className="w-fit rounded-xl theme-button px-4 py-2.5 text-[11px] font-semibold text-white shadow-sm transition hover:brightness-110"
                     >
                       ⎙ Imprimer PDF
                     </button>
@@ -2041,10 +2411,281 @@ if (item === "Mouvements de Trésorerie") {
           </div>
         )}
 
-        <footer className="shrink-0 border-t border-slate-200 bg-white px-4 py-1.5 text-[10px] text-slate-700 md:px-6">
+
+
+        {profilePanelOpen && (
+          <div className="fixed inset-0 z-[100000] flex items-end justify-center bg-slate-950/65 p-0 sm:items-center sm:p-3">
+            <div className="flex max-h-[95vh] w-full max-w-[780px] flex-col overflow-hidden rounded-t-[22px] border border-white/15 bg-white shadow-[0_20px_60px_rgba(2,6,23,.40)] sm:rounded-[24px]">
+              <div className="theme-sidebar relative overflow-hidden px-3.5 py-3 text-white sm:px-4">
+                <div className="absolute -right-14 -top-16 h-36 w-36 rounded-full bg-white/10" />
+                <div className="absolute -bottom-20 left-1/3 h-36 w-36 rounded-full bg-cyan-300/10" />
+
+                <div className="relative flex items-start justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-2xl border border-white/15 bg-white/10 shadow-md ring-2 ring-white/10 sm:h-14 sm:w-14">
+                      {currentProfilePhoto ? (
+                        <img src={currentProfilePhoto} alt={currentUser.name} className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="grid h-full w-full place-items-center bg-gradient-to-br from-cyan-500 to-slate-950 text-base font-semibold text-white sm:text-lg">
+                          {getUserInitials(currentUser.name, currentUser.email)}
+                        </div>
+                      )}
+                      <span className="absolute bottom-1 right-1 h-2.5 w-2.5 rounded-full border-2 border-slate-950 bg-emerald-400" />
+                    </div>
+
+                    <div className="min-w-0">
+                      <p className="text-[9px] font-medium uppercase tracking-[.18em] text-white/55">Mon profil</p>
+                     <div className="mt-0.5 break-words text-[14px] font-medium leading-snug text-white sm:text-[15px] md:text-[16px]">
+                        {currentUser.name}
+                      </div>
+                      <p className="mt-0.5 max-w-[210px] truncate text-[11px] font-normal text-white/65 sm:max-w-none sm:text-xs">
+                        {currentUser.email}
+                      </p>
+                      <div className="absolute right-12 top-0 flex flex-col items-end gap-1">
+                        <span className="rounded-full border border-white/10 bg-white/10 px-2.5 py-0.5 text-[9px] font-medium text-white backdrop-blur-sm">
+                          {currentRoleLabel}
+                        </span>
+
+                        <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-0.5 text-[9px] font-medium text-emerald-100">
+                          Actif
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setProfilePanelOpen(false)}
+                    className="grid h-8 w-8 shrink-0 place-items-center rounded-xl border border-white/15 bg-white/10 text-sm font-medium hover:bg-white/20"
+                    aria-label="Fermer profil"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              {profileMessage && (
+                <div className="border-b border-emerald-200 bg-emerald-50 px-3.5 py-2 text-[11px] font-medium text-emerald-700">
+                  ✅ {profileMessage}
+                </div>
+              )}
+
+              <div className="min-h-0 overflow-y-auto bg-slate-50 p-2.5 sm:p-3">
+                <div className="grid gap-2.5 lg:grid-cols-[245px_1fr]">
+                  <aside className="space-y-2.5">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+                      <div>
+                        <h3 className="text-[13px] font-semibold text-slate-950">Photo de profil</h3>
+                        <p className="mt-0.5 text-[10.5px] font-normal leading-snug text-slate-500">
+                          Visible dans le dashboard et l’espace admin.
+                        </p>
+                      </div>
+
+                      <div className="mt-3 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-2.5 lg:flex-col lg:items-center">
+                        <div className="h-16 w-16 shrink-0 overflow-hidden rounded-2xl bg-slate-900 shadow-inner ring-2 ring-slate-200 sm:h-20 sm:w-20">
+                          {currentProfilePhoto ? (
+                            <img src={currentProfilePhoto} alt={currentUser.name} className="h-full w-full object-cover" />
+                          ) : (
+                            <div className="grid h-full w-full place-items-center bg-gradient-to-br from-cyan-500 to-slate-950 text-xl font-semibold text-white">
+                              {getUserInitials(currentUser.name, currentUser.email)}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="grid flex-1 gap-1.5 lg:w-full">
+                          <label className="w-full cursor-pointer rounded-xl bg-slate-950 px-3 py-2 text-center text-[11px] font-medium text-white shadow-sm transition hover:bg-slate-800">
+                            {uploadingProfilePhoto ? "Traitement..." : "Changer photo"}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              disabled={uploadingProfilePhoto}
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                uploadConnectedUserPhoto(file);
+                                e.currentTarget.value = "";
+                              }}
+                            />
+                          </label>
+
+                          {currentProfilePhoto && (
+                            <button
+                              type="button"
+                              onClick={removeConnectedUserPhoto}
+                              disabled={uploadingProfilePhoto}
+                              className="w-full rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-medium text-red-600 transition hover:bg-red-600 hover:text-white disabled:opacity-50"
+                            >
+                              Supprimer
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+                      <h3 className="text-[13px] font-semibold text-slate-950">Résumé du compte</h3>
+                      <div className="mt-2.5 grid gap-1.5 text-[11px]">
+                        <div className="rounded-xl bg-slate-50 px-2.5 py-2">
+                          <p className="text-[9.5px] font-medium uppercase tracking-wide text-slate-400">Nom</p>
+                          <p className="mt-0.5 truncate font-medium text-slate-950">{currentUser.name}</p>
+                        </div>
+                        <div className="rounded-xl bg-slate-50 px-2.5 py-2">
+                          <p className="text-[9.5px] font-medium uppercase tracking-wide text-slate-400">Email</p>
+                          <p className="mt-0.5 break-all font-normal text-slate-700">{currentUser.email}</p>
+                        </div>
+                        <div className="rounded-xl bg-slate-50 px-2.5 py-2">
+                          <p className="text-[9.5px] font-medium uppercase tracking-wide text-slate-400">Rôle</p>
+                          <p className="mt-0.5 font-medium text-slate-950">{currentRoleLabel}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </aside>
+
+                  <div className="space-y-2.5">
+                    <form onSubmit={saveConnectedUserName} className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+                      <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <h3 className="text-[13px] font-semibold text-slate-950 sm:text-sm">Informations personnelles</h3>
+                          <p className="mt-0.5 text-[10.5px] font-normal leading-snug text-slate-500">
+                            Modifier le nom affiché. L’email reste le login.
+                          </p>
+                        </div>
+                        <span className="w-fit rounded-full bg-blue-50 px-2.5 py-1 text-[9.5px] font-medium text-blue-700">Identité</span>
+                      </div>
+
+                      <div className="mt-3 grid gap-2.5 md:grid-cols-2">
+                        <label className="block">
+                          <span className="text-[11px] font-medium text-slate-700">Nom complet</span>
+                          <input
+                            value={profileName}
+                            onChange={(e) => setProfileName(e.target.value)}
+                            className="mt-1 h-9 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-[13px] font-normal text-slate-950 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="text-[11px] font-medium text-slate-700">Email login</span>
+                          <input
+                            value={currentUser.email}
+                            readOnly
+                            className="mt-1 h-9 w-full cursor-not-allowed rounded-xl border border-slate-200 bg-slate-100 px-3 text-[13px] font-normal text-slate-500 outline-none"
+                          />
+                        </label>
+                      </div>
+
+                      <div className="mt-3 flex flex-col gap-1.5 sm:flex-row">
+                        <button
+                          type="submit"
+                          disabled={savingProfileName}
+                          className="rounded-xl bg-slate-950 px-4 py-2 text-[11px] font-medium text-white shadow-sm transition hover:bg-slate-800 disabled:opacity-60"
+                        >
+                          {savingProfileName ? "Enregistrement..." : "Enregistrer"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setProfileName(currentUser.name)}
+                          className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-[11px] font-medium text-slate-700 transition hover:bg-slate-50"
+                        >
+                          Annuler
+                        </button>
+                      </div>
+                    </form>
+
+                    <form onSubmit={changeConnectedUserPassword} className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+                      <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <h3 className="text-[13px] font-semibold text-slate-950 sm:text-sm">Sécurité du compte</h3>
+                          <p className="mt-0.5 text-[10.5px] font-normal leading-snug text-slate-500">
+                            Changez votre mot de passe personnel.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowProfilePasswords((v) => !v)}
+                          className="w-fit rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[10px] font-medium text-slate-700 hover:bg-white"
+                        >
+                          {showProfilePasswords ? "🙈 Masquer" : "👁 Voir"}
+                        </button>
+                      </div>
+
+                      <div className="mt-3 grid gap-2.5">
+                        <label className="block">
+                          <span className="text-[11px] font-medium text-slate-700">Mot de passe actuel</span>
+                          <input
+                            type={showProfilePasswords ? "text" : "password"}
+                            value={currentPassword}
+                            onChange={(e) => setCurrentPassword(e.target.value)}
+                            className="mt-1 h-9 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-[13px] font-normal text-slate-950 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                          />
+                        </label>
+
+                        <div className="grid gap-2.5 md:grid-cols-2">
+                          <label className="block">
+                            <span className="text-[11px] font-medium text-slate-700">Nouveau mot de passe</span>
+                            <input
+                              type={showProfilePasswords ? "text" : "password"}
+                              value={newPassword}
+                              onChange={(e) => setNewPassword(e.target.value)}
+                              className="mt-1 h-9 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-[13px] font-normal text-slate-950 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                            />
+                          </label>
+
+                          <label className="block">
+                            <span className="text-[11px] font-medium text-slate-700">Confirmer le mot de passe</span>
+                            <input
+                              type={showProfilePasswords ? "text" : "password"}
+                              value={confirmPassword}
+                              onChange={(e) => setConfirmPassword(e.target.value)}
+                              className="mt-1 h-9 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-[13px] font-normal text-slate-950 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                            />
+                          </label>
+                        </div>
+
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                          <div className="flex items-center justify-between text-[9.5px] font-medium uppercase tracking-wide text-slate-500">
+                            <span>Force du mot de passe</span>
+                            <span>{profilePasswordScore.label}</span>
+                          </div>
+                          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200">
+                            <div className={`h-full ${profilePasswordScore.color} transition-all`} style={{ width: profilePasswordScore.width }} />
+                          </div>
+                          <p className="mt-1.5 text-[10px] font-normal text-slate-500">
+                            Conseil : minimum 8 caractères avec chiffre et majuscule.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 flex flex-col gap-1.5 sm:flex-row">
+                        <button
+                          type="submit"
+                          disabled={savingProfilePassword}
+                          className="rounded-xl bg-blue-600 px-4 py-2 text-[11px] font-medium text-white shadow-sm transition hover:bg-blue-500 disabled:opacity-60"
+                        >
+                          {savingProfilePassword ? "Modification..." : "Modifier mot de passe"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCurrentPassword("");
+                            setNewPassword("");
+                            setConfirmPassword("");
+                          }}
+                          className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-[11px] font-medium text-slate-700 transition hover:bg-slate-50"
+                        >
+                          Initialiser
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <footer className="shrink-0 border-t border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 md:px-6">
           <div className="flex items-center justify-between gap-2">
             <span>
-              Connecté : <b>{user.name}</b> — {user.role}
+              Connecté : <b>{currentUser.name}</b> — {currentRoleLabel}
               <span className="ml-2 inline-block h-2 w-2 rounded-full bg-emerald-500" />
             </span>
             <span className="hidden sm:block">Strelitzia School © 2026</span>
