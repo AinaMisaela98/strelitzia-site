@@ -848,11 +848,11 @@ export async function PUT(req: Request) {
     const motifOnly = buildMotifOnly(
       {
         ...body,
-        feeCode: body.feeCode || current.feeCode || current.studentFee?.code || current.trainingFee?.code,
-        feeLabel: body.feeLabel || current.feeLabel || current.studentFee?.libelle || current.trainingFee?.libelle,
+        feeCode: body.feeCode || (current as any).feeCode || (current as any).studentFee?.code || (current as any).trainingFee?.code,
+        feeLabel: body.feeLabel || (current as any).feeLabel || (current as any).studentFee?.libelle || (current as any).trainingFee?.libelle,
         description: body.description ?? current.description,
-        libelle: body.libelle ?? current.libelle,
-        motif: body.motif ?? current.motif,
+        libelle: body.libelle ?? (current as any).libelle,
+        motif: body.motif ?? (current as any).motif,
       },
       movementType,
       category
