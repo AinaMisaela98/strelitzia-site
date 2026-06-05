@@ -202,18 +202,81 @@ function uniqueFees(list: any[]) {
   return Array.from(map.values());
 }
 
+function getTreasuryName(item: any) {
+  return String(item?.name || item?.label || item?.libelle || item?.title || "").trim();
+}
+
+function isTreasuryActive(item: any) {
+  // Compatible amin'ny API samihafa: active / isActive / actif / status.
+  const status = String(item?.status || item?.statut || "").trim().toUpperCase();
+  if (item?.active === false || item?.isActive === false || item?.actif === false) return false;
+  if (["INACTIVE", "INACTIF", "DESACTIVE", "DÉSACTIVÉ", "DISABLED"].includes(status)) return false;
+  return true;
+}
+
+function isTreasuryPrincipal(item: any) {
+  return Boolean(
+    item?.isPrincipal === true ||
+      item?.principal === true ||
+      item?.isMain === true ||
+      item?.main === true ||
+      item?.default === true ||
+      item?.isDefault === true
+  );
+}
+
+function extractTreasuryList(data: any) {
+  const candidates = [
+    data,
+    data?.treasuries,
+    data?.data,
+    data?.items,
+    data?.results,
+    data?.rows,
+    data?.list,
+  ];
+
+  const found = candidates.find((item) => Array.isArray(item));
+  return Array.isArray(found) ? found : [];
+}
+
+function normalizeTreasuries(list: any[]) {
+  const map = new Map<string, any>();
+
+  for (const item of list || []) {
+    const id = item?.id ?? item?.treasuryId ?? item?.value;
+    const name = getTreasuryName(item);
+    if (!id || !name) continue;
+
+    const normalized = {
+      ...item,
+      id,
+      name,
+      active: isTreasuryActive(item),
+      isPrincipal: isTreasuryPrincipal(item),
+    };
+
+    map.set(String(id), normalized);
+  }
+
+  return Array.from(map.values());
+}
+
 function sortTreasuriesActivePrincipalFirst(list: any[]) {
-  return [...list]
-    .filter((item: any) => item?.active !== false)
+  return normalizeTreasuries(list)
+    .filter((item: any) => isTreasuryActive(item))
     .sort((a: any, b: any) => {
-      const principalDiff = Number(Boolean(b?.isPrincipal)) - Number(Boolean(a?.isPrincipal));
+      const principalDiff = Number(isTreasuryPrincipal(b)) - Number(isTreasuryPrincipal(a));
       if (principalDiff !== 0) return principalDiff;
+
+      const activeDiff = Number(isTreasuryActive(b)) - Number(isTreasuryActive(a));
+      if (activeDiff !== 0) return activeDiff;
 
       const idA = Number(a?.id || 0);
       const idB = Number(b?.id || 0);
       if (idA !== idB) return idA - idB;
 
-      return String(a?.name || "").localeCompare(String(b?.name || ""), "fr", {
+      return getTreasuryName(a).localeCompare(getTreasuryName(b), "fr", {
         numeric: true,
         sensitivity: "base",
       });
@@ -222,45 +285,45 @@ function sortTreasuriesActivePrincipalFirst(list: any[]) {
 
 function getDefaultTreasury(list = treasuries) {
   const activeTreasuries = sortTreasuriesActivePrincipalFirst(list);
-  return activeTreasuries.find((item: any) => item?.isPrincipal === true) || activeTreasuries[0] || null;
+  return activeTreasuries.find((item: any) => isTreasuryPrincipal(item)) || activeTreasuries[0] || null;
 }
 
 useEffect(() => {
+  async function fetchTreasuryList(url: string) {
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return [];
+    return extractTreasuryList(data);
+  }
+
   async function loadTreasuries() {
     try {
       setLoadingTreasuries(true);
 
-      const schoolYearName = effectiveSchoolYearName;
       const params = addSiteYearParams(new URLSearchParams());
+      const filteredUrl = `/api/treasuries${params.toString() ? `?${params.toString()}` : ""}`;
 
-      const res = await fetch(`/api/treasuries?${params.toString()}`, {
-        cache: "no-store",
-      });
-      const data = await res.json();
+      let list = await fetchTreasuryList(filteredUrl);
+      let activeTreasuries = sortTreasuriesActivePrincipalFirst(list);
 
-      if (!res.ok) {
-        throw new Error(data?.error || "Erreur chargement trésoreries");
+      // Raha tsy misy vokatra noho ny filtre site/année, maka liste générale.
+      // Izany no manakana ilay message "Aucune trésorerie active" nefa misy trésorerie ao amin'ny base.
+      if (activeTreasuries.length === 0) {
+        list = await fetchTreasuryList("/api/treasuries");
+        activeTreasuries = sortTreasuriesActivePrincipalFirst(list);
       }
 
-      const list = Array.isArray(data)
-        ? data
-        : Array.isArray(data.treasuries)
-          ? data.treasuries
-          : [];
-
-      const activeTreasuries = sortTreasuriesActivePrincipalFirst(list);
       setTreasuries(activeTreasuries);
 
       const defaultTreasury = getDefaultTreasury(activeTreasuries);
-      if (defaultTreasury) {
-        setPaymentForm((prev) => ({
-          ...prev,
-          treasuryId: prev.treasuryId || String(defaultTreasury.id),
-          tresorerie: prev.tresorerie || defaultTreasury.name || "",
-        }));
-      }
+      setPaymentForm((prev) => ({
+        ...prev,
+        treasuryId: defaultTreasury ? String(defaultTreasury.id) : "",
+        tresorerie: defaultTreasury ? getTreasuryName(defaultTreasury) : "",
+      }));
     } catch {
       setTreasuries([]);
+      setPaymentForm((prev) => ({ ...prev, treasuryId: "", tresorerie: "" }));
     } finally {
       setLoadingTreasuries(false);
     }
@@ -270,27 +333,31 @@ useEffect(() => {
 }, [effectiveSchoolYearName, effectiveSiteId]);
 
 function getSelectedTreasury() {
-  const id = Number(paymentForm.treasuryId || 0);
-  const byId = treasuries.find((item: any) => Number(item.id) === id);
-  if (byId) return byId;
+  const selectedId = String(paymentForm.treasuryId || "").trim();
+  if (selectedId) {
+    const byId = treasuries.find((item: any) => String(item.id) === selectedId);
+    if (byId && isTreasuryActive(byId)) return byId;
+  }
 
-  const byName = treasuries.find(
-    (item: any) =>
-      String(item.name || "").trim().toLowerCase() ===
-      String(paymentForm.tresorerie || "").trim().toLowerCase()
-  );
+  const selectedName = String(paymentForm.tresorerie || "").trim().toLowerCase();
+  if (selectedName) {
+    const byName = treasuries.find(
+      (item: any) => getTreasuryName(item).toLowerCase() === selectedName && isTreasuryActive(item)
+    );
+    if (byName) return byName;
+  }
 
-  return byName || null;
+  return null;
 }
 
 function buildTreasuryPayload() {
-  const treasury = getSelectedTreasury() || getDefaultTreasury();
-  const fallbackName = paymentForm.tresorerie || treasury?.name || "Caisse principale";
+  const treasury = getSelectedTreasury();
+  const fallbackName = treasury ? getTreasuryName(treasury) : "";
 
   return {
-    treasuryId: treasury?.id || Number(paymentForm.treasuryId || 0) || undefined,
-    treasuryName: treasury?.name || fallbackName,
-    tresorerie: treasury?.name || fallbackName,
+    treasuryId: treasury?.id || undefined,
+    treasuryName: fallbackName,
+    tresorerie: fallbackName,
     siteId: effectiveSiteId || undefined,
     site: effectiveSiteName,
     siteName: effectiveSiteName,
@@ -954,7 +1021,7 @@ function openPaymentModal() {
   setPaymentForm({
     datePaiement: new Date().toISOString().slice(0, 10),
     treasuryId: defaultTreasury ? String(defaultTreasury.id) : "",
-    tresorerie: defaultTreasury?.name || "",
+    tresorerie: defaultTreasury ? getTreasuryName(defaultTreasury) : "",
     modePaiement: "Espèce",
     reference: buildPaymentReference(),
     commentaire: "",
@@ -1091,6 +1158,12 @@ async function payOneFee(fee: any) {
 
 async function paySelectedFees() {
   if (paymentInProgressRef.current || actionId !== null) return;
+
+  const selectedTreasury = getSelectedTreasury();
+  if (!selectedTreasury) {
+    alert("Veuillez choisir une trésorerie active avant d'enregistrer le paiement.");
+    return;
+  }
 
   const selectedFees = getSelectedFeesToPay();
   if (selectedFees.length === 0) return;
@@ -2483,23 +2556,24 @@ function printTicketMultiple(selectedFees: any[]) {
                   <label className="block">
                     <span className="mb-1 block text-slate-600">Trésorerie</span>
                     <select
+                      required
                       value={paymentForm.treasuryId}
                       onChange={(e) => {
                         const treasury = treasuries.find((item: any) => String(item.id) === e.target.value);
                         setPaymentForm((p) => ({
                           ...p,
                           treasuryId: e.target.value,
-                          tresorerie: treasury?.name || "",
+                          tresorerie: treasury ? getTreasuryName(treasury) : "",
                         }));
                       }}
                       className="w-full border border-slate-300 px-3 py-2 outline-none focus:border-blue-500"
                     >
                       <option value="">
-                        {loadingTreasuries ? "Chargement..." : "Choisissez la trésorerie"}
+                        {loadingTreasuries ? "Chargement..." : "-- Choisir la trésorerie --"}
                       </option>
                       {treasuries.map((treasury: any) => (
                         <option key={treasury.id} value={String(treasury.id)}>
-                          {treasury.isPrincipal ? "⭐ " : ""}{treasury.name}
+                          {isTreasuryPrincipal(treasury) ? "⭐ " : ""}{getTreasuryName(treasury)}{isTreasuryPrincipal(treasury) ? " - principale" : ""}
                         </option>
                       ))}
                     </select>
@@ -2582,7 +2656,7 @@ function printTicketMultiple(selectedFees: any[]) {
                   </button>
                   <button
                     type="button"
-                    disabled={actionId !== null}
+                    disabled={actionId !== null || !getSelectedTreasury()}
                     onClick={paySelectedFees}
                     className="rounded-[2px] bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                   >
