@@ -23,7 +23,7 @@ async function requireUser() {
 }
 
 async function ensureActiveSchoolYear() {
-  let activeYear = await prisma.schoolYear.findFirst({
+  const activeYear = await prisma.schoolYear.findFirst({
     where: { active: true },
     orderBy: { id: "desc" },
   });
@@ -47,6 +47,89 @@ async function ensureActiveSchoolYear() {
       active: true,
     },
   });
+}
+
+async function getYearLinks(yearName: string) {
+  const [
+    students,
+    levels,
+    classes,
+    series,
+    feeModels,
+    trainingFees,
+    studentFees,
+    studentPayments,
+    treasuries,
+    treasuryMovements,
+  ] = await Promise.all([
+    prisma.student.count({
+      where: { anneeScolaire: yearName },
+    }),
+
+    prisma.level.count({
+      where: { schoolYearName: yearName },
+    }),
+
+    prisma.classRoom.count({
+      where: { schoolYearName: yearName },
+    }),
+
+    prisma.serie.count({
+      where: { schoolYearName: yearName },
+    }),
+
+    prisma.feeModel.count({
+      where: { schoolYearName: yearName },
+    }),
+
+    prisma.trainingFee.count({
+      where: { schoolYearName: yearName },
+    }),
+
+    prisma.studentFee.count({
+      where: { schoolYearName: yearName },
+    }),
+
+    prisma.studentPayment.count({
+      where: { schoolYearName: yearName },
+    }),
+
+    prisma.treasury.count({
+      where: { schoolYearName: yearName },
+    }),
+
+    prisma.treasuryMovement.count({
+      where: { schoolYearName: yearName },
+    }),
+  ]);
+
+  const total =
+    students +
+    levels +
+    classes +
+    series +
+    feeModels +
+    trainingFees +
+    studentFees +
+    studentPayments +
+    treasuries +
+    treasuryMovements;
+
+  return {
+    total,
+    details: {
+      students,
+      levels,
+      classes,
+      series,
+      feeModels,
+      trainingFees,
+      studentFees,
+      studentPayments,
+      treasuries,
+      treasuryMovements,
+    },
+  };
 }
 
 export async function GET() {
@@ -155,6 +238,20 @@ export async function PUT(req: Request) {
       );
     }
 
+    const existing = await prisma.schoolYear.findFirst({
+      where: {
+        name,
+        id: { not: id },
+      },
+    });
+
+    if (existing) {
+      return NextResponse.json(
+        { error: "Cette année scolaire existe déjà" },
+        { status: 400 }
+      );
+    }
+
     const year = await prisma.schoolYear.update({
       where: { id },
       data: {
@@ -179,6 +276,71 @@ export async function PUT(req: Request) {
     return NextResponse.json(
       {
         error: error?.message || "Erreur modification année scolaire.",
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(req: Request) {
+  const auth = await requireUser();
+  if (auth.response) return auth.response;
+
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = Number(searchParams.get("id"));
+
+    if (!id) {
+      return NextResponse.json({ error: "ID obligatoire" }, { status: 400 });
+    }
+
+    const year = await prisma.schoolYear.findUnique({
+      where: { id },
+    });
+
+    if (!year) {
+      return NextResponse.json(
+        { error: "Année scolaire introuvable" },
+        { status: 404 }
+      );
+    }
+
+    if (year.active) {
+      return NextResponse.json(
+        { error: "Impossible de supprimer l’année scolaire active." },
+        { status: 400 }
+      );
+    }
+
+    const links = await getYearLinks(year.name);
+
+    if (links.total > 0) {
+      return NextResponse.json(
+        {
+          error:
+            "Suppression impossible : cette année scolaire contient déjà des données liées.",
+          details: links.details,
+        },
+        { status: 409 }
+      );
+    }
+
+    await prisma.schoolYear.delete({
+      where: { id },
+    });
+
+    await ensureActiveSchoolYear();
+
+    return NextResponse.json({
+      success: true,
+      message: "Année scolaire supprimée avec succès.",
+    });
+  } catch (error: any) {
+    console.error("DELETE /api/school-years:", error);
+
+    return NextResponse.json(
+      {
+        error: error?.message || "Erreur suppression année scolaire.",
       },
       { status: 500 }
     );
