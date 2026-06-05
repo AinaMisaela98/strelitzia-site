@@ -585,56 +585,90 @@ export async function GET(req: Request) {
     const dateFrom = text(url.searchParams.get("dateFrom") || url.searchParams.get("from"));
     const dateTo = text(url.searchParams.get("dateTo") || url.searchParams.get("to"));
 
-    const where: any = {
-      schoolYearName,
+    const buildWhere = (withSchoolYear: boolean) => {
+      const where: any = {};
+
+      // IMPORTANT:
+      // Tsy asiana filtre siteId eto amin'ny GET intsony.
+      // Antony: amin'ny production, misy mouvements créés taloha tsy manana siteId,
+      // na manana site hafa, ka lasa tsy miseho mihitsy ao amin'ny page.
+      // Ny affichage mouvement dia tokony hampiseho ny mouvements rehetra azo avy amin'ny année/filtre.
+      if (withSchoolYear && modelHasField("TreasuryMovement", "schoolYearName")) {
+        where.schoolYearName = schoolYearName;
+      }
+
+      if (treasuryId) where.treasuryId = treasuryId;
+      if (studentId) where.studentId = studentId;
+      if (trainingFeeId) where.trainingFeeId = trainingFeeId;
+      if (studentFeeId) where.studentFeeId = studentFeeId;
+      if (movementType) where.movementType = normalizeMovementType(movementType);
+      if (category) where.category = category;
+
+      if (dateFrom || dateTo) {
+        where.createdAt = {};
+
+        if (dateFrom) {
+          where.createdAt.gte = new Date(`${dateFrom}T00:00:00`);
+        }
+
+        if (dateTo) {
+          where.createdAt.lte = new Date(`${dateTo}T23:59:59`);
+        }
+      }
+
+      if (q) {
+        where.OR = [
+          { description: { contains: q, mode: "insensitive" } },
+          { reference: { contains: q, mode: "insensitive" } },
+          { category: { contains: q, mode: "insensitive" } },
+        ];
+      }
+
+      return where;
     };
 
-    addSiteWhere("TreasuryMovement", where, site);
+    const include = getRelationInclude("TreasuryMovement");
+    const orderBy: any = [
+      { createdAt: "desc" },
+      { id: "desc" },
+    ];
 
-    if (treasuryId) where.treasuryId = treasuryId;
-    if (studentId) where.studentId = studentId;
-    if (trainingFeeId) where.trainingFeeId = trainingFeeId;
-    if (studentFeeId) where.studentFeeId = studentFeeId;
-    if (movementType) where.movementType = normalizeMovementType(movementType);
-    if (category) where.category = category;
+    let usedFallback = false;
+    let where = buildWhere(true);
 
-    if (dateFrom || dateTo) {
-      where.createdAt = {};
-
-      if (dateFrom) {
-        where.createdAt.gte = new Date(`${dateFrom}T00:00:00`);
-      }
-
-      if (dateTo) {
-        where.createdAt.lte = new Date(`${dateTo}T23:59:59`);
-      }
-    }
-
-    if (q) {
-      where.OR = [
-        { description: { contains: q, mode: "insensitive" } },
-        { reference: { contains: q, mode: "insensitive" } },
-        { category: { contains: q, mode: "insensitive" } },
-      ];
-    }
-
-    const movements = await prisma.treasuryMovement.findMany({
+    let movements = await prisma.treasuryMovement.findMany({
       where,
-      include: getRelationInclude("TreasuryMovement"),
-      orderBy: [
-        { createdAt: "desc" },
-        { id: "desc" },
-      ],
+      include,
+      orderBy,
     });
+
+    // Sécurité affichage:
+    // Raha mbola tsy miverina na inona na inona, dia esorina fotsiny ny filtre année
+    // mba tsy ho banga ny page raha misy données taloha tsy mitondra schoolYearName mitovy.
+    // Ny filtre spécifique toy ny treasuryId/studentId/date/q dia tazonina foana.
+    if (movements.length === 0) {
+      usedFallback = true;
+      where = buildWhere(false);
+
+      movements = await prisma.treasuryMovement.findMany({
+        where,
+        include,
+        orderBy,
+      });
+    }
 
     const formatted = movements.map(formatMovementForClient);
     const totals = computeTotals(movements);
 
     return NextResponse.json({
+      success: true,
       movements: formatted,
       treasuryMovements: formatted,
       data: formatted,
+      items: formatted,
       totals,
+      count: formatted.length,
+      usedFallback,
       siteId: site.id,
       site: site.name,
       siteCode: site.code,
@@ -653,7 +687,6 @@ export async function GET(req: Request) {
     );
   }
 }
-
 export async function POST(req: Request) {
   const user = await getAuthUser();
 
