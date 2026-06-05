@@ -8,6 +8,13 @@ type AuthUser = {
   role: string;
 };
 
+type Site = {
+  id: number;
+  name: string;
+  code?: string;
+  active: boolean;
+};
+
 type AcademicLevel = {
   id: number;
   name: string;
@@ -93,7 +100,9 @@ function normalizeArray(value: any): any[] {
 }
 
 function modelTitle(model?: FeeModel | null) {
-  return String(model?.title || model?.name || model?.libelle || model?.label || `Modèle ${model?.id || ""}`).trim();
+  return String(
+    model?.title || model?.name || model?.libelle || model?.label || `Modèle ${model?.id || ""}`
+  ).trim();
 }
 
 function getModelRows(model?: FeeModel | null): TrainingFee[] {
@@ -103,7 +112,12 @@ function getModelRows(model?: FeeModel | null): TrainingFee[] {
 }
 
 function getFeeRowStableId(row: TrainingFee, index: number) {
-  return String((row as any).id || (row as any).feeTariffId || (row as any).tariffId || `${feeLabel(row)}-${(row as any).code || ""}-${index}`);
+  return String(
+    (row as any).id ||
+      (row as any).feeTariffId ||
+      (row as any).tariffId ||
+      `${feeLabel(row)}-${(row as any).code || ""}-${index}`
+  );
 }
 
 function feeLabel(fee: TrainingFee) {
@@ -129,9 +143,6 @@ function feeAmount(fee: TrainingFee) {
 function parseJsonObject(value: any) {
   if (!value) return {} as Record<string, any>;
 
-  // Fee Models renvoie souvent les tarifs spéciaux sous forme de tableau:
-  // specials: [{ name: "ANCIEN", montant: 80000 }, ...]
-  // On le transforme ici en objet: { ANCIEN: 80000 }.
   if (Array.isArray(value)) {
     return value.reduce<Record<string, any>>((acc, item) => {
       const key = String(
@@ -166,7 +177,7 @@ function parseJsonObject(value: any) {
     const parsed = JSON.parse(value);
     return parseJsonObject(parsed);
   } catch {
-    return {} as Record<string, any>;
+    return {};
   }
 }
 
@@ -226,6 +237,10 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
   const [selectedLevelId, setSelectedLevelId] = useState("");
   const [selectedClassId, setSelectedClassId] = useState("");
 
+  const [sites, setSites] = useState<Site[]>([]);
+  const [selectedSiteId, setSelectedSiteId] = useState("");
+  const [selectedSiteName, setSelectedSiteName] = useState("Strelitzia School");
+
   const [feeModels, setFeeModels] = useState<FeeModel[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [selectedFeeModelId, setSelectedFeeModelId] = useState("");
@@ -270,11 +285,36 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
 
   useEffect(() => {
     loadAcademics();
+    loadSites();
   }, []);
 
   useEffect(() => {
     loadFeeModelsByClass();
-  }, [selectedClassId, academics.year, form.classe]);
+  }, [selectedClassId, selectedSiteId, academics.year, academics.levels]);
+
+  async function loadSites() {
+    try {
+      const res = await fetch(`/api/sites?_ts=${Date.now()}`, {
+        cache: "no-store",
+      });
+
+      const data = await res.json();
+      const list: Site[] = Array.isArray(data?.sites) ? data.sites : [];
+
+      setSites(list);
+
+      const firstActive = list.find((site) => site.active) || list[0];
+
+      if (firstActive) {
+        setSelectedSiteId(String(firstActive.id));
+        setSelectedSiteName(firstActive.name || "Strelitzia School");
+      }
+    } catch {
+      setSites([]);
+      setSelectedSiteId("");
+      setSelectedSiteName("Strelitzia School");
+    }
+  }
 
   async function loadAcademics() {
     try {
@@ -291,6 +331,14 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
 
   async function loadFeeModelsByClass() {
     const classRoomId = Number(selectedClassId);
+    const siteId = Number(selectedSiteId);
+    const className = String(
+      academics.levels
+        .flatMap((level) => level.classes || [])
+        .find((classe) => String(classe.id) === String(selectedClassId))?.name ||
+        form.classe ||
+        ""
+    ).trim();
 
     setFeeModels([]);
     setSelectedFeeModelId("");
@@ -298,35 +346,56 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
     setSelectedFeeIds([]);
     setSelectedTarif("");
 
-    if (!classRoomId) return;
+    if (!classRoomId || !siteId || !className) return;
 
     try {
       setLoadingModels(true);
       setLoadingFees(true);
 
-      const params = new URLSearchParams();
-      if (academics.year) {
-        params.set("schoolYearName", academics.year);
-        params.set("anneeScolaire", academics.year);
-        params.set("year", academics.year);
-      }
-      params.set("classRoomId", String(classRoomId));
-      params.set("classId", String(classRoomId));
-      if (form.classe) {
-        params.set("classe", form.classe);
-        params.set("className", form.classe);
-        params.set("classRoomName", form.classe);
+      const buildParams = (classeValue: string) => {
+        const params = new URLSearchParams();
+
+        if (academics.year) {
+          params.set("schoolYearName", academics.year);
+          params.set("anneeScolaire", academics.year);
+          params.set("year", academics.year);
+        }
+
+        params.set("siteId", String(siteId));
+        params.set("classRoomId", String(classRoomId));
+        params.set("classId", String(classRoomId));
+        params.set("classe", classeValue);
+        params.set("className", classeValue);
+        params.set("classRoomName", classeValue);
+
+        return params;
+      };
+
+      async function fetchModels(classeValue: string) {
+        const params = buildParams(classeValue);
+        const res = await fetch(`/api/fee-models?${params.toString()}`, {
+          cache: "no-store",
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          console.error("Erreur chargement modèles de frais:", data);
+          return [] as FeeModel[];
+        }
+
+        return normalizeArray(data) as FeeModel[];
       }
 
-      const res = await fetch(`/api/fee-models?${params.toString()}`, {
-        cache: "no-store",
-      });
+      let models = await fetchModels(className);
 
-      const data = await res.json();
-      const models = normalizeArray(data) as FeeModel[];
+      // Raha natao GENERAL ilay modèle dia aseho ihany rehefa voafidy classe.
+      if (models.length === 0) {
+        models = await fetchModels("GENERAL");
+      }
 
       setFeeModels(models);
-    } catch {
+    } catch (error) {
+      console.error("loadFeeModelsByClass:", error);
       setFeeModels([]);
     } finally {
       setLoadingModels(false);
@@ -413,8 +482,6 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
   }, [selectedFeeModelId, selectedFeeRows]);
 
   useEffect(() => {
-    // Tsy atao Principal automatique intsony.
-    // Mila mifidy tarif aloha ny utilisateur vao miseho sy ampidirina ny frais.
     if (!selectedFeeModelId) {
       if (selectedTarif) setSelectedTarif("");
       return;
@@ -426,8 +493,6 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
   }, [availableTarifs, selectedFeeModelId, selectedTarif]);
 
   useEffect(() => {
-    // Rehefa voafidy ny tarif dia ampidirina automatique daholo ny frais ao amin'ilay modèle.
-    // Tsy mila selection ligne tsirairay intsony, mba tsy hisy mélange Principal/Ancien/Famille.
     if (!selectedFeeModelId || !selectedTarif) {
       setSelectedFeeIds([]);
       return;
@@ -461,6 +526,7 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
       !form.nom ||
       !form.prenoms ||
       !form.sexe ||
+      !selectedSiteId ||
       !selectedLevelId ||
       !selectedClassId
     ) {
@@ -498,7 +564,9 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
         },
         body: JSON.stringify({
           ...form,
-          site: "Strelitzia School",
+          siteId: Number(selectedSiteId),
+          site: selectedSiteName,
+          siteName: selectedSiteName,
           anneeScolaire: activeYearName,
           schoolYearName: activeYearName,
           levelId: Number(selectedLevelId),
@@ -533,11 +601,12 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
             feeRowId: stableId,
             feeModelId: Number(selectedFeeModelId),
             sourceType: "FEE_MODEL",
+            siteId: Number(selectedSiteId),
+            site: selectedSiteName,
+            siteName: selectedSiteName,
             code: fee.code || "",
             libelle: feeLabel(fee),
             label: feeLabel(fee),
-            // Montant ligne par ligne avy amin'ilay tarif sélectionné.
-            // Tsy total général no alefa; ity montant ity no an'ilay frais tsirairay.
             montant: amount,
             amount,
             tarifAmount: amount,
@@ -573,6 +642,9 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
           },
           body: JSON.stringify({
             studentId: createdStudent.id,
+            siteId: Number(selectedSiteId),
+            site: selectedSiteName,
+            siteName: selectedSiteName,
             schoolYearName: activeYearName,
             anneeScolaire: activeYearName,
             tarifName: selectedTarif,
@@ -590,8 +662,6 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
             feeModelName: modelTitle(selectedFeeModelDetails),
             sourceType: "FEE_MODEL",
             modeCreation: "FEE_MODEL_TARIF_ROWS",
-            // Source de vérité: chaque ligne de frais porte déjà le montant du tarif choisi.
-            // Tsy mandefa trainingFeeIds na montantTotal global intsony isika mba tsy hiverenan'ny API amin'ny Principal.
             feeRows,
             fees: feeRows,
             items: feeRows,
@@ -670,6 +740,8 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
                     </h1>
                     <p className="text-blue-100 mt-2">
                       Année scolaire : <b>{academics.year || "2025-2026"}</b>
+                      <span className="mx-2 text-blue-300">•</span>
+                      Site : <b>{selectedSiteName || "Strelitzia School"}</b>
                     </p>
                   </div>
 
@@ -698,6 +770,26 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
                     >
                       <Grid>
                         <Input label="Date inscription *" type="date" value={form.dateInscription} onChange={(v: string) => update("dateInscription", v)} />
+                        <Select
+                          label="Site *"
+                          value={selectedSiteId}
+                          options={sites.map((site) => ({
+                            label: site.name,
+                            value: String(site.id),
+                          }))}
+                          onChange={(value: string) => {
+                            const site = sites.find((s) => String(s.id) === value);
+
+                            setSelectedSiteId(value);
+                            setSelectedSiteName(site?.name || "Strelitzia School");
+
+                            setFeeModels([]);
+                            setSelectedFeeModelId("");
+                            setSelectedFeeModelDetails(null);
+                            setSelectedFeeIds([]);
+                            setSelectedTarif("");
+                          }}
+                        />
                         <Input label="Matricule *" value={form.matricule} onChange={(v: string) => update("matricule", v)} />
                         <PhotoInput value={form.photoUrl} onChange={(v: string) => update("photoUrl", v)} />
 
@@ -838,7 +930,7 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
                         </div>
 
                         <p className="mt-2 text-xs font-semibold text-slate-500">
-                          Safidio aloha ny modèle avy amin'ny Fee Models, avy eo safidio ny tarif. Rehefa voafidy ny tarif dia miseho sy ampidirina automatique daholo ny frais ao anatiny.
+                          Safidio aloha ny modèle avy amin&apos;ny Fee Models, avy eo safidio ny tarif. Rehefa voafidy ny tarif dia miseho sy ampidirina automatique daholo ny frais ao anatiny.
                         </p>
                       </div>
 
@@ -888,7 +980,7 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
                                 <button
                                   key={rowId}
                                   type="button"
-                                  onClick={() => undefined}
+                                  onClick={() => toggleFee(rowId)}
                                   className={`group flex items-center gap-3 rounded-2xl border p-4 text-left transition ${
                                     checked
                                       ? "border-blue-500 bg-white shadow-md ring-4 ring-blue-100"
@@ -978,45 +1070,56 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
                               👤
                             </div>
                           )}
-                          <h3 className="font-black text-lg mt-4">{form.nom || "-"} {form.prenoms || ""}</h3>
-                          <p className="text-slate-500">{form.classe || "-"} / {form.section || "-"}</p>
+
+                          <div className="mt-4 rounded-2xl bg-blue-50 px-4 py-3 text-sm font-black text-blue-800">
+                            Site : {selectedSiteName || "Strelitzia School"}
+                          </div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          {Object.entries(form)
-                            .filter(([key]) => key !== "photoUrl")
-                            .map(([key, value]) => (
-                            <div key={key} className="bg-white rounded-2xl border p-4">
-                              <p className="text-[11px] uppercase tracking-wide text-slate-400 font-bold">{key}</p>
-                              <p className="font-bold text-slate-800 mt-1 break-words">{value || "-"}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <InfoBox label="Matricule" value={form.matricule} />
+                            <InfoBox label="Année scolaire" value={academics.year || "2025-2026"} />
+                            <InfoBox label="Site" value={selectedSiteName || "Strelitzia School"} />
+                            <InfoBox label="Nom" value={form.nom} />
+                            <InfoBox label="Prénom(s)" value={form.prenoms} />
+                            <InfoBox label="Sexe" value={form.sexe} />
+                            <InfoBox label="Classe" value={selectedClass?.name || form.classe} />
+                            <InfoBox label="Série / Section" value={form.section || "-"} />
+                            <InfoBox label="Téléphone" value={form.telephone || "-"} />
+                            <InfoBox label="Activité" value={form.activite || "-"} />
+                          </div>
 
-                      <div className="mt-6 bg-white rounded-3xl border p-5 shadow-sm">
-                        <div className="mb-3 flex items-center justify-between">
-                          <h3 className="font-black text-slate-800">Frais de formation sélectionnés</h3>
-                          <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-black text-blue-700">
-                            {selectedFeeIds.length} frais
-                          </span>
-                        </div>
-
-                        <div className="divide-y rounded-2xl border bg-slate-50">
-                          {selectedFees.length === 0 ? (
-                            <div className="p-4 text-sm font-semibold text-slate-500">
-                              Aucun frais sélectionné.
-                            </div>
-                          ) : (
-                            selectedFees.map((fee, index) => (
-                              <div key={getFeeRowStableId(fee, index)} className="flex items-center justify-between gap-3 p-3 text-sm">
-                                <span className="min-w-0">
-                                  <b>{fee.code || "-"}</b> — {feeLabel(fee)}
-                                </span>
-                                <b className="shrink-0">{formatAmount(feeAmountByTarif(fee, selectedTarif))} Ar</b>
+                          <div className="rounded-3xl border border-slate-200 bg-white p-4">
+                            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                              <div>
+                                <h3 className="font-black text-slate-900">Frais liés à l’étudiant</h3>
+                                <p className="text-xs font-semibold text-slate-500">
+                                  Modèle : {modelTitle(selectedFeeModelDetails)} • Tarif : {selectedTarif || "-"}
+                                </p>
                               </div>
-                            ))
-                          )}
+                              <div className="rounded-2xl bg-emerald-50 px-4 py-2 text-sm font-black text-emerald-700">
+                                Total : {formatAmount(totalSelectedFees)} Ar
+                              </div>
+                            </div>
+
+                            <div className="mt-4 divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-100 bg-slate-50">
+                              {selectedFees.length === 0 ? (
+                                <div className="p-4 text-center text-sm font-bold text-slate-500">
+                                  Aucun frais sélectionné
+                                </div>
+                              ) : (
+                                selectedFees.map((fee, index) => (
+                                  <div key={getFeeRowStableId(fee, index)} className="flex items-center justify-between gap-3 p-3 text-sm">
+                                    <span className="min-w-0">
+                                      <b>{fee.code || "-"}</b> — {feeLabel(fee)}
+                                    </span>
+                                    <b className="shrink-0">{formatAmount(feeAmountByTarif(fee, selectedTarif))} Ar</b>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </Panel>
@@ -1285,5 +1388,14 @@ function Textarea({
         className="mt-2 w-full bg-white border border-slate-200 rounded-2xl p-4 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100 transition"
       />
     </label>
+  );
+}
+
+function InfoBox({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+      <p className="text-[11px] font-black uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="mt-1 break-words text-sm font-black text-slate-900">{value || "-"}</p>
+    </div>
   );
 }

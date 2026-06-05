@@ -20,6 +20,7 @@ type FeeRow = {
   classe: string;
   serie: string;
   site: string;
+  siteId?: number | string | null;
   status: Record<string, boolean>;
   paidCount?: number;
   unpaidCount?: number;
@@ -33,10 +34,18 @@ type FeeRow = {
 type Filters = {
   anneeScolaire: string;
   site: string;
+  siteId: string;
   classe: string;
   section: string;
   frais: string;
   matricule: string;
+};
+
+type SiteOption = {
+  id: number;
+  name: string;
+  code?: string;
+  active?: boolean;
 };
 
 type ApiFilters = {
@@ -56,6 +65,7 @@ type ApiFilters = {
 const EMPTY_FILTERS: Filters = {
   anneeScolaire: "",
   site: "",
+  siteId: "",
   classe: "",
   section: "",
   frais: "",
@@ -73,6 +83,27 @@ function unique(values: (string | undefined | null)[]) {
   return Array.from(new Set(values.filter(Boolean) as string[])).sort((a, b) =>
     a.localeCompare(b)
   );
+}
+
+function normalizeSites(data: any): SiteOption[] {
+  const raw = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.sites)
+      ? data.sites
+      : Array.isArray(data?.data)
+        ? data.data
+        : Array.isArray(data?.items)
+          ? data.items
+          : [];
+
+  return raw
+    .map((item: any) => ({
+      id: Number(item?.id || 0),
+      name: String(item?.name || item?.label || item?.site || "").trim(),
+      code: String(item?.code || "").trim(),
+      active: Boolean(item?.active || item?.isActive || item?.actif),
+    }))
+    .filter((item: SiteOption) => item.id > 0 && item.name);
 }
 
 function normalizeCode(value: any) {
@@ -132,12 +163,27 @@ export default function EtatPaiementFraisPage() {
   const [rows, setRows] = useState<FeeRow[]>([]);
   const [feeCodes, setFeeCodes] = useState<string[]>([]);
   const [apiFilters, setApiFilters] = useState<ApiFilters>({});
+  const [siteOptions, setSiteOptions] = useState<SiteOption[]>([]);
   const [activeYear, setActiveYear] = useState("");
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [fixing, setFixing] = useState(false);
   const [fixMessage, setFixMessage] = useState("");
+
+  function getActiveSite(list: SiteOption[] = siteOptions) {
+    return list.find((item) => item.active) || list[0] || null;
+  }
+
+  function applySiteToFilters(base: Filters, siteName: string): Filters {
+    const selectedSite = siteOptions.find((item) => item.name === siteName);
+
+    return {
+      ...base,
+      site: siteName,
+      siteId: selectedSite ? String(selectedSite.id) : "",
+    };
+  }
 
   async function loadData(nextFilters: Filters = filters) {
     try {
@@ -152,7 +198,11 @@ export default function EtatPaiementFraisPage() {
         params.append("year", nextFilters.anneeScolaire);
       }
 
-      if (nextFilters.site) params.append("site", nextFilters.site);
+      if (nextFilters.siteId) params.append("siteId", nextFilters.siteId);
+      if (nextFilters.site) {
+        params.append("site", nextFilters.site);
+        params.append("siteName", nextFilters.site);
+      }
       if (nextFilters.classe) params.append("classe", nextFilters.classe);
       if (nextFilters.section) params.append("section", nextFilters.section);
       if (nextFilters.frais) params.append("frais", nextFilters.frais);
@@ -175,9 +225,6 @@ export default function EtatPaiementFraisPage() {
 
       setApiFilters(data.filters || {});
 
-      // Année scolaire active = principale/default.
-      // Premier chargement: raha mbola tsy misy année voafidy, averina chargena
-      // amin'ny année scolaire active mba tsy hiseho ny données année hafa.
       if (!nextFilters.anneeScolaire && apiActiveYear) {
         const activeYearFilters: Filters = {
           ...nextFilters,
@@ -240,7 +287,9 @@ export default function EtatPaiementFraisPage() {
           anneeScolaire: selectedYear,
           schoolYearName: selectedYear,
           year: selectedYear,
+          siteId: filters.siteId,
           site: filters.site,
+          siteName: filters.site,
           classe: filters.classe,
           section: filters.section,
         }),
@@ -272,14 +321,51 @@ export default function EtatPaiementFraisPage() {
   }
 
   useEffect(() => {
-    loadData(EMPTY_FILTERS);
+    let cancelled = false;
+
+    async function loadSites() {
+      try {
+        const res = await fetch(`/api/sites?_ts=${Date.now()}`, {
+          cache: "no-store",
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok || cancelled) return;
+
+        const list = normalizeSites(data);
+        setSiteOptions(list);
+
+        const activeSite = getActiveSite(list);
+
+        const initialFilters = {
+          ...EMPTY_FILTERS,
+          siteId: activeSite ? String(activeSite.id) : "",
+          site: activeSite?.name || "",
+        };
+
+        setFilters(initialFilters);
+        loadData(initialFilters);
+      } catch {
+        if (!cancelled) {
+          loadData(EMPTY_FILTERS);
+        }
+      }
+    }
+
+    loadSites();
+
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const sites = useMemo(() => {
+    if (siteOptions.length > 0) return siteOptions.map((item) => item.name);
     if (apiFilters.sites?.length) return apiFilters.sites;
     return unique(rows.map((r) => r.site));
-  }, [apiFilters.sites, rows]);
+  }, [siteOptions, apiFilters.sites, rows]);
 
   const classes = useMemo(() => {
     if (apiFilters.classes?.length) return apiFilters.classes;
@@ -312,15 +398,19 @@ export default function EtatPaiementFraisPage() {
   }, [rows, filters.matricule]);
 
   function updateFilter<K extends keyof Filters>(key: K, value: Filters[K], autoLoad = true) {
-    const nextFilters: Filters = {
+    let nextFilters: Filters = {
       ...filters,
       [key]: value,
       ...(key === "anneeScolaire"
-        ? { site: "", classe: "", section: "", frais: "" }
+        ? { classe: "", section: "", frais: "" }
         : {}),
       ...(key === "site" ? { classe: "", section: "", frais: "" } : {}),
       ...(key === "classe" ? { section: "", frais: "" } : {}),
     };
+
+    if (key === "site") {
+      nextFilters = applySiteToFilters(nextFilters, String(value || ""));
+    }
 
     setFilters(nextFilters);
 
@@ -330,9 +420,13 @@ export default function EtatPaiementFraisPage() {
   }
 
   function resetFilters() {
+    const activeSite = getActiveSite();
+
     const nextFilters = {
       ...EMPTY_FILTERS,
       anneeScolaire: activeYear || "",
+      siteId: activeSite ? String(activeSite.id) : "",
+      site: activeSite?.name || "",
     };
 
     setFilters(nextFilters);
@@ -373,7 +467,7 @@ export default function EtatPaiementFraisPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `etat-paiement-frais-${filters.anneeScolaire || activeYear || "annee"}.csv`;
+    a.download = `etat-paiement-frais-${filters.site || "site"}-${filters.anneeScolaire || activeYear || "annee"}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -388,7 +482,7 @@ export default function EtatPaiementFraisPage() {
             </h1>
             <p className="text-[11px] text-slate-500">
               Les colonnes viennent automatiquement des frais créés dans TrainingFee.
-              Année principale : {activeYear || "non définie"}.
+              Année principale : {activeYear || "non définie"} • Site : {filters.site || "site actif"}.
             </p>
           </div>
 
@@ -440,11 +534,16 @@ export default function EtatPaiementFraisPage() {
             className="h-[38px] rounded bg-slate-800 px-2 font-semibold text-white outline-none"
           >
             <option value="">Sites : TOUT</option>
-            {sites.map((s) => (
-              <option key={s} value={s}>
-                Sites : {s}
-              </option>
-            ))}
+            {sites.map((s) => {
+              const optionSite = siteOptions.find((item) => item.name === s);
+
+              return (
+                <option key={s} value={s}>
+                  Sites : {s}
+                  {optionSite?.active ? " • actif" : ""}
+                </option>
+              );
+            })}
           </select>
 
           <select

@@ -2,13 +2,25 @@
 
 import { useState, useMemo, useEffect, useRef } from "react";
 
-export default function StudentDetails({ user, student }: any) {
+export default function StudentDetails({
+  user,
+  student,
+  schoolYearName,
+  anneeScolaire,
+  siteId,
+  site,
+  siteCode,
+}: any) {
   const [tab, setTab] = useState("PDF");
   const [editing, setEditing] = useState(false);
 
   const initialForm = useMemo(
     () => ({
       ...student,
+      siteId: siteId || student.siteId || "",
+      site: site || student.site || "Strelitzia School",
+      siteCode: siteCode || student.siteCode || "",
+      anneeScolaire: schoolYearName || anneeScolaire || student.anneeScolaire || "2025-2026",
       signeParticulier: student.signeParticulier || "",
       maladieAllergie: student.maladieAllergie || "",
     }),
@@ -39,6 +51,48 @@ const [loadingTreasuries, setLoadingTreasuries] = useState(false);
 const paymentInProgressRef = useRef(false);
 const cancelInProgressRef = useRef(false);
 const movementKeysInProgressRef = useRef<Set<string>>(new Set());
+const effectiveSchoolYearName = String(
+  schoolYearName ||
+    anneeScolaire ||
+    form.anneeScolaire ||
+    student.anneeScolaire ||
+    "2025-2026"
+).trim();
+
+const effectiveSiteId = String(siteId || form.siteId || student.siteId || "").trim();
+const effectiveSiteName = String(site || form.site || student.site || "Strelitzia School").trim();
+const effectiveSiteCode = String(siteCode || form.siteCode || student.siteCode || "").trim();
+
+function addSiteYearParams(params: URLSearchParams) {
+  if (effectiveSchoolYearName) {
+    params.set("schoolYearName", effectiveSchoolYearName);
+    params.set("year", effectiveSchoolYearName);
+    params.set("anneeScolaire", effectiveSchoolYearName);
+  }
+
+  if (effectiveSiteId) params.set("siteId", effectiveSiteId);
+  if (effectiveSiteName) {
+    params.set("site", effectiveSiteName);
+    params.set("siteName", effectiveSiteName);
+  }
+  if (effectiveSiteCode) params.set("siteCode", effectiveSiteCode);
+
+  return params;
+}
+
+function getSiteYearPayload(extra: any = {}) {
+  return {
+    ...extra,
+    siteId: effectiveSiteId || undefined,
+    site: effectiveSiteName,
+    siteName: effectiveSiteName,
+    siteCode: effectiveSiteCode || undefined,
+    schoolYearName: effectiveSchoolYearName,
+    anneeScolaire: effectiveSchoolYearName,
+    year: effectiveSchoolYearName,
+  };
+}
+
 
 // Ordre professionnel: on garde l’ordre réel de création venant de la base.
 // Si un champ ordre/position existe plus tard dans l’API, il sera prioritaire.
@@ -176,12 +230,8 @@ useEffect(() => {
     try {
       setLoadingTreasuries(true);
 
-      const schoolYearName = String(form.anneeScolaire || student.anneeScolaire || "2025-2026").trim();
-      const params = new URLSearchParams();
-      if (schoolYearName) {
-        params.set("schoolYearName", schoolYearName);
-        params.set("year", schoolYearName);
-      }
+      const schoolYearName = effectiveSchoolYearName;
+      const params = addSiteYearParams(new URLSearchParams());
 
       const res = await fetch(`/api/treasuries?${params.toString()}`, {
         cache: "no-store",
@@ -217,7 +267,7 @@ useEffect(() => {
   }
 
   loadTreasuries();
-}, [form.anneeScolaire, student?.anneeScolaire]);
+}, [effectiveSchoolYearName, effectiveSiteId]);
 
 function getSelectedTreasury() {
   const id = Number(paymentForm.treasuryId || 0);
@@ -241,6 +291,10 @@ function buildTreasuryPayload() {
     treasuryId: treasury?.id || Number(paymentForm.treasuryId || 0) || undefined,
     treasuryName: treasury?.name || fallbackName,
     tresorerie: treasury?.name || fallbackName,
+    siteId: effectiveSiteId || undefined,
+    site: effectiveSiteName,
+    siteName: effectiveSiteName,
+    siteCode: effectiveSiteCode || undefined,
   };
 }
 
@@ -289,7 +343,8 @@ function buildMovementUniqueKey(fee: any, operation: "CREDIT" | "DEBIT", referen
     student.id,
     feeIdentity,
     reference || "NO_REF",
-    form.anneeScolaire || student.anneeScolaire || fee.schoolYearName || "2025-2026",
+    effectiveSiteId || effectiveSiteName,
+    effectiveSchoolYearName || fee.schoolYearName || "2025-2026",
   ]
     .map((item) => String(item ?? "").trim())
     .join("|");
@@ -404,7 +459,11 @@ async function createFeeTreasuryMovement(fee: any, operation: "CREDIT" | "DEBIT"
       studentName,
       matricule: student.matricule || student.registrationNumber || "",
       className: student.classe || student.className || student.classRoomName || "",
-      schoolYearName: form.anneeScolaire || student.anneeScolaire || fee.schoolYearName || "2025-2026",
+      siteId: effectiveSiteId || undefined,
+      site: effectiveSiteName,
+      siteName: effectiveSiteName,
+      siteCode: effectiveSiteCode || undefined,
+      schoolYearName: effectiveSchoolYearName || fee.schoolYearName || "2025-2026",
       feeId: fee.studentFeeId || fee.id,
       studentFeeId: fee.studentFeeId || null,
       trainingFeeId: fee.trainingFeeId || fee.sourceTrainingFeeId || fee.trainingId || null,
@@ -567,13 +626,27 @@ function normalizeTrainingFee(f: any, index: number, paidMap: Map<string, any>, 
   const keyId = f.id ?? `tf-${index}`;
   const linkedPaid = paidMap.get(String(f.id)) || paidMap.get(code);
   const localKey = `${student.id}-${keyId}-${code}`;
-  const localPaid = localPayments[localKey];
   const localEdit = getLocalFeeEdits()[localKey];
-  const paidInfo = linkedPaid || localPaid;
+
+  // LOGIQUE STRICTE:
+  // Tsy mampiasa localStorage hanaovana PAYE intsony.
+  // PAYE ihany raha misy StudentFee PAYE tena miverina avy amin'ny /api/student-fees.
+  const paidInfo = linkedPaid || null;
+  const paid = Boolean(paidInfo && isFeePaid(paidInfo));
+
+  const baseAmount = Number(
+    localEdit?.montant ??
+      paidInfo?.montantTotal ??
+      paidInfo?.amount ??
+      f.montant ??
+      f.montantTotal ??
+      f.amount ??
+      0
+  );
 
   return {
     id: paidInfo?.id || `training-${keyId}-${code}`,
-    studentFeeId: paidInfo?.id || null,
+    studentFeeId: paidInfo?.id || paidInfo?.studentFeeId || null,
     trainingFeeId: f.id,
     sourceTrainingFeeId: f.id,
     __sourceIndex: index,
@@ -583,21 +656,27 @@ function normalizeTrainingFee(f: any, index: number, paidMap: Map<string, any>, 
     schoolYearName: f.schoolYearName || f.year || f.anneeScolaire || "",
     code: f.code || f.libelle || code,
     libelle: f.libelle || f.code || code,
-    montantTotal: Number(localEdit?.montant ?? f.montant ?? f.montantTotal ?? f.amount ?? 0),
+    montantTotal: baseAmount,
     modifiedMontant: localEdit?.montant ? Number(localEdit.montant) : undefined,
-    montantPaye: paidInfo ? Number(paidInfo.montantPaye || paidInfo.amount || paidInfo.montantTotal || localEdit?.montant || f.montant || 0) : 0,
-    reste: paidInfo ? 0 : Number(localEdit?.montant ?? f.montant ?? f.montantTotal ?? f.amount ?? 0),
-    status: paidInfo ? "PAYE" : "NON_PAYE",
-    paid: Boolean(paidInfo),
-    localOnly: Boolean(localPaid && !linkedPaid),
+    montantPaye: paid ? Number(paidInfo?.montantPaye || paidInfo?.amount || paidInfo?.montantTotal || baseAmount) : 0,
+    reste: paid ? 0 : baseAmount,
+    status: paid ? "PAYE" : "NON_PAYE",
+    paid,
+    localOnly: false,
   };
 }
 
 function normalizeStudentFee(f: any, index: number) {
+  // LOGIQUE STRICTE:
+  // Seul le StudentFee retourné par /api/student-fees décide PAYE/NON_PAYE.
+  // localStorage ne transforme plus jamais un frais en PAYE.
+  const paid = isFeePaid(f);
+  const amount = getFeeAmount(f);
+
   return {
     ...f,
     id: f.id ?? `student-fee-${index}`,
-    studentFeeId: f.id,
+    studentFeeId: f.studentFeeId || f.id,
     __sourceIndex: index,
     createdAt: f.createdAt,
     ordre: f.ordre ?? f.order ?? f.position ?? f.rank ?? f.sortOrder,
@@ -605,9 +684,12 @@ function normalizeStudentFee(f: any, index: number) {
     schoolYearName: f.schoolYearName || f.year || f.anneeScolaire || "",
     code: f.code || f.libelle || f.month || f.mois || `Frais ${index + 1}`,
     libelle: f.libelle || f.label || f.name || f.code || `Frais ${index + 1}`,
-    montantTotal: getFeeAmount(f),
-    status: isFeePaid(f) ? "PAYE" : "NON_PAYE",
-    paid: isFeePaid(f),
+    montantTotal: amount,
+    montantPaye: paid ? Number(f.montantPaye || amount) : Number(f.montantPaye || 0),
+    reste: paid ? 0 : Number(f.reste ?? amount),
+    status: paid ? "PAYE" : "NON_PAYE",
+    paid,
+    localOnly: false,
   };
 }
 
@@ -615,7 +697,7 @@ useEffect(() => {
   if (tab === "FRAIS DE FORMATION") {
     loadStudentFees();
   }
-}, [tab, student?.id]);
+}, [tab, student?.id, effectiveSchoolYearName, effectiveSiteId]);
 
 async function loadStudentFees() {
   setLoadingFees(true);
@@ -626,7 +708,7 @@ async function loadStudentFees() {
       ...form,
     };
 
-    const schoolYearName = String(currentStudent.anneeScolaire || "").trim();
+    const schoolYearName = effectiveSchoolYearName;
     const classeName = String(
       currentStudent.classe ||
         currentStudent.className ||
@@ -640,7 +722,7 @@ async function loadStudentFees() {
       currentStudent.classeId ||
       "";
 
-    const trainingParams = new URLSearchParams();
+    const trainingParams = addSiteYearParams(new URLSearchParams());
 
     if (currentStudent.id) {
       trainingParams.set("studentId", String(currentStudent.id));
@@ -664,9 +746,9 @@ async function loadStudentFees() {
 
     const [studentRes, trainingRes] = await Promise.allSettled([
       fetch(
-        `/api/student-fees?studentId=${currentStudent.id}&schoolYearName=${encodeURIComponent(
-          schoolYearName
-        )}`,
+        `/api/student-fees?${addSiteYearParams(
+          new URLSearchParams({ studentId: String(currentStudent.id) })
+        ).toString()}`,
         { cache: "no-store" }
       ),
       fetch(`/api/training-fees?${trainingParams.toString()}`, {
@@ -887,7 +969,7 @@ function closePaymentModal() {
 async function payOneFee(fee: any) {
   if (isFeePaid(fee)) {
     setSelectedPaidFee(fee);
-    return;
+    return true;
   }
 
   setActionId(fee.id);
@@ -896,131 +978,112 @@ async function payOneFee(fee: any) {
   const paymentDate = getSelectedPaymentDate();
   const treasuryPayload = buildTreasuryPayload();
   const paymentUniqueKey = buildMovementUniqueKey(fee, "CREDIT", paymentReference);
-
-  const paidFee = {
-    ...fee,
-    status: "PAYE",
-    paid: true,
-    montantPaye: getFeeAmount(fee),
-    montantTotal: getFeeAmount(fee),
-    reste: 0,
-    paidAt: paymentDate,
-    treasuryId: treasuryPayload.treasuryId,
-    treasuryName: treasuryPayload.treasuryName,
-    tresorerie: treasuryPayload.tresorerie,
-    modePaiement: paymentForm.modePaiement,
-    reference: paymentReference,
-    commentaire: paymentForm.commentaire,
-  };
+  const amountToPay = getFeeAmount(fee);
 
   try {
-    let saved = false;
+    let res: Response;
 
-    if (fee.studentFeeId && !String(fee.studentFeeId).startsWith("training-")) {
-      const res = await fetch("/api/student-fees", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", "Idempotency-Key": paymentUniqueKey },
-        body: JSON.stringify({
-          idempotencyKey: paymentUniqueKey,
-          id: fee.studentFeeId,
-          action: "PAY",
-          montantPaye: getFeeAmount(fee),
-          date: paymentDate,
-          datePaiement: paymentDate,
-          paymentDate,
-          movementDate: paymentDate,
-          dateInsertion: paymentDate,
-          insertedAt: buildInsertionDateTime(paymentDate),
-          createdAt: buildInsertionDateTime(paymentDate),
-          actionAt: buildInsertionDateTime(paymentDate),
-          movementOrderAt: buildInsertionDateTime(paymentDate),
-          sortAt: buildInsertionDateTime(paymentDate),
-          modePaiement: paymentForm.modePaiement,
-          reference: paymentReference,
-          commentaire: paymentForm.commentaire,
-          tresorerie: treasuryPayload.tresorerie,
-        }),
-      });
-      saved = res.ok;
-    } else {
-      const res = await fetch("/api/student-fees", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Idempotency-Key": paymentUniqueKey },
-        body: JSON.stringify({
-          idempotencyKey: paymentUniqueKey,
-          studentId: student.id,
-          trainingFeeId: fee.trainingFeeId || fee.sourceTrainingFeeId,
-          code: getFeeCode(fee),
-          libelle: getFeeLabel(fee),
-          montantTotal: getFeeAmount(fee),
-          montantPaye: getFeeAmount(fee),
-          reste: 0,
-          status: "PAYE",
-          date: paymentDate,
-          datePaiement: paymentDate,
-          paymentDate,
-          movementDate: paymentDate,
-          dateInsertion: paymentDate,
-          insertedAt: buildInsertionDateTime(paymentDate),
-          createdAt: buildInsertionDateTime(paymentDate),
-          actionAt: buildInsertionDateTime(paymentDate),
-          movementOrderAt: buildInsertionDateTime(paymentDate),
-          sortAt: buildInsertionDateTime(paymentDate),
-          modePaiement: paymentForm.modePaiement,
-          reference: paymentReference,
-          commentaire: paymentForm.commentaire,
-          schoolYearName: form.anneeScolaire || student.anneeScolaire || "2025-2026",
-          tresorerie: treasuryPayload.tresorerie,
-        }),
-      });
-      saved = res.ok;
-    }
-
-    // Sécurité anti-doublon:
-    // Si /api/student-fees a répondu OK, c'est l'API qui a déjà créé le mouvement CREDIT.
-    // Donc le frontend ne recrée PAS de mouvement.
-    // On crée un mouvement ici uniquement si l'API student-fees n'a pas sauvegardé,
-    // pour garder un fallback local/API treasury-movements sans doublon.
-    if (!saved) {
-      saveLocalPayment(getPaymentKey(fee), paidFee);
-
-      await createFeeTreasuryMovement(fee, "CREDIT", {
-        amount: getFeeAmount(fee),
-        date: paymentDate,
-        datePaiement: paymentDate,
-        paymentDate,
-        movementDate: paymentDate,
-        dateInsertion: paymentDate,
-        reference: paymentReference,
-        modePaiement: paymentForm.modePaiement,
-        commentaire: paymentForm.commentaire,
-        treasuryPayload,
-      });
-    }
-
-    setFees((prev) =>
-      prev.map((item) =>
-        item.id === fee.id || getPaymentKey(item) === getPaymentKey(fee) ? paidFee : item
-      )
-    );
-    setSelectedPaidFee(paidFee);
-
-    if (saved) await loadStudentFees();
-  } catch {
-    saveLocalPayment(getPaymentKey(fee), paidFee);
-    await createFeeTreasuryMovement(fee, "CREDIT", {
-      amount: getFeeAmount(fee),
+    const commonPayload = {
+      idempotencyKey: paymentUniqueKey,
+      ...getSiteYearPayload(),
+      montantPaye: amountToPay,
+      montantTotal: amountToPay,
+      reste: 0,
+      status: "PAYE",
       date: paymentDate,
       datePaiement: paymentDate,
       paymentDate,
       movementDate: paymentDate,
-      reference: paymentReference,
+      dateInsertion: paymentDate,
+      insertedAt: buildInsertionDateTime(paymentDate),
+      createdAt: buildInsertionDateTime(paymentDate),
+      actionAt: buildInsertionDateTime(paymentDate),
+      movementOrderAt: buildInsertionDateTime(paymentDate),
+      sortAt: buildInsertionDateTime(paymentDate),
       modePaiement: paymentForm.modePaiement,
+      reference: paymentReference,
       commentaire: paymentForm.commentaire,
-      treasuryPayload,
-    });
-    setFees((prev) => prev.map((item) => (item.id === fee.id ? paidFee : item)));
-    setSelectedPaidFee(paidFee);
+      tresorerie: treasuryPayload.tresorerie,
+      treasuryId: treasuryPayload.treasuryId,
+      treasuryName: treasuryPayload.treasuryName,
+    };
+
+    if (fee.studentFeeId && !String(fee.studentFeeId).startsWith("training-")) {
+      res = await fetch("/api/student-fees", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": paymentUniqueKey,
+        },
+        body: JSON.stringify({
+          ...commonPayload,
+          id: fee.studentFeeId,
+          action: "PAY",
+        }),
+      });
+    } else {
+      res = await fetch("/api/student-fees", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": paymentUniqueKey,
+        },
+        body: JSON.stringify({
+          ...commonPayload,
+          studentId: student.id,
+          trainingFeeId: fee.trainingFeeId || fee.sourceTrainingFeeId,
+          code: getFeeCode(fee),
+          libelle: getFeeLabel(fee),
+        }),
+      });
+    }
+
+    const result = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      alert(result?.error || result?.message || "Erreur paiement. Le frais n'a pas été marqué payé.");
+      return false;
+    }
+
+    const savedFee = result?.data || result?.studentFee || result?.fee || result;
+    const finalPaidFee = {
+      ...fee,
+      ...savedFee,
+      id: savedFee?.id || fee.id,
+      studentFeeId: savedFee?.studentFeeId || savedFee?.id || fee.studentFeeId || null,
+      paid: true,
+      status: "PAYE",
+      montantPaye: Number(savedFee?.montantPaye || amountToPay),
+      montantTotal: Number(savedFee?.montantTotal || amountToPay),
+      reste: 0,
+      paidAt: savedFee?.paidAt || paymentDate,
+      treasuryId: treasuryPayload.treasuryId,
+      treasuryName: treasuryPayload.treasuryName,
+      tresorerie: treasuryPayload.tresorerie,
+      modePaiement: paymentForm.modePaiement,
+      reference: paymentReference,
+      commentaire: paymentForm.commentaire,
+      localOnly: false,
+    };
+
+    // Tsy mamorona movement côté frontend intsony.
+    // /api/student-fees irery no mamorona ENTREE mba hisorohana doublon.
+    removeLocalPayment(getPaymentKey(fee));
+
+    setFees((prev) =>
+      prev.map((item) =>
+        item.id === fee.id || getPaymentKey(item) === getPaymentKey(fee)
+          ? finalPaidFee
+          : item
+      )
+    );
+
+    setSelectedPaidFee(finalPaidFee);
+    await loadStudentFees();
+    return true;
+  } catch {
+    alert("Erreur serveur pendant le paiement. Le frais n'a pas été marqué payé.");
+    return false;
   } finally {
     setActionId(null);
   }
@@ -1036,42 +1099,42 @@ async function paySelectedFees() {
   setActionId("pay-multiple");
 
   try {
-    // Date réelle du paiement choisie dans le formulaire.
-    // Io date io no hampidirina any amin'ny Trésorerie mouvements.
-    const paymentDate = getSelectedPaymentDate();
-
-    // Tsy sakanana intsony raha tsy voafidy ny trésorerie: maka principal/default, sinon Caisse principale.
-    const paymentReference = paymentForm.reference || buildPaymentReference();
-    const treasuryPayload = buildTreasuryPayload();
-    if (!paymentForm.reference) {
-      setPaymentForm((p) => ({ ...p, reference: paymentReference }));
-    }
+    const paidFees: any[] = [];
 
     for (const fee of selectedFees) {
-      await payOneFee(fee);
+      const ok = await payOneFee(fee);
+      if (ok) {
+        paidFees.push({
+          ...fee,
+          status: "PAYE",
+          paid: true,
+          montantPaye: getFeeAmount(fee),
+          montantTotal: getFeeAmount(fee),
+          reste: 0,
+          paidAt: getSelectedPaymentDate(),
+          treasuryId: buildTreasuryPayload().treasuryId,
+          treasuryName: buildTreasuryPayload().treasuryName,
+          tresorerie: buildTreasuryPayload().tresorerie,
+          modePaiement: paymentForm.modePaiement,
+          reference: paymentForm.reference || buildPaymentReference(),
+          commentaire: paymentForm.commentaire,
+          localOnly: false,
+        });
+      }
     }
 
-    const paidFees = selectedFees.map((fee) => ({
-      ...fee,
-      status: "PAYE",
-      paid: true,
-      montantPaye: getFeeAmount(fee),
-      montantTotal: getFeeAmount(fee),
-      reste: 0,
-      paidAt: paymentDate,
-      treasuryId: treasuryPayload.treasuryId,
-      treasuryName: treasuryPayload.treasuryName,
-      tresorerie: treasuryPayload.tresorerie,
-      modePaiement: paymentForm.modePaiement,
-      reference: paymentReference,
-      commentaire: paymentForm.commentaire,
-    }));
-
-    setSelectedPaidFee(paidFees[paidFees.length - 1] || null);
-    setSelectedPaidFeeIds(paidFees.map((fee) => fee.id));
     setSelectedFeeIdsToPay([]);
     setShowPaymentModal(false);
-    printTicketMultiple(paidFees);
+
+    if (paidFees.length > 0) {
+      setSelectedPaidFee(paidFees[paidFees.length - 1] || null);
+      setSelectedPaidFeeIds(paidFees.map((fee) => fee.id));
+      printTicketMultiple(paidFees);
+      await loadStudentFees();
+    } else {
+      setSelectedPaidFee(null);
+      setSelectedPaidFeeIds([]);
+    }
   } finally {
     paymentInProgressRef.current = false;
     setActionId(null);
@@ -1081,13 +1144,107 @@ async function paySelectedFees() {
 async function cancelOnePayment(fee: any) {
   const realPaidAmount = getRealPaidAmount(fee);
 
+  if (!realPaidAmount || realPaidAmount <= 0) {
+    alert("Montant réel du paiement introuvable. Annulation impossible pour éviter une erreur de montant.");
+    return false;
+  }
+
+  if (!fee.studentFeeId || fee.localOnly || String(fee.studentFeeId).startsWith("training-")) {
+    alert("Aucun paiement réel à annuler pour ce frais.");
+    return false;
+  }
+
+  const cancelReference = fee.reference || `ANNULATION-${buildPaymentReference()}`;
+  const cancelDate = normalizeDateOnly(new Date().toISOString().slice(0, 10));
+  const cancelUniqueKey = buildMovementUniqueKey(
+    {
+      ...fee,
+      montantPaye: realPaidAmount,
+      montantTotal: realPaidAmount || getFeeAmount(fee),
+      amount: realPaidAmount || getFeeAmount(fee),
+    },
+    "DEBIT",
+    cancelReference
+  );
+
+  const res = await fetch("/api/student-fees", {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": cancelUniqueKey,
+    },
+    body: JSON.stringify({
+      idempotencyKey: cancelUniqueKey,
+      id: fee.studentFeeId,
+      action: "CANCEL",
+      type: "DEBIT",
+      sens: "DEBIT",
+      operation: "DEBIT",
+      movementType: "DEBIT",
+      nature: "ANNULATION",
+      status: "ANNULATION",
+      category: "ANNULATION_PAIEMENT_FRAIS",
+      categorie: "Annulation frais de formation",
+      source: "FRAIS_DE_FORMATION",
+      sourceType: "STUDENT_FEE",
+      motif: `ANNULATION - Frais de formation - ${getFeeLabel(fee)} - ${getFeeCode(fee)}`,
+      libelle: `ANNULATION - Frais de formation - ${getFeeLabel(fee)} - ${getFeeCode(fee)}`,
+      description: `ANNULATION - Frais de formation - ${getFeeLabel(fee)} - ${getFeeCode(fee)}`,
+      debit: realPaidAmount,
+      credit: 0,
+      montant: realPaidAmount,
+      amount: realPaidAmount,
+      montantPaye: realPaidAmount,
+      montantTotal: realPaidAmount,
+      reste: realPaidAmount,
+      date: cancelDate,
+      datePaiement: cancelDate,
+      paymentDate: cancelDate,
+      movementDate: cancelDate,
+      dateInsertion: cancelDate,
+      insertedAt: buildInsertionDateTime(cancelDate),
+      createdAt: buildInsertionDateTime(cancelDate),
+      actionAt: buildInsertionDateTime(cancelDate),
+      movementOrderAt: buildInsertionDateTime(cancelDate),
+      sortAt: buildInsertionDateTime(cancelDate),
+      studentId: student.id,
+      trainingFeeId: fee.trainingFeeId || fee.sourceTrainingFeeId,
+      originalMontantPaye: realPaidAmount,
+      paidAmount: realPaidAmount,
+      amountPaid: realPaidAmount,
+      appliedAmount: realPaidAmount,
+      selectedTarifAmount: realPaidAmount,
+      tarifName:
+        fee.tarifName ||
+        fee.selectedTarif ||
+        fee.appliedTarif ||
+        fee.tarifSelectionne ||
+        fee.tarifApplique ||
+        "",
+      ...getSiteYearPayload({
+        schoolYearName: effectiveSchoolYearName || fee.schoolYearName || "2025-2026",
+      }),
+      tresorerie: fee.tresorerie || fee.treasuryName,
+      treasuryId: fee.treasuryId || paymentForm.treasuryId || undefined,
+      treasuryName: fee.treasuryName || fee.tresorerie || paymentForm.tresorerie || undefined,
+      reference: cancelReference,
+      commentaire: `ANNULATION - Annulation paiement frais de formation ${getFeeCode(fee)}`,
+    }),
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    alert(data?.error || data?.message || "Erreur annulation paiement");
+    return false;
+  }
+
+  removeLocalPayment(getPaymentKey(fee));
+
   const unpaidFee = {
     ...fee,
     status: "NON_PAYE",
     paid: false,
     montantPaye: 0,
-    // Rehefa annulation dia averina ho reste ilay vola tena naloa tamin'io frais io.
-    // Tsy maka Principal intsony raha Ancien/Famille no tena paiement.
     montantTotal: realPaidAmount || getFeeAmount(fee),
     appliedAmount: realPaidAmount || getFeeAmount(fee),
     selectedTarifAmount: realPaidAmount || getFeeAmount(fee),
@@ -1095,113 +1252,6 @@ async function cancelOnePayment(fee: any) {
     paidAt: null,
     localOnly: false,
   };
-
-  let cancelled = false;
-  const cancelReference = fee.reference || `ANNULATION-${buildPaymentReference()}`;
-  const cancelDate = normalizeDateOnly(new Date().toISOString().slice(0, 10));
-  const cancelUniqueKey = buildMovementUniqueKey(
-    { ...fee, montantPaye: realPaidAmount, montantTotal: realPaidAmount || getFeeAmount(fee), amount: realPaidAmount || getFeeAmount(fee) },
-    "DEBIT",
-    cancelReference
-  );
-
-  if (!realPaidAmount || realPaidAmount <= 0) {
-    alert("Montant réel du paiement introuvable. Annulation impossible pour éviter une erreur de montant.");
-    return false;
-  }
-
-  if (fee.studentFeeId && !fee.localOnly && !String(fee.studentFeeId).startsWith("training-")) {
-    const res = await fetch("/api/student-fees", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json", "Idempotency-Key": cancelUniqueKey },
-      body: JSON.stringify({
-        idempotencyKey: cancelUniqueKey,
-        id: fee.studentFeeId,
-        action: "CANCEL",
-        // ANNULATION = vola mivoaka, noho izany DEBIT foana.
-        type: "DEBIT",
-        sens: "DEBIT",
-        operation: "DEBIT",
-        movementType: "DEBIT",
-        nature: "ANNULATION",
-        status: "ANNULATION",
-        category: "ANNULATION_PAIEMENT_FRAIS",
-        categorie: "Annulation frais de formation",
-        source: "FRAIS_DE_FORMATION",
-        sourceType: "STUDENT_FEE",
-        motif: `ANNULATION - Frais de formation - ${getFeeLabel(fee)} - ${getFeeCode(fee)}`,
-        libelle: `ANNULATION - Frais de formation - ${getFeeLabel(fee)} - ${getFeeCode(fee)}`,
-        description: `ANNULATION - Frais de formation - ${getFeeLabel(fee)} - ${getFeeCode(fee)}`,
-        debit: realPaidAmount,
-        credit: 0,
-        montant: realPaidAmount,
-        amount: realPaidAmount,
-        montantPaye: realPaidAmount,
-        montantTotal: realPaidAmount,
-        reste: realPaidAmount,
-        date: cancelDate,
-        datePaiement: cancelDate,
-        paymentDate: cancelDate,
-        movementDate: cancelDate,
-        dateInsertion: cancelDate,
-        insertedAt: buildInsertionDateTime(cancelDate),
-        createdAt: buildInsertionDateTime(cancelDate),
-        actionAt: buildInsertionDateTime(cancelDate),
-        movementOrderAt: buildInsertionDateTime(cancelDate),
-        sortAt: buildInsertionDateTime(cancelDate),
-        studentId: student.id,
-        trainingFeeId: fee.trainingFeeId || fee.sourceTrainingFeeId,
-        // Champs supplémentaires pour que l'API garde le montant réel du paiement annulé.
-        originalMontantPaye: realPaidAmount,
-        paidAmount: realPaidAmount,
-        amountPaid: realPaidAmount,
-        appliedAmount: realPaidAmount,
-        selectedTarifAmount: realPaidAmount,
-        tarifName: fee.tarifName || fee.selectedTarif || fee.appliedTarif || fee.tarifSelectionne || fee.tarifApplique || "",
-        schoolYearName: form.anneeScolaire || student.anneeScolaire || fee.schoolYearName || "2025-2026",
-        tresorerie: fee.tresorerie || fee.treasuryName,
-        reference: cancelReference,
-        commentaire: `ANNULATION - Annulation paiement frais de formation ${getFeeCode(fee)}`,
-      }),
-    });
-
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      alert(data?.error || data?.message || "Erreur annulation paiement");
-      return false;
-    }
-
-    cancelled = true;
-  }
-
-  removeLocalPayment(getPaymentKey(fee));
-
-  // Sécurité anti-doublon:
-  // Si /api/student-fees a répondu OK, c'est l'API qui a déjà créé le mouvement DEBIT d'annulation.
-  // Donc le frontend ne recrée PAS de mouvement.
-  // On crée un mouvement ici uniquement si aucun PATCH API n'a été fait
-  // (cas localOnly/fallback), afin d'éviter les doublons en ligne.
-  if (!cancelled) {
-    await createFeeTreasuryMovement(fee, "DEBIT", {
-      amount: realPaidAmount,
-      montant: realPaidAmount,
-      debit: realPaidAmount,
-      credit: 0,
-      date: cancelDate,
-      datePaiement: cancelDate,
-      paymentDate: cancelDate,
-      movementDate: cancelDate,
-      dateInsertion: cancelDate,
-      reference: cancelReference,
-      modePaiement: fee.modePaiement || paymentForm.modePaiement,
-      commentaire: `ANNULATION - Annulation paiement frais de formation ${getFeeCode(fee)}`,
-      treasuryPayload: {
-        treasuryId: fee.treasuryId,
-        treasuryName: fee.treasuryName || fee.tresorerie || paymentForm.tresorerie || "Caisse principale",
-        tresorerie: fee.tresorerie || fee.treasuryName || paymentForm.tresorerie || "Caisse principale",
-      },
-    });
-  }
 
   setFees((prev) =>
     prev.map((item) =>
@@ -1211,7 +1261,8 @@ async function cancelOnePayment(fee: any) {
     )
   );
 
-  return cancelled;
+  await loadStudentFees();
+  return true;
 }
 
 async function cancelPayment() {
@@ -1571,7 +1622,7 @@ function printTicket(fee: any) {
   const reference = fee.reference || paymentForm.reference || "-";
   const mode = fee.modePaiement || paymentForm.modePaiement || "-";
   const treasury = fee.tresorerie || fee.treasuryName || paymentForm.tresorerie || "-";
-  const schoolYear = form.anneeScolaire || student.anneeScolaire || fee.schoolYearName || "-";
+  const schoolYear = effectiveSchoolYearName || fee.schoolYearName || "-";
   const cashierRole = getReceiptUserRole();
 
   const receiptHtml = `
@@ -1583,6 +1634,7 @@ function printTicket(fee: any) {
         <div class="row"><span>Matricule</span><span>${escapeReceiptText(matricule)}</span></div>
         <div class="row"><span>Classe / Section</span><span>${escapeReceiptText(classe)}</span></div>
         <div class="row"><span>Année scolaire</span><span>${escapeReceiptText(schoolYear)}</span></div>
+        <div class="row"><span>Site</span><span>${escapeReceiptText(effectiveSiteName)}</span></div>
       </div>
 
       <div class="line"></div>
@@ -1637,7 +1689,7 @@ function printTicketMultiple(selectedFees: any[]) {
   const reference = paymentForm.reference || selectedFees[0]?.reference || "-";
   const mode = paymentForm.modePaiement || selectedFees[0]?.modePaiement || "-";
   const treasury = paymentForm.tresorerie || selectedFees[0]?.tresorerie || selectedFees[0]?.treasuryName || "-";
-  const schoolYear = form.anneeScolaire || student.anneeScolaire || selectedFees[0]?.schoolYearName || "-";
+  const schoolYear = effectiveSchoolYearName || selectedFees[0]?.schoolYearName || "-";
   const cashierRole = getReceiptUserRole();
 
   const rows = selectedFees
@@ -1663,6 +1715,7 @@ function printTicketMultiple(selectedFees: any[]) {
         <div class="row"><span>Matricule</span><span>${escapeReceiptText(matricule)}</span></div>
         <div class="row"><span>Classe / Section</span><span>${escapeReceiptText(classe)}</span></div>
         <div class="row"><span>Année scolaire</span><span>${escapeReceiptText(schoolYear)}</span></div>
+        <div class="row"><span>Site</span><span>${escapeReceiptText(effectiveSiteName)}</span></div>
       </div>
 
       <div class="line"></div>
@@ -1703,8 +1756,9 @@ function printTicketMultiple(selectedFees: any[]) {
   useEffect(() => {
     async function loadAcademics() {
       try {
-        const year = form.anneeScolaire || "2025-2026";
-        const res = await fetch(`/api/academics?year=${encodeURIComponent(year)}`);
+        const year = effectiveSchoolYearName;
+        const params = addSiteYearParams(new URLSearchParams());
+        const res = await fetch(`/api/academics?${params.toString()}`);
         const data = await res.json();
 
         setAcademics(Array.isArray(data) ? data : data.levels || []);
@@ -1714,7 +1768,7 @@ function printTicketMultiple(selectedFees: any[]) {
     }
 
     loadAcademics();
-  }, [form.anneeScolaire]);
+  }, [effectiveSchoolYearName, effectiveSiteId]);
 
   const classOptions = useMemo(() => {
     const classes = academics.flatMap((level: any) => level.classes || []);
@@ -1763,8 +1817,13 @@ function printTicketMultiple(selectedFees: any[]) {
       const payload = {
         photoUrl: form.photoUrl || "",
         matricule: form.matricule || "",
-        site: form.site || "Strelitzia School",
-        anneeScolaire: form.anneeScolaire || "2025-2026",
+        siteId: effectiveSiteId || form.siteId || student.siteId || undefined,
+        site: effectiveSiteName || form.site || "Strelitzia School",
+        siteName: effectiveSiteName || form.site || "Strelitzia School",
+        siteCode: effectiveSiteCode || form.siteCode || student.siteCode || undefined,
+        anneeScolaire: effectiveSchoolYearName || form.anneeScolaire || "2025-2026",
+        schoolYearName: effectiveSchoolYearName || form.anneeScolaire || "2025-2026",
+        year: effectiveSchoolYearName || form.anneeScolaire || "2025-2026",
         dateInscription: form.dateInscription,
 
         nom: form.nom || "",
@@ -1833,8 +1892,12 @@ function printTicketMultiple(selectedFees: any[]) {
     if (!ok) return;
 
     const deleteParams = new URLSearchParams();
-    const schoolYearName = String(form.anneeScolaire || student.anneeScolaire || "").trim();
-    if (schoolYearName) deleteParams.set("schoolYearName", schoolYearName);
+    const schoolYearName = effectiveSchoolYearName;
+    if (schoolYearName) {
+      deleteParams.set("schoolYearName", schoolYearName);
+      deleteParams.set("year", schoolYearName);
+    }
+    if (effectiveSiteId) deleteParams.set("siteId", effectiveSiteId);
 
     const res = await fetch(
       `/api/students/${form.id}${deleteParams.toString() ? `?${deleteParams.toString()}` : ""}`,

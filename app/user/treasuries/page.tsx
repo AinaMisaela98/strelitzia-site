@@ -1,36 +1,33 @@
-
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+const DEFAULT_YEAR = "2025-2026";
 
 type Treasury = {
   id: number;
   name: string;
   type: string;
   active: boolean;
-  totalEntree?: number;
-  totalSortie?: number;
-  solde?: number;
+  siteId?: number | null;
   site?: string | null;
   schoolYearName?: string | null;
   isDefault?: boolean | null;
   default?: boolean | null;
   principale?: boolean | null;
   isPrincipal?: boolean | null;
+  totalEntree?: number;
+  totalSortie?: number;
+  totalCredit?: number;
+  totalDebit?: number;
+  solde?: number;
+  balance?: number;
+  soldeReel?: number;
   accountName?: string | null;
   accountNumber?: string | null;
   bankName?: string | null;
   address?: string | null;
   bic?: string | null;
-};
-
-type Dashboard = {
-  treasuries?: Treasury[];
-  totals?: {
-    totalEntree: number;
-    totalSortie: number;
-    soldeGlobal: number;
-  };
 };
 
 type SchoolYear = {
@@ -40,194 +37,106 @@ type SchoolYear = {
   active?: boolean;
 };
 
+type Site = {
+  id: number;
+  name: string;
+  code?: string;
+  active?: boolean;
+};
+
 type TreasuryMovement = {
   id?: number | string;
   treasuryId?: number | string | null;
-  treasury?: { id?: number | string | null } | null;
+  movementType?: string | null;
   type?: string | null;
   sens?: string | null;
   operation?: string | null;
-  movementType?: string | null;
-  debit?: number | string | null;
-  credit?: number | string | null;
   amount?: number | string | null;
   montant?: number | string | null;
-  schoolYearName?: string | null;
-  year?: string | null;
-  anneeScolaire?: string | null;
+  credit?: number | string | null;
+  debit?: number | string | null;
 };
 
-type TreasuryBalance = {
-  totalEntree: number;
-  totalSortie: number;
-  solde: number;
+type Dashboard = {
+  treasuries?: Treasury[];
+  totals?: {
+    totalEntree?: number;
+    totalSortie?: number;
+    totalCredit?: number;
+    totalDebit?: number;
+    soldeGlobal?: number;
+    solde?: number;
+    balance?: number;
+  };
 };
+
+const TYPE_OPTIONS = [
+  { value: "CAISSE", label: "Caisse" },
+  { value: "BANQUE", label: "Banque" },
+];
+
+function text(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function cleanYear(value: unknown) {
+  return text(value) || DEFAULT_YEAR;
+}
+
+function getYearName(year: SchoolYear) {
+  return text(year.name || year.label);
+}
+
+function normalizeType(value: unknown) {
+  const raw = text(value).toUpperCase();
+  return raw === "BANQUE" ? "BANQUE" : "CAISSE";
+}
 
 function toNumber(value: unknown) {
-  const cleaned = String(value ?? "0").replace(/[^0-9.-]/g, "");
+  const cleaned = String(value ?? "0").replace(/[^\d.-]/g, "");
   const n = Number(cleaned);
   return Number.isFinite(n) ? n : 0;
 }
 
-function normalizeMovementRows(data: any): TreasuryMovement[] {
-  const raw = Array.isArray(data)
-    ? data
-    : data?.movements || data?.treasuryMovements || data?.data || data?.items || [];
-
-  return Array.isArray(raw) ? raw : [];
+function formatMoney(value: unknown) {
+  const n = toNumber(value);
+  return new Intl.NumberFormat("fr-FR").format(n);
 }
 
-function getMovementTreasuryId(movement: TreasuryMovement) {
-  return String(movement.treasuryId ?? movement.treasury?.id ?? "").trim();
+function isPrincipalTreasury(item: Treasury) {
+  return Boolean(item.isPrincipal || item.isDefault || item.default || item.principale);
 }
 
-function getMovementType(movement: TreasuryMovement) {
-  const raw = String(
-    movement.type ||
+function normalizeMovementType(movement: TreasuryMovement) {
+  const raw = text(
+    movement.movementType ||
+      movement.type ||
       movement.sens ||
-      movement.operation ||
-      movement.movementType ||
-      ""
+      movement.operation
   ).toUpperCase();
 
   if (raw === "DEBIT" || raw === "SORTIE" || raw === "DEPENSE" || raw === "DÉPENSE") {
     return "DEBIT";
   }
 
-  if (raw === "CREDIT" || raw === "CRÉDIT" || raw === "ENTREE" || raw === "ENTRÉE" || raw === "RECETTE") {
+  if (raw === "CREDIT" || raw === "ENTREE" || raw === "ENTRÉE" || raw === "RECETTE") {
     return "CREDIT";
   }
 
-  const debit = toNumber(movement.debit);
-  const credit = toNumber(movement.credit);
-  if (debit > 0 && credit <= 0) return "DEBIT";
+  if (toNumber(movement.debit) > 0) return "DEBIT";
+  if (toNumber(movement.credit) > 0) return "CREDIT";
+
   return "CREDIT";
 }
 
 function getMovementAmount(movement: TreasuryMovement) {
-  const debit = toNumber(movement.debit);
-  const credit = toNumber(movement.credit);
+  const type = normalizeMovementType(movement);
 
-  if (debit > 0) return debit;
-  if (credit > 0) return credit;
-
-  return Math.abs(toNumber(movement.amount ?? movement.montant));
-}
-
-function buildRealBalancesByTreasury(movements: TreasuryMovement[]) {
-  const map = new Map<string, TreasuryBalance>();
-
-  for (const movement of movements) {
-    const treasuryId = getMovementTreasuryId(movement);
-    if (!treasuryId) continue;
-
-    const current = map.get(treasuryId) || {
-      totalEntree: 0,
-      totalSortie: 0,
-      solde: 0,
-    };
-
-    const amount = getMovementAmount(movement);
-    if (amount <= 0) continue;
-
-    if (getMovementType(movement) === "DEBIT") {
-      current.totalSortie += amount;
-    } else {
-      current.totalEntree += amount;
-    }
-
-    current.solde = current.totalEntree - current.totalSortie;
-    map.set(treasuryId, current);
+  if (type === "DEBIT") {
+    return toNumber(movement.debit) || toNumber(movement.amount) || toNumber(movement.montant);
   }
 
-  return map;
-}
-
-function applyRealBalancesToTreasuries(treasuries: Treasury[], movements: TreasuryMovement[]) {
-  const balances = buildRealBalancesByTreasury(movements);
-
-  return treasuries.map((treasury) => {
-    const balance = balances.get(String(treasury.id)) || {
-      totalEntree: 0,
-      totalSortie: 0,
-      solde: 0,
-    };
-
-    return {
-      ...treasury,
-      totalEntree: balance.totalEntree,
-      totalSortie: balance.totalSortie,
-      solde: balance.solde,
-    };
-  });
-}
-
-function getRealTotals(treasuries: Treasury[]) {
-  return treasuries.reduce(
-    (acc, treasury) => {
-      acc.totalEntree += Number(treasury.totalEntree || 0);
-      acc.totalSortie += Number(treasury.totalSortie || 0);
-      acc.soldeGlobal += Number(treasury.solde || 0);
-      return acc;
-    },
-    { totalEntree: 0, totalSortie: 0, soldeGlobal: 0 }
-  );
-}
-
-const TYPE_OPTIONS = [
-  { value: "CAISSE", label: "Caisse" },
-  { value: "BANQUE", label: "Banque" },
-  { value: "MOBILE_MONEY", label: "Mobile Money" },
-  { value: "AUTRE", label: "Autre" },
-];
-
-const DEFAULT_YEAR = "2025-2026";
-
-function formatMoney(value: number | undefined | null) {
-  return new Intl.NumberFormat("fr-FR").format(Number(value || 0));
-}
-
-function normalizeType(type: string | undefined | null) {
-  const value = String(type || "CAISSE").toUpperCase();
-  if (value === "MOBILE_MONEY") return "Mobile Money";
-  if (value === "CAISSE") return "Caisse";
-  if (value === "BANQUE") return "Banque";
-  return "Autre";
-}
-
-function isPrincipalTreasury(item: Treasury) {
-  return Boolean(item.isDefault || item.default || item.principale || item.isPrincipal);
-}
-
-function getYearName(item: SchoolYear) {
-  return item.name || item.label || "";
-}
-
-
-function getTreasuryYear(item: Partial<Treasury>) {
-  return cleanYear(
-    item.schoolYearName ||
-      (item as any).schoolYear?.name ||
-      (item as any).schoolYear?.label ||
-      (item as any).anneeScolaire ||
-      (item as any).year
-  );
-}
-
-function cleanYear(value: unknown) {
-  return String(value ?? "").trim();
-}
-
-function sameSchoolYear(item: Partial<Treasury>, year: string) {
-  return getTreasuryYear(item) === cleanYear(year);
-}
-
-function normalizeTreasuries(data: any): Treasury[] {
-  const raw = Array.isArray(data) ? data : data?.treasuries || data?.data || data?.items || [];
-  return (Array.isArray(raw) ? raw : []).map((item: any) => ({
-    ...item,
-    schoolYearName: getTreasuryYear(item),
-  }));
+  return toNumber(movement.credit) || toNumber(movement.amount) || toNumber(movement.montant);
 }
 
 function normalizeSchoolYears(data: any): SchoolYear[] {
@@ -238,11 +147,96 @@ function normalizeSchoolYears(data: any): SchoolYear[] {
   return (Array.isArray(raw) ? raw : [])
     .map((item: any) => ({
       id: item.id,
-      name: item.name || item.label || item.schoolYearName || item.anneeScolaire || item.year || "",
-      label: item.label,
+      name: item.name || item.label,
+      label: item.label || item.name,
       active: Boolean(item.active || item.isActive || item.actif),
     }))
     .filter((item: SchoolYear) => getYearName(item));
+}
+
+function normalizeSites(data: any): Site[] {
+  const raw = Array.isArray(data) ? data : data?.sites || data?.data || data?.items || [];
+
+  return (Array.isArray(raw) ? raw : [])
+    .map((item: any) => ({
+      id: Number(item.id),
+      name: text(item.name || item.label || item.site),
+      code: text(item.code),
+      active: Boolean(item.active || item.isActive || item.actif),
+    }))
+    .filter((item: Site) => item.id && item.name);
+}
+
+function normalizeTreasuries(data: any): Treasury[] {
+  const raw = Array.isArray(data) ? data : data?.treasuries || data?.data || data?.items || [];
+
+  return (Array.isArray(raw) ? raw : []).map((item: any) => ({
+    ...item,
+    id: Number(item.id),
+    name: text(item.name),
+    type: normalizeType(item.type),
+    active: item.active !== false,
+    siteId: item.siteId ?? null,
+    site: item.site ?? null,
+    schoolYearName: item.schoolYearName || item.anneeScolaire || item.year || DEFAULT_YEAR,
+    totalEntree: Number(item.totalEntree ?? item.totalCredit ?? 0),
+    totalSortie: Number(item.totalSortie ?? item.totalDebit ?? 0),
+    solde: Number(item.solde ?? item.balance ?? item.soldeReel ?? 0),
+  }));
+}
+
+function normalizeMovementRows(data: any): TreasuryMovement[] {
+  const raw = Array.isArray(data)
+    ? data
+    : data?.movements || data?.treasuryMovements || data?.data || data?.items || [];
+
+  return Array.isArray(raw) ? raw : [];
+}
+
+function applyRealBalancesToTreasuries(treasuries: Treasury[], movements: TreasuryMovement[]) {
+  return treasuries.map((treasury) => {
+    let totalEntree = 0;
+    let totalSortie = 0;
+
+    for (const movement of movements) {
+      if (Number(movement.treasuryId) !== Number(treasury.id)) continue;
+
+      const amount = getMovementAmount(movement);
+      const type = normalizeMovementType(movement);
+
+      if (type === "DEBIT") totalSortie += amount;
+      else totalEntree += amount;
+    }
+
+    const solde = totalEntree - totalSortie;
+
+    return {
+      ...treasury,
+      totalEntree,
+      totalSortie,
+      totalCredit: totalEntree,
+      totalDebit: totalSortie,
+      solde,
+      balance: solde,
+      soldeReel: solde,
+    };
+  });
+}
+
+function getRealTotals(treasuries: Treasury[]) {
+  const totalEntree = treasuries.reduce((sum, item) => sum + toNumber(item.totalEntree), 0);
+  const totalSortie = treasuries.reduce((sum, item) => sum + toNumber(item.totalSortie), 0);
+  const soldeGlobal = totalEntree - totalSortie;
+
+  return {
+    totalEntree,
+    totalSortie,
+    soldeGlobal,
+    totalCredit: totalEntree,
+    totalDebit: totalSortie,
+    solde: soldeGlobal,
+    balance: soldeGlobal,
+  };
 }
 
 export default function TreasuriesPage() {
@@ -250,10 +244,12 @@ export default function TreasuriesPage() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [schoolYears, setSchoolYears] = useState<SchoolYear[]>([]);
   const [schoolYearName, setSchoolYearName] = useState(DEFAULT_YEAR);
+  const [sites, setSites] = useState<Site[]>([]);
+  const [selectedSiteId, setSelectedSiteId] = useState("");
+
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
-  const [site, setSite] = useState("Strelitzia School");
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
@@ -262,13 +258,18 @@ export default function TreasuriesPage() {
   const [isDefault, setIsDefault] = useState(false);
 
   const [actionMenu, setActionMenu] = useState<{ id: number; top: number; left: number } | null>(null);
+
   const loadSeqRef = useRef(0);
   const initializedYearRef = useRef(false);
+  const initializedSiteRef = useRef(false);
+
+  const selectedSite = useMemo(() => {
+    return sites.find((item) => String(item.id) === String(selectedSiteId)) || null;
+  }, [sites, selectedSiteId]);
+
+  const selectedSiteName = selectedSite?.name || "Strelitzia School";
 
   const sourceRows = useMemo(() => {
-    // IMPORTANT: on ne filtre plus une 2e fois côté frontend.
-    // L'API reçoit déjà schoolYearName et doit renvoyer uniquement les données de l'année choisie.
-    // Si les anciennes lignes n'ont pas encore schoolYearName, ce double filtre les cachait toutes.
     return dashboard?.treasuries ?? treasuries;
   }, [dashboard, treasuries]);
 
@@ -279,7 +280,9 @@ export default function TreasuriesPage() {
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
+
     if (!q) return sourceRows;
+
     return sourceRows.filter((item) =>
       [
         item.name,
@@ -303,51 +306,86 @@ export default function TreasuriesPage() {
     try {
       const res = await fetch("/api/school-years", { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
+
       if (!res.ok) return;
 
       const list = normalizeSchoolYears(data);
       setSchoolYears(list);
 
-      // L'année active créée dans Paramètres devient la sélection principale seulement au premier affichage.
       if (!initializedYearRef.current) {
         initializedYearRef.current = true;
-        const active = list.find((y) => y.active) || list[0];
+
+        const active = list.find((year) => year.active) || list[0];
         const activeName = active ? getYearName(active) : "";
+
         if (activeName) setSchoolYearName(activeName);
       }
     } catch {
       initializedYearRef.current = true;
-      // Si l'API année scolaire n'existe pas encore, on garde DEFAULT_YEAR.
     }
   }, []);
 
-  const loadData = useCallback(async (year: string) => {
-    const selectedYear = cleanYear(year) || DEFAULT_YEAR;
+  const loadSites = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/sites?_ts=${Date.now()}`, { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) return;
+
+      const list = normalizeSites(data);
+      setSites(list);
+
+      if (!initializedSiteRef.current) {
+        initializedSiteRef.current = true;
+
+        const active = list.find((site) => site.active) || list[0];
+
+        if (active) setSelectedSiteId(String(active.id));
+      }
+    } catch {
+      initializedSiteRef.current = true;
+    }
+  }, []);
+
+  const loadData = useCallback(async (year: string, siteId: string) => {
+    const selectedYear = cleanYear(year);
     const seq = ++loadSeqRef.current;
 
-    // Nettoyage immédiat: aucune donnée de l'ancienne année ne reste affichée.
     setLoading(true);
     setActionMenu(null);
     setTreasuries([]);
-    setDashboard({ treasuries: [], totals: { totalEntree: 0, totalSortie: 0, soldeGlobal: 0 } });
+    setDashboard({
+      treasuries: [],
+      totals: {
+        totalEntree: 0,
+        totalSortie: 0,
+        soldeGlobal: 0,
+      },
+    });
 
     try {
-      const qs = `?schoolYearName=${encodeURIComponent(selectedYear)}`;
+      const params = new URLSearchParams();
+      params.set("schoolYearName", selectedYear);
+      params.set("year", selectedYear);
+
+      if (siteId) params.set("siteId", siteId);
+
+      const qs = `?${params.toString()}`;
+
       const [treasuryRes, dashboardRes, movementRes] = await Promise.all([
         fetch(`/api/treasuries${qs}`, { cache: "no-store" }),
-        fetch(`/api/treasury-dashboard${qs}`, { cache: "no-store" }),
+        fetch(`/api/treasury-dashboard${qs}`, { cache: "no-store" }).catch(() => null),
         fetch(`/api/treasury-movements${qs}`, { cache: "no-store" }),
       ]);
 
       const treasuryJson = await treasuryRes.json().catch(() => ({}));
-      const dashboardJson = await dashboardRes.json().catch(() => ({}));
+      const dashboardJson = dashboardRes ? await dashboardRes.json().catch(() => ({})) : {};
       const movementJson = await movementRes.json().catch(() => ({}));
 
-      // Si l'utilisateur a changé d'année pendant le chargement, on ignore cette ancienne réponse.
       if (seq !== loadSeqRef.current) return;
 
       if (!treasuryRes.ok) throw new Error(treasuryJson.error || "Erreur chargement trésoreries");
-      if (!dashboardRes.ok) throw new Error(dashboardJson.error || "Erreur chargement dashboard");
+      if (dashboardRes && !dashboardRes.ok) throw new Error(dashboardJson.error || "Erreur chargement dashboard");
       if (!movementRes.ok) throw new Error(movementJson.error || "Erreur chargement mouvements");
 
       const movementRows = normalizeMovementRows(movementJson);
@@ -378,12 +416,20 @@ export default function TreasuriesPage() {
 
   useEffect(() => {
     loadSchoolYears();
-  }, [loadSchoolYears]);
+    loadSites();
+  }, [loadSchoolYears, loadSites]);
 
   useEffect(() => {
+    if (!selectedSiteId) return;
+
     setSearch("");
-    loadData(schoolYearName);
-  }, [schoolYearName, loadData]);
+    loadData(schoolYearName, selectedSiteId);
+  }, [schoolYearName, selectedSiteId, loadData]);
+
+  function changeSite(siteId: string) {
+    setSelectedSiteId(siteId);
+    setActionMenu(null);
+  }
 
   function openCreate() {
     setActionMenu(null);
@@ -391,6 +437,12 @@ export default function TreasuriesPage() {
     setName("");
     setType("CAISSE");
     setIsDefault(false);
+
+    if (!selectedSiteId && sites.length > 0) {
+      const active = sites.find((item) => item.active) || sites[0];
+      setSelectedSiteId(String(active.id));
+    }
+
     setModalOpen(true);
   }
 
@@ -398,13 +450,14 @@ export default function TreasuriesPage() {
     setActionMenu(null);
     setEditId(item.id);
     setName(item.name || "");
-    setType(String(item.type || "CAISSE").toUpperCase());
+    setType(normalizeType(item.type));
     setIsDefault(isPrincipalTreasury(item));
     setModalOpen(true);
   }
 
   function toggleActionMenu(e: React.MouseEvent<HTMLButtonElement>, id: number) {
     const rect = e.currentTarget.getBoundingClientRect();
+
     setActionMenu((current) =>
       current?.id === id
         ? null
@@ -418,6 +471,7 @@ export default function TreasuriesPage() {
 
   async function saveTreasury(e: React.FormEvent) {
     e.preventDefault();
+
     if (saving) return;
 
     if (!name.trim()) {
@@ -425,7 +479,13 @@ export default function TreasuriesPage() {
       return;
     }
 
+    if (!selectedSiteId) {
+      alert("Site obligatoire");
+      return;
+    }
+
     setSaving(true);
+
     try {
       const res = await fetch("/api/treasuries", {
         method: editId ? "PUT" : "POST",
@@ -435,7 +495,10 @@ export default function TreasuriesPage() {
           name: name.trim(),
           type,
           active: true,
-          site,
+          siteId: selectedSiteId,
+          site: selectedSiteName,
+          siteName: selectedSiteName,
+          siteCode: selectedSite?.code || "",
           schoolYearName: cleanYear(schoolYearName),
           isDefault: isDefault || (!editId && sourceRows.length === 0),
           principale: isDefault || (!editId && sourceRows.length === 0),
@@ -444,13 +507,14 @@ export default function TreasuriesPage() {
       });
 
       const data = await res.json().catch(() => ({}));
+
       if (!res.ok) {
         alert(data.error || "Erreur enregistrement");
         return;
       }
 
       setModalOpen(false);
-      await loadData(schoolYearName);
+      await loadData(schoolYearName, selectedSiteId);
     } finally {
       setSaving(false);
     }
@@ -458,7 +522,11 @@ export default function TreasuriesPage() {
 
   async function setAsPrincipal(item: Treasury) {
     setActionMenu(null);
-    const ok = confirm(`Définir "${item.name}" comme trésorerie principale pour ${schoolYearName} ?`);
+
+    const ok = confirm(
+      `Définir "${item.name}" comme trésorerie principale pour ${schoolYearName} sur ${selectedSiteName} ?`
+    );
+
     if (!ok) return;
 
     const res = await fetch("/api/treasuries", {
@@ -470,7 +538,10 @@ export default function TreasuriesPage() {
         name: item.name,
         type: item.type,
         active: item.active ?? true,
-        site: item.site || site,
+        siteId: selectedSiteId,
+        site: item.site || selectedSiteName,
+        siteName: item.site || selectedSiteName,
+        siteCode: selectedSite?.code || "",
         schoolYearName: cleanYear(schoolYearName),
         isDefault: true,
         principale: true,
@@ -479,29 +550,46 @@ export default function TreasuriesPage() {
     });
 
     const data = await res.json().catch(() => ({}));
+
     if (!res.ok) {
       alert(data.error || "Erreur modification principale");
       return;
     }
-    await loadData(schoolYearName);
+
+    await loadData(schoolYearName, selectedSiteId);
   }
 
   async function deleteTreasury(id: number) {
     setActionMenu(null);
+
     const ok = confirm("Supprimer cette trésorerie ? Si elle contient déjà des mouvements, elle sera désactivée.");
+
     if (!ok) return;
 
-    const res = await fetch(`/api/treasuries?id=${id}&schoolYearName=${encodeURIComponent(schoolYearName)}`, { method: "DELETE" });
+    const params = new URLSearchParams();
+    params.set("id", String(id));
+    params.set("schoolYearName", schoolYearName);
+    if (selectedSiteId) params.set("siteId", selectedSiteId);
+
+    const res = await fetch(`/api/treasuries?${params.toString()}`, {
+      method: "DELETE",
+    });
+
     const data = await res.json().catch(() => ({}));
+
     if (!res.ok) {
       alert(data.error || "Erreur suppression");
       return;
     }
-    await loadData(schoolYearName);
+
+    await loadData(schoolYearName, selectedSiteId);
   }
 
   return (
-    <main className="min-h-screen bg-[#f4f6f8] text-[12px] text-slate-900" onClick={() => actionMenu && setActionMenu(null)}>
+    <main
+      className="min-h-screen bg-[#f4f6f8] text-[12px] text-slate-900"
+      onClick={() => actionMenu && setActionMenu(null)}
+    >
       <div className="px-3 py-3 md:px-4">
         <div className="flex flex-col gap-2 border-b border-slate-300 pb-2 md:flex-row md:items-center md:justify-between">
           <div>
@@ -510,12 +598,14 @@ export default function TreasuriesPage() {
             </h1>
             <p className="mt-0.5 text-[11px] text-slate-500">
               Année scolaire : <span className="font-bold text-blue-700">{schoolYearName}</span>
+              <span className="mx-2">•</span>
+              Site : <span className="font-bold text-blue-700">{selectedSiteName}</span>
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5">
             <button
-              onClick={() => loadData(schoolYearName)}
+              onClick={() => loadData(schoolYearName, selectedSiteId)}
               disabled={loading}
               className="h-8 rounded-[3px] bg-[#0b9aad] px-3 text-[12px] font-bold text-white shadow-sm hover:bg-[#087f8f] disabled:opacity-50"
             >
@@ -534,7 +624,8 @@ export default function TreasuriesPage() {
                   const value = getYearName(year);
                   return (
                     <option key={value} value={value}>
-                      {value}{year.active ? " • active" : ""}
+                      {value}
+                      {year.active ? " • active" : ""}
                     </option>
                   );
                 })
@@ -542,11 +633,20 @@ export default function TreasuriesPage() {
             </select>
 
             <select
-              value={site}
-              onChange={(e) => setSite(e.target.value)}
+              value={selectedSiteId}
+              onChange={(e) => changeSite(e.target.value)}
               className="h-8 rounded-[3px] border border-slate-700 bg-[#252b33] px-2 text-[12px] font-bold text-white outline-none"
             >
-              <option value="Strelitzia School">Sites : Strelitzia School</option>
+              {sites.length === 0 ? (
+                <option value="">Sites : Strelitzia School</option>
+              ) : (
+                sites.map((item) => (
+                  <option key={item.id} value={String(item.id)}>
+                    Sites : {item.name}
+                    {item.active ? " • actif" : ""}
+                  </option>
+                ))
+              )}
             </select>
 
             <button
@@ -560,7 +660,7 @@ export default function TreasuriesPage() {
 
         <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div className="rounded-[4px] border border-blue-200 bg-blue-50 px-3 py-2 text-[11px] text-blue-900">
-            La trésorerie principale est marquée par une case bleue cochée. Une seule doit être principale par année scolaire.
+            La trésorerie principale est marquée par une case bleue cochée. Une seule doit être principale par site et par année scolaire.
           </div>
           <input
             value={search}
@@ -575,16 +675,16 @@ export default function TreasuriesPage() {
             <thead>
               <tr className="bg-[#2d333c] text-left text-white">
                 <th className="w-[70px] border-r border-slate-500 px-2 py-2 text-center font-bold">Principale</th>
-                <th className="w-[230px] border-r border-slate-500 px-2 py-2 font-bold">Nom <span className="float-right text-slate-300">↕</span></th>
-                <th className="w-[130px] border-r border-slate-500 px-2 py-2 font-bold">Année scolaire <span className="float-right text-slate-300">↕</span></th>
-                <th className="w-[130px] border-r border-slate-500 px-2 py-2 font-bold">Site <span className="float-right text-slate-300">↕</span></th>
-                <th className="w-[95px] border-r border-slate-500 px-2 py-2 font-bold">TYPE <span className="float-right text-slate-300">↕</span></th>
-                <th className="w-[145px] border-r border-slate-500 px-2 py-2 font-bold">Nom du compte <span className="float-right text-slate-300">↕</span></th>
-                <th className="w-[155px] border-r border-slate-500 px-2 py-2 font-bold">numero du compte <span className="float-right text-slate-300">↕</span></th>
-                <th className="w-[190px] border-r border-slate-500 px-2 py-2 font-bold">banque Correspondante <span className="float-right text-slate-300">↕</span></th>
-                <th className="w-[95px] border-r border-slate-500 px-2 py-2 font-bold">solde <span className="float-right text-slate-300">↕</span></th>
-                <th className="w-[80px] border-r border-slate-500 px-2 py-2 font-bold">Adresse <span className="float-right text-slate-300">↕</span></th>
-                <th className="w-[45px] border-r border-slate-500 px-2 py-2 font-bold">bic <span className="float-right text-slate-300">↕</span></th>
+                <th className="w-[230px] border-r border-slate-500 px-2 py-2 font-bold">Nom</th>
+                <th className="w-[130px] border-r border-slate-500 px-2 py-2 font-bold">Année scolaire</th>
+                <th className="w-[130px] border-r border-slate-500 px-2 py-2 font-bold">Site</th>
+                <th className="w-[95px] border-r border-slate-500 px-2 py-2 font-bold">TYPE</th>
+                <th className="w-[145px] border-r border-slate-500 px-2 py-2 font-bold">Nom du compte</th>
+                <th className="w-[155px] border-r border-slate-500 px-2 py-2 font-bold">numero du compte</th>
+                <th className="w-[190px] border-r border-slate-500 px-2 py-2 font-bold">banque Correspondante</th>
+                <th className="w-[95px] border-r border-slate-500 px-2 py-2 font-bold">solde</th>
+                <th className="w-[80px] border-r border-slate-500 px-2 py-2 font-bold">Adresse</th>
+                <th className="w-[45px] border-r border-slate-500 px-2 py-2 font-bold">bic</th>
                 <th className="w-[95px] px-2 py-2 text-center font-bold">Actions</th>
               </tr>
             </thead>
@@ -610,10 +710,18 @@ export default function TreasuriesPage() {
                     </td>
                     <td className="border-r border-slate-300 px-2 py-[6px] font-semibold text-slate-900">
                       {item.name}
-                      {checked && <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">Principale</span>}
+                      {checked && (
+                        <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+                          Principale
+                        </span>
+                      )}
                     </td>
-                    <td className="border-r border-slate-300 px-2 py-[6px] font-semibold text-blue-700">{item.schoolYearName || schoolYearName}</td>
-                    <td className="border-r border-slate-300 px-2 py-[6px]">{item.site || site}</td>
+                    <td className="border-r border-slate-300 px-2 py-[6px] font-semibold text-blue-700">
+                      {item.schoolYearName || schoolYearName}
+                    </td>
+                    <td className="border-r border-slate-300 px-2 py-[6px]">
+                      {item.site || selectedSiteName}
+                    </td>
                     <td className="border-r border-slate-300 px-2 py-[6px]">{normalizeType(item.type)}</td>
                     <td className="border-r border-slate-300 px-2 py-[6px]">{item.accountName || ""}</td>
                     <td className="border-r border-slate-300 px-2 py-[6px]">{item.accountNumber || ""}</td>
@@ -663,7 +771,7 @@ export default function TreasuriesPage() {
                             Mettre principale
                           </button>
                           <a
-                            href={`/user/treasury-movements?schoolYearName=${encodeURIComponent(schoolYearName)}&treasuryId=${item.id}`}
+                            href={`/user/treasury-movements?schoolYearName=${encodeURIComponent(schoolYearName)}&siteId=${encodeURIComponent(selectedSiteId)}&treasuryId=${item.id}`}
                             className="flex w-full items-center gap-2 px-3 py-2 text-[12px] font-semibold text-emerald-700 hover:bg-emerald-50"
                           >
                             <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-emerald-600 text-white">↗</span>
@@ -687,7 +795,7 @@ export default function TreasuriesPage() {
               {!loading && rows.length === 0 && (
                 <tr>
                   <td colSpan={12} className="px-3 py-8 text-center text-slate-500">
-                    Aucune trésorerie trouvée pour l'année scolaire « {schoolYearName} ».
+                    Aucune trésorerie trouvée pour l'année scolaire « {schoolYearName} » sur le site « {selectedSiteName} ».
                   </td>
                 </tr>
               )}
@@ -700,8 +808,14 @@ export default function TreasuriesPage() {
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 px-3 pt-[110px]">
           <form onSubmit={saveTreasury} className="w-full max-w-[430px] overflow-hidden rounded-[6px] bg-white shadow-2xl">
             <div className="flex items-center justify-between bg-[#303640] px-3 py-3 text-white">
-              <h2 className="text-[16px] font-black">{editId ? "Modifier Trésorerie" : "Nouveau Trésorerie"}</h2>
-              <button type="button" onClick={() => setModalOpen(false)} className="text-[22px] leading-none text-slate-300 hover:text-white">
+              <h2 className="text-[16px] font-black">
+                {editId ? "Modifier Trésorerie" : "Nouveau Trésorerie"}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setModalOpen(false)}
+                className="text-[22px] leading-none text-slate-300 hover:text-white"
+              >
                 ×
               </button>
             </div>
@@ -721,10 +835,31 @@ export default function TreasuriesPage() {
                       const value = getYearName(year);
                       return (
                         <option key={value} value={value}>
-                          {value}{year.active ? " • active" : ""}
+                          {value}
+                          {year.active ? " • active" : ""}
                         </option>
                       );
                     })
+                  )}
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="mb-1 block text-[11px] font-semibold text-slate-700">Sites</span>
+                <select
+                  value={selectedSiteId}
+                  onChange={(e) => changeSite(e.target.value)}
+                  className="h-8 w-full border border-slate-300 bg-white px-2 text-[12px] outline-none focus:border-blue-500"
+                >
+                  {sites.length === 0 ? (
+                    <option value="">Strelitzia School</option>
+                  ) : (
+                    sites.map((item) => (
+                      <option key={item.id} value={String(item.id)}>
+                        {item.name}
+                        {item.active ? " • actif" : ""}
+                      </option>
+                    ))
                   )}
                 </select>
               </label>
@@ -741,7 +876,7 @@ export default function TreasuriesPage() {
 
               <button
                 type="button"
-                onClick={() => setIsDefault((v) => !v)}
+                onClick={() => setIsDefault((value) => !value)}
                 className={
                   isDefault
                     ? "flex w-full items-center gap-2 rounded-[5px] border border-blue-600 bg-blue-50 px-3 py-2 text-left text-[12px] font-bold text-blue-800"
@@ -759,17 +894,6 @@ export default function TreasuriesPage() {
                 </span>
                 Cocher si cette trésorerie est principale / par défaut
               </button>
-
-              <label className="block">
-                <span className="mb-1 block text-[11px] font-semibold text-slate-700">Sites</span>
-                <select
-                  value={site}
-                  onChange={(e) => setSite(e.target.value)}
-                  className="h-8 w-full border border-slate-300 bg-white px-2 text-[12px] outline-none focus:border-blue-500"
-                >
-                  <option value="Strelitzia School">Strelitzia School</option>
-                </select>
-              </label>
 
               <label className="block">
                 <span className="mb-1 block text-[11px] font-semibold text-slate-700">Type trésorerie</span>

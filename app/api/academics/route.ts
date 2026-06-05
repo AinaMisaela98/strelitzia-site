@@ -16,11 +16,35 @@ async function getActiveYear() {
   return year.name;
 }
 
+async function getDefaultSite() {
+  let site = await prisma.site.findFirst({
+    where: { active: true },
+    orderBy: { id: "asc" },
+  });
+
+  if (!site) {
+    site = await prisma.site.create({
+      data: {
+        name: "Strelitzia School",
+        code: "STRELITZIA",
+        active: true,
+      },
+    });
+  }
+
+  return site;
+}
+
 async function requireUser() {
   const user = await getAuthUser();
+
   if (!user) {
-    return { user: null, response: NextResponse.json({ error: "Non autorisé" }, { status: 401 }) };
+    return {
+      user: null,
+      response: NextResponse.json({ error: "Non autorisé" }, { status: 401 }),
+    };
   }
+
   return { user, response: null };
 }
 
@@ -33,19 +57,40 @@ function cleanId(value: unknown) {
   return Number.isFinite(id) && id > 0 ? id : null;
 }
 
+async function resolveSiteId(value: unknown) {
+  const id = cleanId(value);
+
+  if (id) return id;
+
+  const site = await getDefaultSite();
+  return site.id;
+}
+
 export async function GET(req: Request) {
   const auth = await requireUser();
   if (auth.response) return auth.response;
 
   const url = new URL(req.url);
   const year = url.searchParams.get("year") || (await getActiveYear());
+  const siteId = await resolveSiteId(url.searchParams.get("siteId"));
 
   const levels = await prisma.level.findMany({
-    where: { schoolYearName: year },
+    where: {
+      schoolYearName: year,
+      siteId,
+    },
     include: {
       classes: {
+        where: {
+          schoolYearName: year,
+          siteId,
+        },
         include: {
           series: {
+            where: {
+              schoolYearName: year,
+              siteId,
+            },
             orderBy: { id: "asc" },
           },
         },
@@ -55,7 +100,7 @@ export async function GET(req: Request) {
     orderBy: { id: "asc" },
   });
 
-  return NextResponse.json({ year, levels });
+  return NextResponse.json({ year, siteId, levels });
 }
 
 export async function POST(req: Request) {
@@ -64,9 +109,11 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
+
     const type = body.type;
     const name = cleanName(body.name);
     const year = cleanName(body.schoolYearName) || (await getActiveYear());
+    const siteId = await resolveSiteId(body.siteId);
 
     if (!name || !type) {
       return NextResponse.json({ error: "Champs incomplets" }, { status: 400 });
@@ -77,6 +124,7 @@ export async function POST(req: Request) {
         data: {
           name,
           schoolYearName: year,
+          siteId,
         },
       });
 
@@ -85,11 +133,15 @@ export async function POST(req: Request) {
 
     if (type === "class") {
       const levelId = cleanId(body.levelId);
+
       if (!levelId) {
         return NextResponse.json({ error: "Niveau obligatoire" }, { status: 400 });
       }
 
-      const level = await prisma.level.findUnique({ where: { id: levelId } });
+      const level = await prisma.level.findUnique({
+        where: { id: levelId },
+      });
+
       if (!level) {
         return NextResponse.json({ error: "Niveau introuvable" }, { status: 404 });
       }
@@ -99,6 +151,7 @@ export async function POST(req: Request) {
           name,
           levelId,
           schoolYearName: level.schoolYearName || year,
+          siteId: level.siteId || siteId,
         },
       });
 
@@ -107,17 +160,23 @@ export async function POST(req: Request) {
 
     if (type === "serie") {
       const classRoomId = cleanId(body.classRoomId);
+
       if (!classRoomId) {
         return NextResponse.json({ error: "Classe obligatoire" }, { status: 400 });
       }
 
-      const classRoom = await prisma.classRoom.findUnique({ where: { id: classRoomId } });
+      const classRoom = await prisma.classRoom.findUnique({
+        where: { id: classRoomId },
+      });
+
       if (!classRoom) {
         return NextResponse.json({ error: "Classe introuvable" }, { status: 404 });
       }
 
       const names: string[] = Array.isArray(body.names)
-        ? body.names.map((item: unknown) => cleanName(item)).filter((item: string) => item.length > 0)
+        ? body.names
+            .map((item: unknown) => cleanName(item))
+            .filter((item: string) => item.length > 0)
         : name
             .split(/[,;\n]/)
             .map((item: string) => item.trim())
@@ -131,6 +190,7 @@ export async function POST(req: Request) {
                 name: serieName,
                 classRoomId,
                 schoolYearName: classRoom.schoolYearName || year,
+                siteId: classRoom.siteId || siteId,
               },
             })
           )
@@ -144,6 +204,7 @@ export async function POST(req: Request) {
           name: names[0] || name,
           classRoomId,
           schoolYearName: classRoom.schoolYearName || year,
+          siteId: classRoom.siteId || siteId,
         },
       });
 
@@ -155,10 +216,16 @@ export async function POST(req: Request) {
     console.error("ACADEMICS_POST_ERROR", error);
 
     if (error?.code === "P2002") {
-      return NextResponse.json({ error: "Existe déjà pour cette année scolaire" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Existe déjà pour cette année scolaire et ce site" },
+        { status: 400 }
+      );
     }
 
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+    return NextResponse.json(
+      { error: error?.message || "Erreur serveur" },
+      { status: 500 }
+    );
   }
 }
 
@@ -168,9 +235,11 @@ export async function PUT(req: Request) {
 
   try {
     const body = await req.json();
+
     const type = body.type;
     const id = cleanId(body.id);
     const name = cleanName(body.name);
+    const siteId = await resolveSiteId(body.siteId);
 
     if (!type || !id || !name) {
       return NextResponse.json({ error: "Champs incomplets" }, { status: 400 });
@@ -179,21 +248,39 @@ export async function PUT(req: Request) {
     if (type === "level") {
       const item = await prisma.level.update({
         where: { id },
-        data: { name },
+        data: {
+          name,
+          siteId,
+        },
       });
 
       return NextResponse.json(item);
     }
 
     if (type === "class") {
-      const data: { name: string; levelId?: number; schoolYearName?: string } = { name };
+      const data: {
+        name: string;
+        levelId?: number;
+        schoolYearName?: string;
+        siteId?: number;
+      } = { name };
+
       const levelId = cleanId(body.levelId);
 
       if (levelId) {
-        const level = await prisma.level.findUnique({ where: { id: levelId } });
-        if (!level) return NextResponse.json({ error: "Niveau introuvable" }, { status: 404 });
+        const level = await prisma.level.findUnique({
+          where: { id: levelId },
+        });
+
+        if (!level) {
+          return NextResponse.json({ error: "Niveau introuvable" }, { status: 404 });
+        }
+
         data.levelId = levelId;
         data.schoolYearName = level.schoolYearName;
+        data.siteId = level.siteId || siteId;
+      } else {
+        data.siteId = siteId;
       }
 
       const item = await prisma.classRoom.update({
@@ -205,14 +292,29 @@ export async function PUT(req: Request) {
     }
 
     if (type === "serie") {
-      const data: { name: string; classRoomId?: number; schoolYearName?: string } = { name };
+      const data: {
+        name: string;
+        classRoomId?: number;
+        schoolYearName?: string;
+        siteId?: number;
+      } = { name };
+
       const classRoomId = cleanId(body.classRoomId);
 
       if (classRoomId) {
-        const classRoom = await prisma.classRoom.findUnique({ where: { id: classRoomId } });
-        if (!classRoom) return NextResponse.json({ error: "Classe introuvable" }, { status: 404 });
+        const classRoom = await prisma.classRoom.findUnique({
+          where: { id: classRoomId },
+        });
+
+        if (!classRoom) {
+          return NextResponse.json({ error: "Classe introuvable" }, { status: 404 });
+        }
+
         data.classRoomId = classRoomId;
         data.schoolYearName = classRoom.schoolYearName;
+        data.siteId = classRoom.siteId || siteId;
+      } else {
+        data.siteId = siteId;
       }
 
       const item = await prisma.serie.update({
@@ -232,10 +334,16 @@ export async function PUT(req: Request) {
     }
 
     if (error?.code === "P2002") {
-      return NextResponse.json({ error: "Existe déjà pour cette année scolaire" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Existe déjà pour cette année scolaire et ce site" },
+        { status: 400 }
+      );
     }
 
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+    return NextResponse.json(
+      { error: error?.message || "Erreur serveur" },
+      { status: 500 }
+    );
   }
 }
 
@@ -245,6 +353,7 @@ export async function DELETE(req: Request) {
 
   try {
     const body = await req.json();
+
     const type = body.type;
     const id = cleanId(body.id);
 
@@ -275,7 +384,13 @@ export async function DELETE(req: Request) {
       const classIds: number[] = classes.map((item: { id: number }) => item.id);
 
       await prisma.$transaction([
-        prisma.serie.deleteMany({ where: { classRoomId: { in: classIds.length ? classIds : [-1] } } }),
+        prisma.serie.deleteMany({
+          where: {
+            classRoomId: {
+              in: classIds.length ? classIds : [-1],
+            },
+          },
+        }),
         prisma.classRoom.deleteMany({ where: { levelId: id } }),
         prisma.level.delete({ where: { id } }),
       ]);
@@ -292,9 +407,15 @@ export async function DELETE(req: Request) {
     }
 
     if (error?.code === "P2003") {
-      return NextResponse.json({ error: "Suppression impossible: élément déjà utilisé ailleurs" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Suppression impossible: élément déjà utilisé ailleurs" },
+        { status: 400 }
+      );
     }
 
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+    return NextResponse.json(
+      { error: error?.message || "Erreur serveur" },
+      { status: 500 }
+    );
   }
 }

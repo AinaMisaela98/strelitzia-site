@@ -22,11 +22,13 @@ model UserRole {
 
   @@map("UserRole")
 }
+
 enum Role {
   ADMIN
   DIRECTEUR
   SECRETAIRE
 }
+
 enum Sexe {
   Masculin
   Feminin
@@ -43,10 +45,10 @@ model SchoolYear {
 }
 
 model User {
-  id        Int      @id @default(autoincrement())
-  name      String
-  email     String   @unique
-  password  String
+  id       Int    @id @default(autoincrement())
+  name     String
+  email    String @unique
+  password String
 
   // Champ ancien conservé pour ne pas casser le login, la sidebar et les reçus.
   // Il garde ADMIN / DIRECTEUR / SECRETAIRE ou le nom du rôle personnalisé.
@@ -54,19 +56,19 @@ model User {
 
   // Nouveau rôle personnalisable créé par l'ADMIN.
   // Table réelle en production: "UserRole" pour éviter le conflit avec l'ancien enum PostgreSQL "Role".
-  roleId    Int?
-  roleRef   UserRole? @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  roleId  Int?
+  roleRef UserRole? @relation(fields: [roleId], references: [id], onDelete: SetNull)
 
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
+
+  profilePhoto       String?
+  mustChangePassword Boolean @default(false)
 
   @@index([email])
   @@index([active])
   @@index([role])
   @@index([roleId])
-
-  profilePhoto String?
-  mustChangePassword Boolean @default(false)
 }
 
 model Permission {
@@ -75,7 +77,7 @@ model Permission {
   action  String
   allowed Boolean @default(false)
 
-  role    UserRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  role UserRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@unique([roleId, action])
   @@index([roleId])
@@ -83,18 +85,21 @@ model Permission {
 }
 
 model Student {
-  id               Int      @id @default(autoincrement())
-  matricule        String
-  site             String   @default("Strelitzia School")
-  anneeScolaire    String   @default("2025-2026")
-  dateInscription  DateTime
+  id        Int    @id @default(autoincrement())
+  matricule String
+  site      String @default("Strelitzia School")
+  siteId    Int?
+  siteRef   Site?  @relation(fields: [siteId], references: [id])
 
-  photoUrl         String?
-  nom              String
-  prenoms          String
-  sexe             Sexe
-  classe           String
-  section          String
+  anneeScolaire   String   @default("2025-2026")
+  dateInscription DateTime
+
+  photoUrl String?
+  nom      String
+  prenoms  String
+  sexe     Sexe
+  classe   String
+  section  String
 
   contact          String?
   dateNaissance    DateTime?
@@ -104,25 +109,25 @@ model Student {
   maladieAllergie  String?
   email            String?
 
-  pereNom          String?
-  pereTel          String?
-  mereNom          String?
-  mereTel          String?
-  parentAdresse    String?
+  pereNom       String?
+  pereTel       String?
+  mereNom       String?
+  mereTel       String?
+  parentAdresse String?
 
-  tuteurNom        String?
-  tuteurLien       String?
-  tuteurTel        String?
-  tuteurAdresse    String?
+  tuteurNom     String?
+  tuteurLien    String?
+  tuteurTel     String?
+  tuteurAdresse String?
 
   niveau           String?
   fraisInscription String?
   fraisScolarite   String?
 
-  activite         String?
-  remarque         String?
+  activite String?
+  remarque String?
 
-  createdAt        DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@unique([matricule, anneeScolaire])
   @@index([anneeScolaire])
@@ -135,61 +140,82 @@ model Student {
 }
 
 model Level {
-  id             Int      @id @default(autoincrement())
+  id Int @id @default(autoincrement())
+
+  siteId Int?
+  site   String?
+
   name           String
-  schoolYearName String
+  schoolYearName String   @default("2025-2026")
   createdAt      DateTime @default(now())
 
-  classes        ClassRoom[]
+  classes ClassRoom[]
 
-  @@unique([name, schoolYearName])
+  @@unique([name, schoolYearName, siteId])
+  @@index([siteId])
   @@index([schoolYearName])
-  @@index([name])
+  @@index([siteId, schoolYearName])
 }
 
 model ClassRoom {
-  id             Int      @id @default(autoincrement())
+  id Int @id @default(autoincrement())
+
+  siteId Int?
+  site   String?
+
   name           String
   levelId        Int
-  schoolYearName String
+  schoolYearName String   @default("2025-2026")
   createdAt      DateTime @default(now())
 
-  level          Level    @relation(fields: [levelId], references: [id], onDelete: Cascade)
-  series         Serie[]
+  level  Level   @relation(fields: [levelId], references: [id], onDelete: Cascade)
+  series Serie[]
 
-  @@unique([name, levelId, schoolYearName])
+  @@unique([name, levelId, schoolYearName, siteId])
+  @@index([siteId])
   @@index([levelId])
   @@index([schoolYearName])
-  @@index([name])
+  @@index([siteId, schoolYearName])
 }
 
 model Serie {
-  id             Int       @id @default(autoincrement())
+  id Int @id @default(autoincrement())
+
+  siteId Int?
+  site   String?
+
   name           String
   classRoomId    Int
-  schoolYearName String
-  createdAt      DateTime  @default(now())
+  schoolYearName String   @default("2025-2026")
+  createdAt      DateTime @default(now())
 
-  classRoom      ClassRoom @relation(fields: [classRoomId], references: [id], onDelete: Cascade)
+  classRoom ClassRoom @relation(fields: [classRoomId], references: [id], onDelete: Cascade)
 
-  @@unique([name, classRoomId, schoolYearName])
+  @@unique([name, classRoomId, schoolYearName, siteId])
+  @@index([siteId])
   @@index([classRoomId])
   @@index([schoolYearName])
-  @@index([name])
+  @@index([siteId, schoolYearName])
 }
 
 model FeeModel {
-  id             Int      @id @default(autoincrement())
+  id Int @id @default(autoincrement())
+
+  siteId Int?
+  site   String?
+
   title          String
   classe         String
   schoolYearName String
-  createdAt      DateTime @default(now())
 
-  tariffs        FeeTariff[]
+  createdAt DateTime @default(now())
 
-  @@unique([title, classe, schoolYearName])
+  tariffs FeeTariff[]
+
+  @@unique([title, classe, schoolYearName, siteId])
+  @@index([siteId])
   @@index([schoolYearName])
-  @@index([classe])
+  @@index([siteId, schoolYearName])
 }
 
 model FeeTariff {
@@ -200,8 +226,8 @@ model FeeTariff {
   montant    Int
   createdAt  DateTime @default(now())
 
-  feeModel   FeeModel @relation(fields: [feeModelId], references: [id], onDelete: Cascade)
-  specials   FeeSpecialTariff[]
+  feeModel FeeModel           @relation(fields: [feeModelId], references: [id], onDelete: Cascade)
+  specials FeeSpecialTariff[]
 
   @@index([feeModelId])
   @@index([code])
@@ -214,47 +240,57 @@ model FeeSpecialTariff {
   amount      Int
   createdAt   DateTime @default(now())
 
-  feeTariff   FeeTariff @relation(fields: [feeTariffId], references: [id], onDelete: Cascade)
+  feeTariff FeeTariff @relation(fields: [feeTariffId], references: [id], onDelete: Cascade)
 
   @@index([feeTariffId])
   @@index([name])
 }
 
 model TrainingFee {
-  id             Int      @id @default(autoincrement())
-  schoolYearName String
-  site           String   @default("Strelitzia School")
-  levelId        Int?
-  classe         String
-  feeModelId     Int?
-  libelle        String
-  code           String
-  montant        Int
-  createdAt      DateTime @default(now())
+  id Int @id @default(autoincrement())
 
-  @@unique([schoolYearName, classe, code])
+  siteId Int?
+  site   String @default("Strelitzia School")
+
+  schoolYearName String @default("2025-2026")
+
+  levelId Int?
+  classe  String
+
+  feeModelId Int?
+
+  libelle String
+  code    String
+  montant Int
+
+  createdAt DateTime @default(now())
+
+  @@index([siteId])
   @@index([schoolYearName])
   @@index([classe])
   @@index([code])
   @@index([feeModelId])
+  @@index([siteId, schoolYearName])
+  @@index([schoolYearName, classe])
+  @@index([schoolYearName, classe, code])
 }
 
 model StudentPayment {
-  id             Int      @id @default(autoincrement())
+  id             Int    @id @default(autoincrement())
   studentId      Int
   trainingFeeId  Int
   schoolYearName String
 
-  montantTotal   Int
-  montantPaye    Int
-  reste          Int
-  status         String   @default("PARTIEL")
+  montantTotal Int
+  montantPaye  Int
+  reste        Int
+  status       String @default("PARTIEL")
 
-  treasuryId     Int?
-  treasuryName   String?
+  treasuryId   Int?
+  treasuryName String?
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([schoolYearName])
   @@index([studentId])
@@ -264,19 +300,19 @@ model StudentPayment {
 }
 
 model StudentFee {
-  id             Int      @id @default(autoincrement())
+  id             Int       @id @default(autoincrement())
   studentId      Int
   trainingFeeId  Int
   schoolYearName String
   libelle        String
   code           String
   montantTotal   Int
-  montantPaye    Int      @default(0)
+  montantPaye    Int       @default(0)
   reste          Int
-  status         String   @default("NON_PAYE")
+  status         String    @default("NON_PAYE")
   paidAt         DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   @@unique([studentId, trainingFeeId, schoolYearName])
   @@index([schoolYearName])
@@ -287,45 +323,67 @@ model StudentFee {
 }
 
 model Treasury {
-  id             Int      @id @default(autoincrement())
-  name           String
-  type           String   @default("CAISSE")
-  active         Boolean  @default(true)
+  id Int @id @default(autoincrement())
+
+  // MULTI SITE
+  siteId Int?
+  site   String?
+
+  name   String
+  type   String  @default("CAISSE")
+  active Boolean @default(true)
 
   schoolYearName String
-  isPrincipal    Boolean  @default(false)
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  isPrincipal Boolean @default(false)
 
-  movements      TreasuryMovement[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  @@unique([name, schoolYearName])
+  movements TreasuryMovement[]
+
+  @@unique([name, schoolYearName, siteId])
+  @@index([siteId])
   @@index([active])
   @@index([type])
   @@index([schoolYearName])
   @@index([isPrincipal])
+  @@index([siteId, schoolYearName])
+  @@index([siteId, active])
 }
 
 model TreasuryMovement {
-  id             Int      @id @default(autoincrement())
-  treasuryId     Int
-  movementType   String
-  category       String
-  amount         Int
-  description    String?
-  reference      String?
-  studentId      Int?
-  trainingFeeId  Int?
-  studentFeeId   Int?
-  schoolYearName String
-  createdBy      String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id Int @id @default(autoincrement())
 
-  treasury       Treasury @relation(fields: [treasuryId], references: [id], onDelete: Cascade)
+  treasuryId Int
+
+  // MULTI SITE
+  siteId Int?
+  site   String?
+
+  movementType String
+  category     String
+
+  amount Int
+
+  description String?
+  reference   String?
+
+  studentId     Int?
+  trainingFeeId Int?
+  studentFeeId  Int?
+
+  schoolYearName String @default("2025-2026")
+
+  createdBy String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  treasury Treasury @relation(fields: [treasuryId], references: [id], onDelete: Cascade)
 
   @@index([treasuryId])
+  @@index([siteId])
   @@index([movementType])
   @@index([category])
   @@index([createdAt])
@@ -333,5 +391,27 @@ model TreasuryMovement {
   @@index([studentId])
   @@index([trainingFeeId])
   @@index([studentFeeId])
+  @@index([schoolYearName, treasuryId])
+  @@index([schoolYearName, movementType])
+  @@index([schoolYearName, category])
+  @@index([schoolYearName, createdAt])
+  // MULTI SITE
+  @@index([siteId, treasuryId])
+  @@index([siteId, schoolYearName])
+  @@index([siteId, schoolYearName, treasuryId])
+  @@index([siteId, movementType])
+  @@index([siteId, category])
+  // Recherche rapide
+  @@index([reference])
 }
 
+model Site {
+  id        Int      @id @default(autoincrement())
+  name      String
+  code      String   @unique
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  students Student[]
+}

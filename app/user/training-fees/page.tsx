@@ -8,6 +8,7 @@ type ClassRoom = {
   id: number;
   name: string;
   levelId: number;
+  siteId?: number | null;
   schoolYearName?: string;
   series?: Serie[];
 };
@@ -15,6 +16,7 @@ type ClassRoom = {
 type Level = {
   id: number;
   name: string;
+  siteId?: number | null;
   schoolYearName?: string;
   classes?: ClassRoom[];
 };
@@ -29,6 +31,13 @@ type SchoolYear = {
   name: string;
   active?: boolean;
   createdAt?: string;
+};
+
+type Site = {
+  id: number;
+  name: string;
+  code: string;
+  active: boolean;
 };
 
 type FeeSpecialTariff = {
@@ -58,6 +67,9 @@ type FeeModel = {
   title?: string;
   name?: string;
   libelle?: string;
+  siteId?: number | null;
+  schoolYearName?: string;
+  classe?: string;
   tariffs?: FeeTariff[];
   rows?: FeeTariff[];
   details?: FeeTariff[];
@@ -66,6 +78,7 @@ type FeeModel = {
 type TrainingFee = {
   id: number;
   schoolYearName?: string;
+  siteId?: number | null;
   site?: string;
   levelId?: number;
   classId?: number;
@@ -327,6 +340,8 @@ export default function TrainingFeesPage() {
   });
   const [schoolYears, setSchoolYears] = useState<SchoolYear[]>([]);
   const [selectedSchoolYear, setSelectedSchoolYear] = useState("");
+  const [sites, setSites] = useState<Site[]>([]);
+  const [selectedSiteId, setSelectedSiteId] = useState("");
   const [feeModels, setFeeModels] = useState<FeeModel[]>([]);
   const [trainingFees, setTrainingFees] = useState<TrainingFee[]>([]);
 
@@ -340,7 +355,11 @@ export default function TrainingFeesPage() {
     null
   );
 
-  const [selectedSite, setSelectedSite] = useState("Strelitzia School");
+  const selectedSite = useMemo(() => {
+    return sites.find((site) => String(site.id) === String(selectedSiteId)) || null;
+  }, [sites, selectedSiteId]);
+
+  const selectedSiteName = selectedSite?.name || "Strelitzia School";
   const [selectedLevel, setSelectedLevel] = useState("");
   const [selectedClasse, setSelectedClasse] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
@@ -363,13 +382,17 @@ export default function TrainingFeesPage() {
     loadAll();
   }, []);
 
-  function buildYearQuery(year: string) {
+  function buildDataQuery(year: string, siteId?: string) {
     const params = new URLSearchParams();
 
     if (year) {
       params.set("year", year);
       params.set("schoolYearName", year);
       params.set("anneeScolaire", year);
+    }
+
+    if (siteId) {
+      params.set("siteId", siteId);
     }
 
     return params.toString();
@@ -381,13 +404,19 @@ export default function TrainingFeesPage() {
     ) as SchoolYear[];
   }
 
-  async function loadAll(yearOverride?: string) {
+  async function loadAll(yearOverride?: string, siteIdOverride?: string) {
     try {
       setLoading(true);
       setMessage(null);
 
-      const yearsData = await fetchJsonWithTimeout("/api/school-years").catch(() => []);
+      const [yearsData, sitesData] = await Promise.all([
+        fetchJsonWithTimeout("/api/school-years").catch(() => []),
+        fetchJsonWithTimeout(`/api/sites?_ts=${Date.now()}`).catch(() => ({ sites: [] })),
+      ]);
+
       const yearsList = normalizeSchoolYears(yearsData);
+      const sitesList = normalizeArray((sitesData as any)?.sites || sitesData) as Site[];
+
       const activeYear =
         yearsList.find((item) => item.active)?.name ||
         yearsList[0]?.name ||
@@ -395,19 +424,32 @@ export default function TrainingFeesPage() {
         academics.year ||
         "";
 
+      const activeSite =
+        sitesList.find((item) => item.active) ||
+        sitesList[0] ||
+        null;
+
       const targetYear = yearOverride || selectedSchoolYear || activeYear;
-      const yearQuery = buildYearQuery(targetYear);
-      const suffix = yearQuery ? `?${yearQuery}` : "";
+      const targetSiteId = siteIdOverride || selectedSiteId || (activeSite ? String(activeSite.id) : "");
+
+      const query = buildDataQuery(targetYear, targetSiteId);
+      const suffix = query ? `?${query}` : "";
 
       const [academicsData, modelsData, feesData] = await Promise.all([
-        fetchJsonWithTimeout(`/api/academics${targetYear ? `?year=${encodeURIComponent(targetYear)}` : ""}`),
+        fetchJsonWithTimeout(`/api/academics${suffix}`),
         fetchJsonWithTimeout(`/api/fee-models${suffix}`),
         fetchJsonWithTimeout(`/api/training-fees${suffix}`),
       ]);
 
       setSchoolYears(yearsList);
+      setSites(sitesList);
+
       if (!selectedSchoolYear && targetYear) {
         setSelectedSchoolYear(targetYear);
+      }
+
+      if (!selectedSiteId && targetSiteId) {
+        setSelectedSiteId(targetSiteId);
       }
 
       setAcademics({
@@ -436,7 +478,19 @@ export default function TrainingFeesPage() {
     setSelectedModel("");
     setRows([]);
     setExpandedKey(null);
-    loadAll(year);
+    loadAll(year, selectedSiteId);
+  }
+
+  function changeSite(siteId: string) {
+    setSelectedSiteId(siteId);
+    setFilterLevel("");
+    setFilterClass("");
+    setSelectedLevel("");
+    setSelectedClasse("");
+    setSelectedModel("");
+    setRows([]);
+    setExpandedKey(null);
+    loadAll(selectedSchoolYear || academics.year, siteId);
   }
 
   const activeYearName = selectedSchoolYear || academics.year;
@@ -444,23 +498,35 @@ export default function TrainingFeesPage() {
   const visibleTrainingFees = useMemo(() => {
     return trainingFees.filter((fee) => {
       const feeYear = String(fee.schoolYearName || "").trim();
-      return !activeYearName || !feeYear || feeYear === activeYearName;
+      const yearOk = !activeYearName || !feeYear || feeYear === activeYearName;
+      const feeSiteId = fee.siteId ? String(fee.siteId) : "";
+      const feeSiteName = String(fee.site || "").trim();
+      const siteOk =
+        !selectedSiteId ||
+        (feeSiteId ? feeSiteId === String(selectedSiteId) : !feeSiteName || feeSiteName === selectedSiteName);
+
+      return yearOk && siteOk;
     });
-  }, [trainingFees, activeYearName]);
+  }, [trainingFees, activeYearName, selectedSiteId, selectedSiteName]);
 
   const visibleLevels = useMemo(() => {
     return academics.levels.filter((level) => {
       const levelYear = String(level.schoolYearName || "").trim();
-      return !activeYearName || !levelYear || levelYear === activeYearName;
+      const yearOk = !activeYearName || !levelYear || levelYear === activeYearName;
+      const siteOk = !selectedSiteId || !level.siteId || String(level.siteId) === String(selectedSiteId);
+
+      return yearOk && siteOk;
     });
-  }, [academics.levels, activeYearName]);
+  }, [academics.levels, activeYearName, selectedSiteId]);
 
   const allClasses = useMemo(() => {
     return visibleLevels.flatMap((level) =>
       (level.classes || [])
         .filter((classe) => {
           const classYear = String(classe.schoolYearName || "").trim();
-          return !activeYearName || !classYear || classYear === activeYearName;
+          const yearOk = !activeYearName || !classYear || classYear === activeYearName;
+          const siteOk = !selectedSiteId || !classe.siteId || String(classe.siteId) === String(selectedSiteId);
+          return yearOk && siteOk;
         })
         .map((classe) => ({
           ...classe,
@@ -552,7 +618,10 @@ export default function TrainingFeesPage() {
   function openAddModal() {
     setOpen(true);
     setMessage(null);
-    setSelectedSite("Strelitzia School");
+    if (!selectedSiteId && sites.length > 0) {
+      const activeSite = sites.find((site) => site.active) || sites[0];
+      setSelectedSiteId(String(activeSite.id));
+    }
     setSelectedLevel("");
     setSelectedClasse("");
     setSelectedModel("");
@@ -649,10 +718,10 @@ export default function TrainingFeesPage() {
       (row) => row.libelle.trim() || row.code.trim() || row.montant.trim()
     );
 
-    if (!activeYearName || !selectedLevel || !selectedClasse || !selectedModel) {
+    if (!activeYearName || !selectedSiteId || !selectedLevel || !selectedClasse || !selectedModel) {
       setMessage({
         type: "error",
-        text: "Données incomplètes : choisissez niveau, classe et modèle.",
+        text: "Données incomplètes : choisissez site, niveau, classe et modèle.",
       });
       return;
     }
@@ -685,7 +754,10 @@ export default function TrainingFeesPage() {
           method: "POST",
           body: JSON.stringify({
             schoolYearName: activeYearName,
-            site: selectedSite,
+            siteId: Number(selectedSiteId),
+            site: selectedSiteName,
+            siteName: selectedSiteName,
+            siteCode: selectedSite?.code || "",
             levelId: Number(selectedLevel),
             classId: Number(selectedClasse),
             classRoomId: Number(selectedClasse),
@@ -707,7 +779,7 @@ export default function TrainingFeesPage() {
         text: "Frais enregistrés avec succès.",
       });
       setOpen(false);
-      await loadAll();
+      await loadAll(activeYearName, selectedSiteId);
     } catch (error: any) {
       setMessage({
         type: "error",
@@ -730,12 +802,20 @@ export default function TrainingFeesPage() {
       setDeletingKey(group.key);
       setMessage(null);
 
-      const yearParam = activeYearName
-        ? `schoolYearName=${encodeURIComponent(activeYearName)}&year=${encodeURIComponent(activeYearName)}&`
-        : "";
-      const query = group.classId
-        ? `${yearParam}classId=${encodeURIComponent(group.classId)}`
-        : `${yearParam}classe=${encodeURIComponent(group.className)}`;
+      const params = new URLSearchParams();
+      if (activeYearName) {
+        params.set("schoolYearName", activeYearName);
+        params.set("year", activeYearName);
+      }
+      if (selectedSiteId) {
+        params.set("siteId", selectedSiteId);
+      }
+      if (group.classId) {
+        params.set("classId", String(group.classId));
+      } else {
+        params.set("classe", group.className);
+      }
+      const query = params.toString();
 
       try {
         await fetchJsonWithTimeout(`/api/training-fees?${query}`, { method: "DELETE" }, 20000);
@@ -751,7 +831,7 @@ export default function TrainingFeesPage() {
         type: "success",
         text: `Les frais de la classe ${group.className} ont été supprimés.`,
       });
-      await loadAll();
+      await loadAll(activeYearName, selectedSiteId);
     } catch (error: any) {
       setMessage({
         type: "error",
@@ -803,6 +883,9 @@ export default function TrainingFeesPage() {
           method: "PATCH",
           body: JSON.stringify({
             id: editingFee.id,
+            siteId: selectedSiteId,
+            site: selectedSiteName,
+            siteName: selectedSiteName,
             libelle: editForm.libelle.trim(),
             code: editForm.code.trim(),
             montant: amountToNumber(editForm.montant),
@@ -817,7 +900,7 @@ export default function TrainingFeesPage() {
         text: "Frais modifié avec succès.",
       });
       setEditingFee(null);
-      await loadAll();
+      await loadAll(activeYearName, selectedSiteId);
     } catch (error: any) {
       setMessage({
         type: "error",
@@ -841,7 +924,7 @@ export default function TrainingFeesPage() {
       setMessage(null);
 
       await fetchJsonWithTimeout(
-        `/api/training-fees?id=${encodeURIComponent(fee.id)}`,
+        `/api/training-fees?id=${encodeURIComponent(fee.id)}&siteId=${encodeURIComponent(selectedSiteId)}`,
         { method: "DELETE" },
         20000
       );
@@ -850,7 +933,7 @@ export default function TrainingFeesPage() {
         type: "success",
         text: "Frais supprimé avec succès.",
       });
-      await loadAll();
+      await loadAll(activeYearName, selectedSiteId);
     } catch (error: any) {
       setMessage({
         type: "error",
@@ -902,13 +985,22 @@ export default function TrainingFeesPage() {
             </div>
           </div>
 
-          <div className="grid gap-3 p-4 sm:grid-cols-3 md:p-5">
+          <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4 md:p-5">
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
                 Année scolaire
               </p>
               <p className="mt-1 text-xl font-extrabold text-slate-900">
                 {activeYearName || "—"}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                Site
+              </p>
+              <p className="mt-1 text-xl font-extrabold text-slate-900">
+                {selectedSiteName || "—"}
               </p>
             </div>
 
@@ -945,7 +1037,7 @@ export default function TrainingFeesPage() {
         )}
 
         <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="grid gap-3 md:grid-cols-[1fr_1fr_1fr_auto]">
+          <div className="grid gap-3 md:grid-cols-[1fr_1fr_1fr_1fr_auto]">
             <select
               value={activeYearName}
               onChange={(e) => changeSchoolYear(e.target.value)}
@@ -955,6 +1047,19 @@ export default function TrainingFeesPage() {
               {schoolYears.map((year) => (
                 <option key={year.id || year.name} value={year.name}>
                   {year.active ? "⭐ " : ""}{year.name}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={selectedSiteId}
+              onChange={(e) => changeSite(e.target.value)}
+              className="h-11 rounded-xl border border-slate-300 bg-white px-4 text-sm font-bold outline-none transition focus:border-slate-500 focus:ring-4 focus:ring-slate-100"
+            >
+              <option value="">Choisir un site</option>
+              {sites.map((site) => (
+                <option key={site.id} value={site.id}>
+                  {site.active ? "⭐ " : ""}{site.name}
                 </option>
               ))}
             </select>
@@ -1184,11 +1289,18 @@ export default function TrainingFeesPage() {
                   <label className="mb-1 block text-xs font-extrabold uppercase tracking-wide text-slate-500">
                     Site
                   </label>
-                  <input
-                    value={selectedSite}
-                    onChange={(e) => setSelectedSite(e.target.value)}
+                  <select
+                    value={selectedSiteId}
+                    onChange={(e) => changeSite(e.target.value)}
                     className="h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium outline-none focus:border-slate-500 focus:ring-4 focus:ring-slate-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:opacity-70"
-                  />
+                  >
+                    <option value="">Choisir un site</option>
+                    {sites.map((site) => (
+                      <option key={site.id} value={site.id}>
+                        {site.name}{site.active ? " — Actif" : ""}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>
@@ -1249,11 +1361,21 @@ export default function TrainingFeesPage() {
                         ? "Choisissez un type de modèle"
                         : "Sélectionnez d'abord une classe"}
                     </option>
-                    {feeModels.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {modelTitle(model)}
-                      </option>
-                    ))}
+                    {feeModels
+                      .filter((model) => {
+                        const modelYear = String(model.schoolYearName || "").trim();
+                        const yearOk = !activeYearName || !modelYear || modelYear === activeYearName;
+                        const siteOk =
+                          !selectedSiteId ||
+                          !model.siteId ||
+                          String(model.siteId) === String(selectedSiteId);
+                        return yearOk && siteOk;
+                      })
+                      .map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {modelTitle(model)}
+                        </option>
+                      ))}
                   </select>
                 </div>
               </div>

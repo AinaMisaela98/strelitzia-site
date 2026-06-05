@@ -18,8 +18,16 @@ type SchoolYear = {
   active: boolean;
 };
 
+type Site = {
+  id: number;
+  name: string;
+  code?: string | null;
+  active: boolean;
+};
+
 type Student = {
   id: number;
+  siteId?: number | null;
   matricule: string;
   site: string;
   anneeScolaire: string;
@@ -118,7 +126,7 @@ const menus = [
   },
   {
     title: "Paramètres",
-    items: ["Thème"],
+    items: ["Thème", "Sites"],
   },
 ];
 
@@ -188,8 +196,9 @@ function isValidHexColor(value: string | null | undefined) {
 const STUDENT_CACHE_PREFIX = "strelitzia-students-cache-";
 const STUDENT_CACHE_VERSION = "v1";
 
-function getStudentsCacheKey(year: string) {
-  return `${STUDENT_CACHE_PREFIX}${STUDENT_CACHE_VERSION}-${year}`;
+function getStudentsCacheKey(year: string, siteId?: string | number | null) {
+  const safeSiteId = siteId ? String(siteId) : "all";
+  return `${STUDENT_CACHE_PREFIX}${STUDENT_CACHE_VERSION}-${year}-site-${safeSiteId}`;
 }
 
 function clearAllStudentsCache() {
@@ -245,6 +254,9 @@ const [highlightId, setHighlightId] = useState<string | null>(null);
 
 const [schoolYears, setSchoolYears] = useState<SchoolYear[]>([]);
 const [selectedYear, setSelectedYear] = useState("2025-2026");
+
+const [sites, setSites] = useState<Site[]>([]);
+const [selectedSiteId, setSelectedSiteId] = useState("");
 
 const [academics, setAcademics] = useState<{ levels: AcademicLevel[] }>({
   levels: [],
@@ -546,6 +558,36 @@ async function changeConnectedUserPassword(e: FormEvent) {
   }
 }
 
+async function loadSites() {
+  try {
+    const res = await fetch(`/api/sites?_ts=${Date.now()}`, {
+      cache: "no-store",
+    });
+
+    const data = await res.json().catch(() => ({}));
+    const list: Site[] = Array.isArray(data?.sites) ? data.sites : [];
+
+    setSites(list);
+
+    const currentSelected = list.find((s) => String(s.id) === String(selectedSiteId));
+    const firstActive = currentSelected || list.find((s) => s.active) || list[0];
+
+    if (firstActive) {
+      const nextSiteId = String(firstActive.id);
+      setSelectedSiteId(nextSiteId);
+      return nextSiteId;
+    }
+
+    setSelectedSiteId("");
+    return "";
+  } catch (error) {
+    console.error("Erreur chargement sites:", error);
+    setSites([]);
+    setSelectedSiteId("");
+    return "";
+  }
+}
+
 async function loadSchoolYears() {
   try {
     const res = await fetch(`/api/school-years?_ts=${Date.now()}`, {
@@ -568,18 +610,21 @@ async function loadSchoolYears() {
   }
 }
 
-async function loadAcademics(yearParam?: string) {
+async function loadAcademics(yearParam?: string, siteIdParam?: string) {
   if (loadingAcademicsRef.current) return;
 
   try {
     loadingAcademicsRef.current = true;
 
     const yearToUse = yearParam || selectedYear;
+    const siteToUse = siteIdParam || selectedSiteId;
 
     if (!yearToUse) return;
 
+    const siteQuery = siteToUse ? `&siteId=${encodeURIComponent(siteToUse)}` : "";
+
     const res = await fetch(
-      `/api/academics?year=${encodeURIComponent(yearToUse)}&_ts=${Date.now()}`,
+      `/api/academics?year=${encodeURIComponent(yearToUse)}${siteQuery}&_ts=${Date.now()}`,
       {
         cache: "no-store",
       }
@@ -601,12 +646,19 @@ async function loadAcademics(yearParam?: string) {
   }
 }
 
-async function loadStudents(yearParam?: string, forceRefresh = false) {
-  const yearToUse = yearParam || selectedYear;
+async function loadStudents(
+  yearParam?: string,
+  forceRefresh = false,
+  siteIdParam?: string
+) {
 
+  const yearToUse = yearParam || selectedYear;
+  const siteToUse = siteIdParam || selectedSiteId;
+  
   if (!yearToUse) return;
 
-  const cacheKey = getStudentsCacheKey(yearToUse);
+  const siteQuery = siteToUse ? `&siteId=${encodeURIComponent(siteToUse)}` : "";
+  const cacheKey = getStudentsCacheKey(yearToUse, siteToUse);
 
   if (!forceRefresh && typeof window !== "undefined") {
     const cachedStudents = sessionStorage.getItem(cacheKey);
@@ -633,7 +685,7 @@ async function loadStudents(yearParam?: string, forceRefresh = false) {
     setLoadingStudents(true);
 
     const res = await fetch(
-      `/api/students?year=${encodeURIComponent(yearToUse)}&_ts=${Date.now()}`,
+      `/api/students?year=${encodeURIComponent(yearToUse)}${siteQuery}&_ts=${Date.now()}`,
       {
         cache: "no-store",
       }
@@ -668,6 +720,8 @@ async function loadStudents(yearParam?: string, forceRefresh = false) {
     const yearToUse =
       urlYear || (await loadSchoolYears());
 
+      const siteToUse = await loadSites();
+
     const message =
       localStorage.getItem("studentSuccessMessage");
 
@@ -693,8 +747,8 @@ async function loadStudents(yearParam?: string, forceRefresh = false) {
     setSerie("TOUT");
 
     await Promise.all([
-      loadStudents(yearToUse),
-      loadAcademics(yearToUse),
+      loadStudents(yearToUse, false, siteToUse),
+      loadAcademics(yearToUse, siteToUse),
     ]);
 
     initializedRef.current = true;
@@ -711,10 +765,23 @@ useEffect(() => {
   setSerie("TOUT");
 
   Promise.all([
-    loadStudents(selectedYear),
-    loadAcademics(selectedYear),
+    loadStudents(selectedYear, true, selectedSiteId),
+    loadAcademics(selectedYear, selectedSiteId),
   ]);
 }, [selectedYear]);
+
+useEffect(() => {
+  if (!initializedRef.current) return;
+  if (!selectedYear || !selectedSiteId) return;
+
+  setClasse("TOUT");
+  setSerie("TOUT");
+
+  Promise.all([
+    loadStudents(selectedYear, true, selectedSiteId),
+    loadAcademics(selectedYear, selectedSiteId),
+  ]);
+}, [selectedSiteId]);
 
 
 
@@ -906,7 +973,7 @@ useEffect(() => {
     }
 
     if (selectedYear) {
-      sessionStorage.removeItem(getStudentsCacheKey(selectedYear));
+      sessionStorage.removeItem(getStudentsCacheKey(selectedYear, selectedSiteId));
     }
 
     loadStudents(selectedYear, true);
@@ -948,6 +1015,11 @@ if (item === "Mouvements de Trésorerie") {
 
     if (item === "Années scolaires") {
       window.location.href = "/user/school-years";
+      return;
+    }
+
+    if (item === "Sites") {
+      window.location.href = "/user/sites";
       return;
     }
 
@@ -1430,12 +1502,12 @@ if (item === "Mouvements de Trésorerie") {
                   <button
                     onClick={() => {
                       if (selectedYear) {
-                        sessionStorage.removeItem(getStudentsCacheKey(selectedYear));
+                        sessionStorage.removeItem(getStudentsCacheKey(selectedYear, selectedSiteId));
                       }
 
                       loadSchoolYears();
-                      loadStudents(selectedYear, true);
-                      loadAcademics(selectedYear);
+                      loadStudents(selectedYear, true, selectedSiteId);
+                      loadAcademics(selectedYear, selectedSiteId);
                     }}
                     className="h-8 rounded-lg theme-dark-btn px-3 text-[11px] font-medium text-white shadow-sm shadow-slate-300 transition hover:-translate-y-0.5 hover:brightness-110"
                   >
@@ -1591,9 +1663,21 @@ if (item === "Mouvements de Trésorerie") {
                   ))}
                 </select>
 
-                <div className="flex h-8 min-w-[155px] items-center rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-[11px] font-medium text-slate-700">
-                  Sites : Strelitzia School
-                </div>
+                <select
+                  value={selectedSiteId}
+                  onChange={(e) => setSelectedSiteId(e.target.value)}
+                  className="premium-select h-8 min-w-[170px] rounded-lg border border-slate-200 theme-dark-btn px-2.5 pr-7 text-[11px] font-black text-white outline-none ring-blue-200 transition focus:ring-4"
+                >
+                  {sites.length === 0 && (
+                    <option value="">Aucun site</option>
+                  )}
+
+                  {sites.map((site) => (
+                    <option key={site.id} value={site.id}>
+                      Site : {site.name}
+                    </option>
+                  ))}
+                </select>
 
                 <select
                   value={classe}
@@ -1642,7 +1726,7 @@ if (item === "Mouvements de Trésorerie") {
                   </div>
 
                   <button
-                    onClick={() => loadStudents(selectedYear)}
+                    onClick={() => loadStudents(selectedYear, true, selectedSiteId)}
                     className="h-8 rounded-lg theme-dark-btn px-3.5 text-[11px] font-medium text-white shadow-sm transition hover:brightness-110"
                   >
                     🔍 Rechercher

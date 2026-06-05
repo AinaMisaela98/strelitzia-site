@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 type Treasury = {
   id: number;
   name: string;
+  siteId?: number | null;
+  site?: string | null;
   type?: string | null;
   active?: boolean | null;
   principal?: boolean | null;
@@ -19,9 +21,18 @@ type SchoolYear = {
   active?: boolean | null;
 };
 
+type Site = {
+  id: number;
+  name: string;
+  code?: string | null;
+  active?: boolean | null;
+};
+
 type Movement = {
   id: number | string;
   treasuryId: number;
+  siteId?: number | null;
+  site?: string | null;
   movementType: "ENTREE" | "SORTIE" | "CREDIT" | "DEBIT" | string;
   type?: "CREDIT" | "DEBIT" | string | null;
   sens?: string | null;
@@ -70,6 +81,14 @@ type Movement = {
     status?: string | null;
     studentId?: number | null;
     trainingFeeId?: number | null;
+    student?: {
+      id?: number;
+      matricule?: string | null;
+      nom?: string | null;
+      prenoms?: string | null;
+      classe?: string | null;
+      section?: string | null;
+    } | null;
   } | null;
   trainingFee?: {
     id: number | string;
@@ -79,7 +98,7 @@ type Movement = {
   } | null;
 };
 
-const SITE_NAME = "Strelitzia School";
+const DEFAULT_DEFAULT_SITE_NAME = "Strelitzia School";
 const DEFAULT_YEAR = "2025-2026";
 
 function money(value: number | string | null | undefined) {
@@ -146,6 +165,62 @@ function cleanText(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function getStudentIdFromMovement(m: Partial<Movement>) {
+  const direct = Number(m.studentId || m.student?.id || m.studentFee?.studentId || 0);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+
+  const reference = cleanText(m.reference);
+  const match = reference.match(/(?:^|-)PAY-(\d+)-/i) || reference.match(/(?:^|-)STUDENT-(\d+)(?:-|$)/i);
+  const parsed = Number(match?.[1] || 0);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function getStudentFeeIdFromMovement(m: Partial<Movement>) {
+  const direct = Number(m.studentFeeId || m.studentFee?.id || 0);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+
+  const reference = cleanText(m.reference);
+  const match = reference.match(/-FEE-(\d+)-/i) || reference.match(/-STUDENTFEE-(\d+)-/i);
+  const parsed = Number(match?.[1] || 0);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function getTrainingFeeIdFromMovement(m: Partial<Movement>) {
+  const direct = Number(m.trainingFeeId || m.trainingFee?.id || m.studentFee?.trainingFeeId || 0);
+  return Number.isFinite(direct) && direct > 0 ? direct : 0;
+}
+
+function normalizeApiList(json: any) {
+  if (Array.isArray(json)) return json;
+  if (Array.isArray(json?.data)) return json.data;
+  if (Array.isArray(json?.items)) return json.items;
+  if (Array.isArray(json?.students)) return json.students;
+  if (Array.isArray(json?.studentFees)) return json.studentFees;
+  if (Array.isArray(json?.fees)) return json.fees;
+  return [];
+}
+
+function normalizeSites(data: any): Site[] {
+  const raw = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.sites)
+      ? data.sites
+      : Array.isArray(data?.data)
+        ? data.data
+        : Array.isArray(data?.items)
+          ? data.items
+          : [];
+
+  return raw
+    .map((item: any) => ({
+      id: Number(item?.id || 0),
+      name: cleanText(item?.name || item?.label || item?.site),
+      code: cleanText(item?.code),
+      active: Boolean(item?.active || item?.isActive || item?.actif),
+    }))
+    .filter((item: Site) => item.id > 0 && item.name);
+}
+
 function getErrorMessage(data: unknown, fallback: string) {
   if (data && typeof data === "object") {
     const item = data as { error?: unknown; message?: unknown };
@@ -210,8 +285,11 @@ function getMovementTypeLabel(type?: string | null) {
   return cleanText(type) || "-";
 }
 
-function getPaymentModeFromDescription(description?: string | null) {
-  const d = cleanText(description);
+function getPaymentModeFromMovement(m: Partial<Movement>) {
+  const direct = cleanText((m as any).modePaiement || (m as any).paymentMode || (m as any).mode);
+  if (direct && direct !== "-") return direct;
+
+  const d = [m.description, m.motif, m.libelle].map(cleanText).join(" ");
   if (/mvola/i.test(d)) return "Mvola";
   if (/orange/i.test(d)) return "Orange Money";
   if (/virement/i.test(d)) return "Virement";
@@ -220,29 +298,160 @@ function getPaymentModeFromDescription(description?: string | null) {
   return "-";
 }
 
+function getPaymentModeFromDescription(description?: string | null) {
+  return getPaymentModeFromMovement({ description } as Partial<Movement>);
+}
+
+function extractStudentInfoFromText(m: Movement) {
+  const text = [m.description, m.motif, m.libelle, m.reference].map(cleanText).filter(Boolean).join(" ");
+
+  const matriculeMatch =
+    text.match(/\b(?:matricule|mat)\s*:?\s*([A-Z0-9_-]+)/i) ||
+    text.match(/\b(MAT[-_ ]?[A-Z0-9_-]+)\b/i);
+
+  const nameMatch =
+    text.match(/\b(?:élève|eleve|étudiant|etudiant|nom)\s*:?\s*([^-•|,]+)/i) ||
+    text.match(/(?:Paiement|Annulation)\s+(?:frais\s+de\s+scolarité|frais\s+de\s+formation|frais)\s*[-•|]\s*([^-•|,]+)\s*[-•|]/i);
+
+  const classMatch = text.match(/\b(?:classe|class)\s*:?\s*([^-•|,]+)/i);
+
+  return {
+    matricule: cleanText(matriculeMatch?.[1]),
+    name: cleanText(nameMatch?.[1]),
+    classe: cleanText(classMatch?.[1]),
+  };
+}
+
 function getStudentName(m: Movement) {
   const fromApi = cleanText(m.studentName);
   if (fromApi && fromApi !== "-") return fromApi;
-  const fullName = `${m.student?.nom || ""} ${m.student?.prenoms || ""}`.trim();
-  return fullName || "-";
+
+  const directStudent = `${m.student?.nom || ""} ${m.student?.prenoms || ""}`.trim();
+  if (directStudent) return directStudent;
+
+  const feeStudent = `${m.studentFee?.student?.nom || ""} ${m.studentFee?.student?.prenoms || ""}`.trim();
+  if (feeStudent) return feeStudent;
+
+  const extracted = extractStudentInfoFromText(m).name;
+  return extracted || "-";
 }
 
 function getStudentMatricule(m: Movement) {
-  return cleanText(m.studentMatricule) || cleanText(m.student?.matricule) || "-";
+  const fromApi = cleanText(m.studentMatricule);
+  if (fromApi && fromApi !== "-") return fromApi;
+
+  const directStudent = cleanText(m.student?.matricule);
+  if (directStudent && directStudent !== "-") return directStudent;
+
+  const feeStudent = cleanText(m.studentFee?.student?.matricule);
+  if (feeStudent && feeStudent !== "-") return feeStudent;
+
+  const extracted = extractStudentInfoFromText(m).matricule;
+  return extracted || "-";
 }
 
 function getStudentClass(m: Movement) {
   const fromApi = cleanText(m.studentClassLabel);
   if (fromApi && fromApi !== "-") return fromApi;
-  const classe = cleanText(m.studentClasse) || cleanText(m.student?.classe);
-  const section = cleanText(m.studentSection) || cleanText(m.student?.section);
+
+  const classe =
+    cleanText(m.studentClasse) ||
+    cleanText(m.student?.classe) ||
+    cleanText(m.studentFee?.student?.classe) ||
+    extractStudentInfoFromText(m).classe;
+
+  const section =
+    cleanText(m.studentSection) ||
+    cleanText(m.student?.section) ||
+    cleanText(m.studentFee?.student?.section);
+
   if (!classe && !section) return "-";
   return `${classe || "-"}${section ? ` / ${section}` : ""}`;
 }
 
+function cleanStudentNameFromMotif(value?: string | null, movement?: Movement) {
+  // Colonne MOTIF = motif uniquement.
+  // On retire explicitement nom, prénom, matricule, classe, site et morceaux administratifs
+  // qui peuvent avoir été ajoutés dans description/motif par les routes de paiement.
+  let text = cleanText(value);
+  if (!text) return "-";
+
+  const studentName = movement ? cleanText(getStudentName(movement)) : "";
+  const matricule = movement ? cleanText(getStudentMatricule(movement)) : "";
+  const studentClass = movement ? cleanText(getStudentClass(movement)) : "";
+
+  const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const removeValue = (raw: string) => {
+    const v = cleanText(raw);
+    if (!v || v === "-") return;
+    text = text.replace(new RegExp(`\\s*[-•|,/]*\\s*${escapeRegExp(v)}\\s*[-•|,/]*\\s*`, "gi"), " - ");
+  };
+
+  removeValue(studentName);
+  removeValue(matricule);
+  removeValue(studentClass);
+
+  // Retire formes "Nom: X", "Élève: X", etc.
+  text = text
+    .replace(/\b(élève|eleve|étudiant|etudiant|nom|name)\s*:?\s*[^-•|,/]+/gi, "")
+    .replace(/\b(matricule|classe|section|site|année scolaire|annee scolaire)\s*:?\s*[^-•|,/]+/gi, "");
+
+  // Retire phrases connues ajoutées par le module frais.
+  text = text
+    .replace(/paiement\s*-\s*frais\s*de\s*formation/gi, "Paiement frais de formation")
+    .replace(/paiement\s*frais\s*de\s*formation/gi, "Paiement frais de formation")
+    .replace(/annulation\s*-\s*frais\s*de\s*formation/gi, "Annulation frais de formation")
+    .replace(/annulation\s*(paiement)?\s*frais\s*de\s*formation/gi, "Annulation frais de formation");
+
+  // Garde le code frais final s'il existe, mais pas le nom de l'élève au milieu.
+  // Exemple: "Paiement frais de formation - RAKOTO Aina - DI"
+  // devient: "Paiement frais de formation - DI"
+  text = text
+    .replace(/(Paiement frais de formation)\s*[-•|,/]\s*.+?\s*[-•|,/]\s*([A-Z0-9_/-]{1,20})$/i, "$1 - $2")
+    .replace(/(Annulation frais de formation)\s*[-•|,/]\s*.+?\s*[-•|,/]\s*([A-Z0-9_/-]{1,20})$/i, "$1 - $2");
+
+  text = text
+    .replace(/\s+/g, " ")
+    .replace(/\s*[-•|,/]\s*[-•|,/]\s*/g, " - ")
+    .replace(/^[-•|,/\s]+|[-•|,/\s]+$/g, "")
+    .trim();
+
+  return text || "-";
+}
+
+function getMovementMotifOnly(m: Movement) {
+  const category = normalizeCategory(m.category || m.categorie || "");
+  const feeLabel = getFeeLabelFromMovement(m);
+  const suffix = feeLabel && feeLabel !== "-" ? ` - ${feeLabel}` : "";
+
+  if (category === "PAIEMENT_FRAIS") {
+    return `Paiement frais de scolarité${suffix}`;
+  }
+
+  if (category === "ANNULATION_PAIEMENT_FRAIS") {
+    return `Annulation paiement frais de scolarité${suffix}`;
+  }
+
+  const motif = cleanText(m.motif);
+  if (motif && motif !== "-") return cleanStudentNameFromMotif(motif, m);
+
+  const libelle = cleanText(m.libelle);
+  if (libelle && libelle !== "-") return cleanStudentNameFromMotif(libelle, m);
+
+  const description = cleanText(m.description);
+  if (description && description !== "-") return cleanStudentNameFromMotif(description, m);
+
+  return getMovementLabel(m);
+}
+
+function getMovementNameOnly(m: Movement) {
+  const name = getStudentName(m);
+  return name && name !== "-" ? name : "-";
+}
+
 function getFeeLabelFromMovement(m: Movement) {
   const direct = cleanText(m.feeLabel);
-  if (direct && direct !== "-") return direct;
+  if (direct && direct !== "-" && !["PAIEMENT_FRAIS", "ANNULATION_PAIEMENT_FRAIS"].includes(direct.toUpperCase())) return direct;
 
   const studentFeeLabel = cleanText(m.studentFee?.libelle);
   if (studentFeeLabel && studentFeeLabel !== "-") return studentFeeLabel;
@@ -250,17 +459,23 @@ function getFeeLabelFromMovement(m: Movement) {
   const trainingFeeLabel = cleanText(m.trainingFee?.libelle);
   if (trainingFeeLabel && trainingFeeLabel !== "-") return trainingFeeLabel;
 
-  const desc = cleanText(m.description);
-  if (normalizeCategory(m.category) === "PAIEMENT_FRAIS" && desc) {
-    return desc.replace(/^Paiement\s+frais\s*/i, "").replace(/\s*-\s*$/, "").trim() || "Paiement frais";
-  }
+  const code = getFeeCodeFromMovement(m);
+  if (code && code !== "-") return code;
 
-  return getMovementLabel(m);
+  const desc = cleanText(m.description || m.motif || m.libelle);
+  const match =
+    desc.match(/(?:mois|frais|écolage|ecolage)\s*:?\s*([A-Za-zÀ-ÿ0-9 _/-]+)/i) ||
+    desc.match(/(?:Paiement|Annulation)\s+frais\s+(?:de\s+scolarité|de\s+formation)?\s*[-•|]\s*([A-Za-zÀ-ÿ0-9 _/-]+)$/i);
+
+  const parsed = cleanText(match?.[1]);
+  if (parsed && !["PAIEMENT_FRAIS", "ANNULATION_PAIEMENT_FRAIS"].includes(parsed.toUpperCase())) return parsed;
+
+  return "-";
 }
 
 function getFeeCodeFromMovement(m: Movement) {
   const direct = cleanText(m.feeCode);
-  if (direct && direct !== "-") return direct;
+  if (direct && direct !== "-" && !["PAIEMENT_FRAIS", "ANNULATION_PAIEMENT_FRAIS", "FRAIS"].includes(direct.toUpperCase())) return direct;
 
   const studentFeeCode = cleanText(m.studentFee?.code);
   if (studentFeeCode && studentFeeCode !== "-") return studentFeeCode;
@@ -268,7 +483,15 @@ function getFeeCodeFromMovement(m: Movement) {
   const trainingFeeCode = cleanText(m.trainingFee?.code);
   if (trainingFeeCode && trainingFeeCode !== "-") return trainingFeeCode;
 
-  return m.category || "-";
+  const text = [m.description, m.motif, m.libelle].map(cleanText).join(" ");
+  const codeMatch =
+    text.match(/\b(?:code|frais)\s*:?\s*([A-Z0-9_/-]{1,20})\b/i) ||
+    text.match(/(?:Paiement|Annulation)\s+frais\s+(?:de\s+scolarité|de\s+formation)?\s*[-•|]\s*([A-Z0-9_/-]{1,20})$/i);
+
+  const code = cleanText(codeMatch?.[1]).toUpperCase();
+  if (code && !["PAIEMENT_FRAIS", "ANNULATION_PAIEMENT_FRAIS", "FRAIS"].includes(code)) return code;
+
+  return "-";
 }
 
 function getFeePaidAmount(m: Movement) {
@@ -349,6 +572,7 @@ function getMovementStorageKey(movementOrId: Movement | number | string | null |
   // Stable key: tsy miankina amin'ny id fake generated, mba tsy hiteraka doublon
   // raha tonga avy amin'ny API sy localStorage ilay mouvement mitovy.
   return [
+    cleanText((m as any).siteId || (m as any).site).toUpperCase(),
     cleanText(m.reference).toUpperCase(),
     getMovementDayKey(m.createdAt),
     Number(m.treasuryId || 0),
@@ -434,7 +658,8 @@ export default function TreasuryMovementsPage() {
   const [showFilterModal, setShowFilterModal] = useState(false);
 
   const [search, setSearch] = useState("");
-  const [site, setSite] = useState(SITE_NAME);
+  const [sites, setSites] = useState<Site[]>([]);
+  const [selectedSiteId, setSelectedSiteId] = useState("");
   const [schoolYears, setSchoolYears] = useState<SchoolYear[]>([]);
   const [loadingSchoolYears, setLoadingSchoolYears] = useState(true);
   const [schoolYearName, setSchoolYearName] = useState("");
@@ -467,11 +692,66 @@ export default function TreasuryMovementsPage() {
     );
   }, [activeTreasuries, treasuries]);
 
+  const selectedSite = useMemo(() => {
+    return sites.find((item) => String(item.id) === String(selectedSiteId)) || null;
+  }, [sites, selectedSiteId]);
+
+  const selectedSiteName = selectedSite?.name || DEFAULT_DEFAULT_SITE_NAME;
+
+  function getValidFormTreasury() {
+    const selectedId = Number(formTreasuryId || 0);
+
+    const bySelectedId = activeTreasuries.find((t) => Number(t.id) === selectedId);
+    if (bySelectedId) return bySelectedId;
+
+    const byMainId = mainActiveTreasury?.id
+      ? activeTreasuries.find((t) => Number(t.id) === Number(mainActiveTreasury.id))
+      : null;
+
+    return byMainId || activeTreasuries[0] || null;
+  }
+
   useEffect(() => {
     if (!formTreasuryId && mainActiveTreasury?.id) {
       setFormTreasuryId(String(mainActiveTreasury.id));
     }
   }, [formTreasuryId, mainActiveTreasury]);
+
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSites() {
+      try {
+        const res = await fetch(`/api/sites?_ts=${Date.now()}`, {
+          cache: "no-store",
+        });
+
+        const json = await res.json().catch(() => ({}));
+        const list = normalizeSites(json);
+
+        if (cancelled) return;
+
+        setSites(list);
+
+        const activeSite = list.find((item) => item.active === true) || list[0];
+        if (activeSite) {
+          setSelectedSiteId((current) => current || String(activeSite.id));
+        }
+      } catch {
+        if (!cancelled) {
+          setSites([]);
+          setSelectedSiteId((current) => current || "");
+        }
+      }
+    }
+
+    loadSites();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -528,6 +808,8 @@ export default function TreasuryMovementsPage() {
     try {
       const params = new URLSearchParams();
       params.set("schoolYearName", schoolYearName);
+      params.set("year", schoolYearName);
+      if (selectedSiteId) params.set("siteId", selectedSiteId);
 
       const [treasuryRes, movementRes] = await Promise.all([
         fetch(`/api/treasuries?${params.toString()}`, { cache: "no-store" }),
@@ -551,11 +833,77 @@ export default function TreasuryMovementsPage() {
         setFormTreasuryId(String(activeMain.id));
       }
       const apiMovements = Array.isArray(movementJson.movements) ? movementJson.movements : [];
+
+      const studentById = new Map<number, any>();
+      const feeByKey = new Map<string, any>();
+
+      const candidateStudentIds = Array.from(
+        new Set(apiMovements.map((m: any) => getStudentIdFromMovement(m)).filter((id: number) => id > 0))
+      );
+
+      await Promise.all(
+        candidateStudentIds.map(async (studentId: number) => {
+          try {
+            const paramsStudent = new URLSearchParams();
+            paramsStudent.set("schoolYearName", schoolYearName);
+            paramsStudent.set("year", schoolYearName);
+            if (selectedSiteId) paramsStudent.set("siteId", selectedSiteId);
+
+            const res = await fetch(`/api/students/${studentId}?${paramsStudent.toString()}`, { cache: "no-store" });
+            const json = await res.json().catch(() => ({}));
+
+            if (res.ok) {
+              const student = json?.student || json?.data || json;
+              if (student?.id) studentById.set(Number(student.id), student);
+            }
+          } catch {}
+        })
+      );
+
+      await Promise.all(
+        candidateStudentIds.map(async (studentId: number) => {
+          try {
+            const paramsFees = new URLSearchParams();
+            paramsFees.set("studentId", String(studentId));
+            paramsFees.set("schoolYearName", schoolYearName);
+            paramsFees.set("year", schoolYearName);
+            if (selectedSiteId) paramsFees.set("siteId", selectedSiteId);
+
+            const res = await fetch(`/api/student-fees?${paramsFees.toString()}`, { cache: "no-store" });
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok) return;
+
+            const list = normalizeApiList(json);
+            for (const fee of list) {
+              const studentFeeId = Number(fee?.id || fee?.studentFeeId || 0);
+              const trainingFeeId = Number(fee?.trainingFeeId || fee?.sourceTrainingFeeId || 0);
+              if (studentFeeId > 0) feeByKey.set(`sf:${studentFeeId}`, fee);
+              if (trainingFeeId > 0) feeByKey.set(`tf:${studentId}:${trainingFeeId}`, fee);
+            }
+          } catch {}
+        })
+      );
+
       let localMovements: Movement[] = [];
       try {
         const rawLocal = localStorage.getItem("treasuryMovements");
         const parsedLocal = rawLocal ? JSON.parse(rawLocal) : [];
-        localMovements = Array.isArray(parsedLocal) ? parsedLocal : [];
+        localMovements = Array.isArray(parsedLocal)
+          ? parsedLocal.filter((item: any) => {
+              const itemYear = cleanText(item.schoolYearName);
+              const itemSiteId = cleanText(item.siteId);
+              const itemSite = cleanText(item.site);
+
+              const yearOk = !itemYear || itemYear === schoolYearName;
+              const siteOk =
+                !selectedSiteId ||
+                (itemSiteId
+                  ? itemSiteId === String(selectedSiteId)
+                  : !itemSite || itemSite === selectedSiteName);
+
+              return yearOk && siteOk;
+            })
+          : [];
       } catch {
         localMovements = [];
       }
@@ -569,8 +917,60 @@ export default function TreasuryMovementsPage() {
       const unique = new Map<string, Movement>();
 
       for (const rawItem of merged) {
+        const normalizedRaw = rawItem as Movement;
+        const parsedStudentId = getStudentIdFromMovement(normalizedRaw);
+        const parsedStudentFeeId = getStudentFeeIdFromMovement(normalizedRaw);
+        const parsedTrainingFeeId = getTrainingFeeIdFromMovement(normalizedRaw);
+
+        const fetchedStudent = parsedStudentId ? studentById.get(parsedStudentId) : null;
+        const fetchedFee =
+          (parsedStudentFeeId ? feeByKey.get(`sf:${parsedStudentFeeId}`) : null) ||
+          (parsedStudentId && parsedTrainingFeeId ? feeByKey.get(`tf:${parsedStudentId}:${parsedTrainingFeeId}`) : null) ||
+          null;
+
+        const relationStudent =
+          normalizedRaw.student ||
+          normalizedRaw.studentFee?.student ||
+          fetchedStudent ||
+          null;
+
         const item = {
           ...rawItem,
+          studentId: normalizedRaw.studentId || parsedStudentId || relationStudent?.id || null,
+          studentFeeId: normalizedRaw.studentFeeId || parsedStudentFeeId || fetchedFee?.id || null,
+          trainingFeeId: normalizedRaw.trainingFeeId || parsedTrainingFeeId || fetchedFee?.trainingFeeId || null,
+          studentFee: normalizedRaw.studentFee || fetchedFee || null,
+          student: relationStudent || normalizedRaw.student || null,
+          feeLabel:
+            cleanText(normalizedRaw.feeLabel) ||
+            cleanText(normalizedRaw.studentFee?.libelle) ||
+            cleanText(fetchedFee?.libelle) ||
+            cleanText(fetchedFee?.code) ||
+            "",
+          feeCode:
+            cleanText(normalizedRaw.feeCode) ||
+            cleanText(normalizedRaw.studentFee?.code) ||
+            cleanText(fetchedFee?.code) ||
+            "",
+          studentName:
+            cleanText(normalizedRaw.studentName) ||
+            `${relationStudent?.nom || ""} ${relationStudent?.prenoms || ""}`.trim() ||
+            extractStudentInfoFromText(normalizedRaw).name ||
+            "",
+          studentMatricule:
+            cleanText(normalizedRaw.studentMatricule) ||
+            cleanText(relationStudent?.matricule) ||
+            extractStudentInfoFromText(normalizedRaw).matricule ||
+            "",
+          studentClasse:
+            cleanText(normalizedRaw.studentClasse) ||
+            cleanText(relationStudent?.classe) ||
+            extractStudentInfoFromText(normalizedRaw).classe ||
+            "",
+          studentSection:
+            cleanText(normalizedRaw.studentSection) ||
+            cleanText(relationStudent?.section) ||
+            "",
           amount: getMovementRealAmount(rawItem),
           movementType: getStableMovementType(rawItem) === "SORTIE" ? "DEBIT" : "CREDIT",
           type: getStableMovementType(rawItem) === "SORTIE" ? "DEBIT" : "CREDIT",
@@ -612,9 +1012,10 @@ export default function TreasuryMovementsPage() {
   }
 
   useEffect(() => {
+    if (!selectedSiteId) return;
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schoolYearName]);
+  }, [schoolYearName, selectedSiteId]);
 
   const categories = useMemo(() => {
     const set = new Set<string>();
@@ -631,7 +1032,7 @@ export default function TreasuryMovementsPage() {
       .filter((m) => {
         const insertionTimestamp = getMovementInsertionTime(m);
         const created = insertionTimestamp > 0 ? new Date(insertionTimestamp) : new Date(m.createdAt);
-        const paymentMode = getPaymentModeFromDescription(m.description);
+        const paymentMode = getPaymentModeFromMovement(m);
         const studentName = getStudentName(m);
         const studentMatricule = getStudentMatricule(m);
         const studentClass = getStudentClass(m);
@@ -649,6 +1050,7 @@ export default function TreasuryMovementsPage() {
           m.reference,
           m.category,
           getMovementLabel(m),
+          getMovementMotifOnly(m),
           m.description,
           m.movementType,
           m.treasury?.name,
@@ -771,18 +1173,28 @@ export default function TreasuryMovementsPage() {
     e.preventDefault();
     if (saving) return;
 
-    const treasuryId = Number(formTreasuryId);
+    const selectedTreasury = getValidFormTreasury();
+    const treasuryId = Number(selectedTreasury?.id || 0);
     const amount = parseAmount(formAmount);
 
-    if (!treasuryId) return alert("Choisissez une trésorerie.");
+    if (!selectedSiteId) return alert("Choisissez un site.");
+    if (!treasuryId || !selectedTreasury) {
+      return alert("Veuillez sélectionner une trésorerie valide pour cette année scolaire et ce site.");
+    }
     if (!formType) return alert("Choisissez le type du mouvement.");
     if (!amount || amount <= 0) return alert("Montant invalide.");
 
     setSaving(true);
     try {
       const selectedType: "CREDIT" | "DEBIT" = formType === "DEBIT" ? "DEBIT" : "CREDIT";
-      const category = formMotif || (selectedType === "CREDIT" ? "ENTREE_MANUELLE" : "DEPENSE");
-      const movementLabel = formDescription || getMovementLabel({ category, movementType: selectedType });
+
+      // Mouvement manuel:
+      // Tsy misy motif pré-défini intsony.
+      // Izay soratana ao amin'ny champ "Motif / Description" ihany no miseho amin'ny colonne MOTIF.
+      const movementLabel = cleanText(formDescription);
+      if (!movementLabel) return alert("Veuillez saisir le motif / description du mouvement.");
+
+      const category = selectedType === "CREDIT" ? "ENTREE_MANUELLE" : "DEPENSE";
       const movementDate = formDate || todayInput();
       // Date d'insertion réelle: c'est l'heure exacte de l'enregistrement.
       // Elle sert au tri global avec TOUS les mouvements.
@@ -805,6 +1217,7 @@ export default function TreasuryMovementsPage() {
 
       const idempotencyKey = [
         "MANUAL_TREASURY_MOVEMENT",
+        selectedSiteId,
         schoolYearName,
         treasuryId,
         selectedType,
@@ -817,6 +1230,8 @@ export default function TreasuryMovementsPage() {
 
       const payload = {
         treasuryId,
+        treasuryName: selectedTreasury.name,
+        tresorerie: selectedTreasury.name,
 
         // TYPE FORCÉ PAR LE CHOIX UTILISATEUR, PAS PAR LE MOTIF.
         // CREDIT sélectionné => CREDIT foana.
@@ -839,6 +1254,10 @@ export default function TreasuryMovementsPage() {
         reference: stableReference,
         idempotencyKey,
         schoolYearName,
+        siteId: Number(selectedSiteId),
+        site: selectedSiteName,
+        siteName: selectedSiteName,
+        siteCode: selectedSite?.code || "",
         // "date" garde la date métier choisie dans le formulaire.
         date: movementDate,
         datePaiement: movementDate,
@@ -874,7 +1293,7 @@ export default function TreasuryMovementsPage() {
       setFilterFrom(todayInput());
       setFilterTo(todayInput());
       setFormDate(todayInput());
-      setFormTreasuryId(mainActiveTreasury?.id ? String(mainActiveTreasury.id) : "");
+      setFormTreasuryId(selectedTreasury?.id ? String(selectedTreasury.id) : mainActiveTreasury?.id ? String(mainActiveTreasury.id) : "");
       setFormType("");
       setFormAmount("");
       setFormReference(`TR-${Date.now()}`);
@@ -901,7 +1320,13 @@ export default function TreasuryMovementsPage() {
       const realId = target && isRealDatabaseId(target.id) ? String(target.id) : isRealDatabaseId(movementId) ? movementId : "";
 
       if (realId) {
-        const res = await fetch(`/api/treasury-movements?id=${encodeURIComponent(realId)}`, {
+        const deleteParams = new URLSearchParams();
+        deleteParams.set("id", realId);
+        deleteParams.set("schoolYearName", schoolYearName);
+        deleteParams.set("year", schoolYearName);
+        if (selectedSiteId) deleteParams.set("siteId", selectedSiteId);
+
+        const res = await fetch(`/api/treasury-movements?${deleteParams.toString()}`, {
           method: "DELETE",
         });
         const data = await res.json().catch(() => ({}));
@@ -942,6 +1367,7 @@ export default function TreasuryMovementsPage() {
 
   function exportCsv() {
     const headers = [
+      "Site",
       "A-S",
       "Date",
       "Reference",
@@ -963,16 +1389,17 @@ export default function TreasuryMovementsPage() {
     const rows = filteredMovements.map((m) => {
       const balance = balanceByMovement.get(getMovementStorageKey(m)) || { before: 0, debit: 0, credit: 0, after: 0 };
       return [
+        (m as any).site || selectedSiteName,
         m.schoolYearName || schoolYearName,
         formatDateFR(m.createdAt),
         m.reference || "",
         m.treasury?.name || "-",
         getStudentMatricule(m),
-        getFeeLabelFromMovement(m),
-        `${getStudentName(m)}${getStudentClass(m) !== "-" ? ` - ${getStudentClass(m)}` : ""}`,
+        getMovementMotifOnly(m),
+        getMovementNameOnly(m),
         getMovementTypeLabel(m.movementType),
         getFeeCodeFromMovement(m),
-        getPaymentModeFromDescription(m.description),
+        getPaymentModeFromMovement(m),
         balance.before,
         balance.debit,
         balance.credit,
@@ -1026,7 +1453,7 @@ export default function TreasuryMovementsPage() {
           }
 
           .movement-table-scroll table {
-            min-width: 1380px !important;
+            min-width: 1460px !important;
           }
 
           .movement-table-scroll th,
@@ -1052,11 +1479,23 @@ export default function TreasuryMovementsPage() {
             </button>
 
             <select
-              value={site}
-              onChange={(e) => setSite(e.target.value)}
+              value={selectedSiteId}
+              onChange={(e) => {
+                setSelectedSiteId(e.target.value);
+                setFilterTreasury("");
+                setFormTreasuryId("");
+              }}
               className="h-[30px] w-full rounded-[3px] border border-slate-800 bg-slate-800 px-2 text-[11px] sm:w-auto sm:text-[12px] font-semibold text-white"
             >
-              <option value={SITE_NAME}>Sites : Strelitzia School</option>
+              {sites.length > 0 ? (
+                sites.map((item) => (
+                  <option key={item.id} value={String(item.id)}>
+                    Sites : {item.name}{item.active ? " (active)" : ""}
+                  </option>
+                ))
+              ) : (
+                <option value="">Sites : Strelitzia School</option>
+              )}
             </select>
 
             <select
@@ -1089,6 +1528,10 @@ export default function TreasuryMovementsPage() {
             <button
               type="button"
               onClick={() => {
+                if (!selectedSiteId) {
+                  alert("Veuillez choisir un site.");
+                  return;
+                }
                 setFormTreasuryId((current) => current || (mainActiveTreasury?.id ? String(mainActiveTreasury.id) : ""));
                 setShowNewModal(true);
               }}
@@ -1139,6 +1582,8 @@ export default function TreasuryMovementsPage() {
             <div className="grid grid-cols-[150px_1fr] gap-y-1 text-[11px]">
               <span className="text-slate-500">Date du résumé</span>
               <span className="font-semibold text-slate-800">{getSummaryDateLabel(filterFrom, filterTo)}</span>
+              <span className="text-slate-500">Site</span>
+              <span className="font-semibold text-blue-700">{selectedSiteName}</span>
               <span className="text-slate-500">Trésorerie filtrée</span>
               <span className="font-semibold text-blue-700">
                 {filterTreasury
@@ -1195,10 +1640,11 @@ export default function TreasuryMovementsPage() {
         </div>
 
         <div className="movement-table-scroll block max-h-[70vh] w-full overflow-auto rounded-[6px] border border-slate-300 bg-white shadow-sm md:max-h-none">
-          <table className="w-full min-w-[1580px] border-collapse text-[9.5px] md:text-[10.5px]">
+          <table className="w-full min-w-[1660px] border-collapse text-[9.5px] md:text-[10.5px]">
             <thead className="sticky top-0 z-20">
               <tr className="bg-slate-800 text-left text-white">
                 {[
+                  "Site",
                   "A-S",
                   "Date",
                   "Reference",
@@ -1227,7 +1673,7 @@ export default function TreasuryMovementsPage() {
             <tbody>
               {filteredMovements.length === 0 ? (
                 <tr>
-                  <td colSpan={17} className="border border-slate-300 bg-blue-50 py-3 text-center text-slate-500">
+                  <td colSpan={18} className="border border-slate-300 bg-blue-50 py-3 text-center text-slate-500">
                     Aucun mouvement trouvé
                   </td>
                 </tr>
@@ -1236,13 +1682,16 @@ export default function TreasuryMovementsPage() {
                   const studentName = getStudentName(m);
                   const matricule = getStudentMatricule(m);
                   const studentClass = getStudentClass(m);
+                  const motifOnly = getMovementMotifOnly(m);
+                  const nameOnly = getMovementNameOnly(m);
                   const feeLabel = getFeeLabelFromMovement(m);
                   const feeCode = getFeeCodeFromMovement(m);
                   const balance = balanceByMovement.get(getMovementStorageKey(m)) || { before: 0, debit: 0, credit: 0, after: 0 };
-                  const modePaiement = getPaymentModeFromDescription(m.description);
+                  const modePaiement = getPaymentModeFromMovement(m);
 
                   return (
                     <tr key={m.id} className="hover:bg-cyan-50">
+                      <td className="border px-1.5 py-[3px] align-top md:px-2 md:py-1 whitespace-nowrap">{(m as any).site || selectedSiteName}</td>
                       <td className="border px-1.5 py-[3px] align-top md:px-2 md:py-1 whitespace-nowrap">{m.schoolYearName || schoolYearName}</td>
                       <td className="border px-1.5 py-[3px] align-top md:px-2 md:py-1 whitespace-nowrap">{formatDateFR(m.createdAt)}</td>
                       <td className="border px-1.5 py-[3px] align-top md:px-2 md:py-1">
@@ -1257,18 +1706,13 @@ export default function TreasuryMovementsPage() {
                       </td>
                       <td className="border px-1.5 py-[3px] align-top md:px-2 md:py-1 text-center font-semibold text-slate-800">{matricule}</td>
                       <td className="border px-1.5 py-[3px] align-top md:px-2 md:py-1">
-                        <div className="max-w-[230px] truncate font-semibold text-slate-900" title={feeLabel}>
-                          {feeLabel}
+                        <div className="min-w-[260px] max-w-[420px] whitespace-normal break-words font-semibold leading-snug text-slate-900" title={motifOnly}>
+                          {motifOnly}
                         </div>
-                        {m.description && m.description !== feeLabel && (
-                          <div className="max-w-[230px] truncate text-[9px] text-slate-500" title={m.description}>
-                            {m.description}
-                          </div>
-                        )}
                       </td>
                       <td className="border px-1.5 py-[3px] align-top md:px-2 md:py-1">
-                        <div className="max-w-[190px] truncate font-bold text-blue-700" title={studentName}>
-                          {studentName}
+                        <div className="max-w-[190px] truncate font-bold text-blue-700" title={nameOnly}>
+                          {nameOnly}
                         </div>
                         <div className="text-[9px] text-slate-600">
                           {matricule !== "-" ? `${matricule} • ` : ""}{studentClass}
@@ -1330,6 +1774,7 @@ export default function TreasuryMovementsPage() {
             const studentName = getStudentName(m);
             const matricule = getStudentMatricule(m);
             const studentClass = getStudentClass(m);
+            const motifOnly = getMovementMotifOnly(m);
             const feeLabel = getFeeLabelFromMovement(m);
             const feeCode = getFeeCodeFromMovement(m);
             const isPaymentFee = isFeeMovement(m);
@@ -1340,10 +1785,10 @@ export default function TreasuryMovementsPage() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="break-words text-[12px] font-bold text-slate-900">
-                      {isPaymentFee ? feeLabel : getMovementLabel(m)}
+                      {isPaymentFee ? motifOnly : getMovementMotifOnly(m)}
                     </p>
                     <p className="text-[10px] text-slate-500">
-                      {formatDateTimeFR((m as any).insertedAt || (m as any).insertionTime || m.createdAt)} • {m.reference || `N° ${m.id}`} • {m.treasury?.name || "-"}
+                      {(m as any).site || selectedSiteName} • {formatDateTimeFR((m as any).insertedAt || (m as any).insertionTime || m.createdAt)} • {m.reference || `N° ${m.id}`} • {m.treasury?.name || "-"}
                     </p>
                   </div>
                   <span
@@ -1390,12 +1835,34 @@ export default function TreasuryMovementsPage() {
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/55 px-2 py-4 md:px-3 md:pt-[90px]">
           <div className="w-full max-w-[640px] overflow-hidden rounded-[8px] bg-white shadow-2xl md:rounded-[3px]">
             <div className="flex h-[50px] items-center justify-between bg-slate-800 px-4 text-white">
-              <h2 className="text-[16px] font-bold">Nouveau Mouvement</h2>
+              <h2 className="text-[16px] font-bold">Nouveau Mouvement — {selectedSiteName}</h2>
               <button type="button" onClick={() => setShowNewModal(false)} className="text-slate-300 hover:text-white">×</button>
             </div>
 
             <form onSubmit={saveMovement} className="max-h-[calc(100dvh-110px)] overflow-y-auto p-3 md:p-4">
               <div className="grid grid-cols-1 gap-x-6 gap-y-3 md:grid-cols-2">
+                <label className="space-y-1">
+                  <span>Site</span>
+                  <select
+                    value={selectedSiteId}
+                    onChange={(e) => {
+                      setSelectedSiteId(e.target.value);
+                      setFilterTreasury("");
+                      setFormTreasuryId("");
+                    }}
+                    className="h-[26px] w-full border px-2"
+                  >
+                    {sites.length > 0 ? (
+                      sites.map((item) => (
+                        <option key={item.id} value={String(item.id)}>
+                          {item.name}{item.active ? " (active)" : ""}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">Strelitzia School</option>
+                    )}
+                  </select>
+                </label>
                 <label className="space-y-1">
                   <span>Date</span>
                   <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} className="h-[26px] w-full border px-2" />
@@ -1409,7 +1876,7 @@ export default function TreasuryMovementsPage() {
                   </select>
                 </label>
                 <label className="space-y-1">
-                  <span>Trésorerie</span>
+                  <span>Trésorerie ({selectedSiteName})</span>
                   <select value={formTreasuryId} onChange={(e) => setFormTreasuryId(e.target.value)} className="h-[26px] w-full border px-2">
                     {!mainActiveTreasury && <option value="">Choisissez une trésorerie</option>}
                     {activeTreasuries.map((t) => (
@@ -1432,20 +1899,14 @@ export default function TreasuryMovementsPage() {
                   <span>Reference</span>
                   <input value={formReference} onChange={(e) => setFormReference(e.target.value)} className="h-[26px] w-full border px-2" />
                 </label>
-                <label className="space-y-1">
-                  <span>Motif</span>
-                  <select value={formMotif} onChange={(e) => setFormMotif(e.target.value)} className="h-[26px] w-full border px-2">
-                    <option value="">Choisissez le motif</option>
-                    <option value="PAIEMENT_FRAIS">Paiement frais</option>
-                    <option value="ANNULATION_PAIEMENT_FRAIS">Annulation paiement frais</option>
-                    <option value="ENTREE_MANUELLE">Entrée manuelle</option>
-                    <option value="DEPENSE">Dépense</option>
-                    <option value="TRANSFERT">Transfert</option>
-                  </select>
-                </label>
                 <label className="space-y-1 md:col-span-2">
-                  <span>Description</span>
-                  <input value={formDescription} onChange={(e) => setFormDescription(e.target.value)} className="h-[26px] w-full border px-2" />
+                  <span>Motif / Description</span>
+                  <input
+                    value={formDescription}
+                    onChange={(e) => setFormDescription(e.target.value)}
+                    placeholder="Ex: Achat fournitures, avance caisse, dépôt banque..."
+                    className="h-[26px] w-full border px-2"
+                  />
                 </label>
               </div>
               <div className="mt-4 flex flex-col-reverse gap-2 border-t pt-3 text-right sm:flex-row sm:justify-end">
@@ -1486,7 +1947,7 @@ export default function TreasuryMovementsPage() {
                   <input value={filterClasse} onChange={(e) => setFilterClasse(e.target.value)} className="h-[26px] w-full border border-slate-300 px-2" />
                 </label>
                 <label className="space-y-1">
-                  <span>Trésorerie</span>
+                  <span>Trésorerie ({selectedSiteName})</span>
                   <select value={filterTreasury} onChange={(e) => setFilterTreasury(e.target.value)} className="h-[26px] w-full border border-slate-300 px-2">
                     <option value="">Choisissez la trésorerie</option>
                     {treasuries.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}

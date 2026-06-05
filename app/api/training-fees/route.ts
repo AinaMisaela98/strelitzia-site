@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthUser } from "@/lib/auth";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 async function getActiveYear() {
   let year = await prisma.schoolYear.findFirst({
     where: { active: true },
@@ -14,6 +17,27 @@ async function getActiveYear() {
   }
 
   return year.name;
+}
+
+async function getDefaultSite() {
+  let site = await prisma.site.findFirst({
+    where: { active: true },
+    orderBy: { id: "asc" },
+    select: { id: true, name: true, code: true },
+  });
+
+  if (!site) {
+    site = await prisma.site.create({
+      data: {
+        name: "Strelitzia School",
+        code: "STRELITZIA",
+        active: true,
+      },
+      select: { id: true, name: true, code: true },
+    });
+  }
+
+  return site;
 }
 
 function amountToNumber(value: any) {
@@ -60,6 +84,76 @@ function normalizeUpper(value: any) {
   return normalizeText(value).toUpperCase();
 }
 
+async function resolveSiteFromUrl(url: URL) {
+  const rawSiteId = Number(url.searchParams.get("siteId") || 0);
+  const siteName = normalizeText(url.searchParams.get("site"));
+  const siteCode = normalizeText(url.searchParams.get("siteCode"));
+
+  if (rawSiteId) {
+    const site = await prisma.site.findUnique({
+      where: { id: rawSiteId },
+      select: { id: true, name: true, code: true },
+    });
+
+    if (site) return site;
+  }
+
+  if (siteCode) {
+    const site = await prisma.site.findUnique({
+      where: { code: siteCode },
+      select: { id: true, name: true, code: true },
+    });
+
+    if (site) return site;
+  }
+
+  if (siteName) {
+    const site = await prisma.site.findFirst({
+      where: { name: siteName },
+      select: { id: true, name: true, code: true },
+    });
+
+    if (site) return site;
+  }
+
+  return getDefaultSite();
+}
+
+async function resolveSiteFromBody(body: any) {
+  const rawSiteId = Number(body?.siteId || 0);
+  const siteName = normalizeText(body?.site || body?.siteName);
+  const siteCode = normalizeText(body?.siteCode);
+
+  if (rawSiteId) {
+    const site = await prisma.site.findUnique({
+      where: { id: rawSiteId },
+      select: { id: true, name: true, code: true },
+    });
+
+    if (site) return site;
+  }
+
+  if (siteCode) {
+    const site = await prisma.site.findUnique({
+      where: { code: siteCode },
+      select: { id: true, name: true, code: true },
+    });
+
+    if (site) return site;
+  }
+
+  if (siteName) {
+    const site = await prisma.site.findFirst({
+      where: { name: siteName },
+      select: { id: true, name: true, code: true },
+    });
+
+    if (site) return site;
+  }
+
+  return getDefaultSite();
+}
+
 function normalizeSpecialTarifs(value: any) {
   if (!value) return {};
 
@@ -104,8 +198,6 @@ function specialTarifsField(fields: string[]) {
 function valueForPrismaField(modelName: string, fieldName: string, value: any) {
   const fieldType = modelFieldType(modelName, fieldName).toLowerCase();
 
-  // Raha Json ny champ ao Prisma dia alefa object directement.
-  // Raha String/Text kosa dia tehirizina JSON string.
   if (fieldType.includes("json")) return value;
   if (fieldType.includes("string")) return JSON.stringify(value || {});
 
@@ -150,7 +242,7 @@ async function resolveClassNameFromRequest(url: URL) {
   return "";
 }
 
-async function resolveClassRoomIdFromRequest(url: URL, classeName?: string) {
+async function resolveClassRoomIdFromRequest(url: URL, classeName?: string, siteId?: number) {
   const directId = Number(
     url.searchParams.get("classRoomId") ||
       url.searchParams.get("classId") ||
@@ -171,7 +263,8 @@ async function resolveClassRoomIdFromRequest(url: URL, classeName?: string) {
       where: {
         name: classeName,
         ...(year ? { schoolYearName: year } : {}),
-      },
+        ...(siteId ? { siteId } : {}),
+      } as any,
       select: { id: true },
     });
 
@@ -190,6 +283,7 @@ function buildTrainingFeeData(fields: string[], input: any, row: any) {
     "anneeScolaire",
     "academicYear",
   ]);
+  const siteIdField = pickFirst(fields, ["siteId"]);
   const siteField = pickFirst(fields, ["site", "schoolSite"]);
   const levelIdField = pickFirst(fields, ["levelId", "niveauId"]);
   const levelNameField = pickFirst(fields, ["level", "niveau"]);
@@ -210,6 +304,7 @@ function buildTrainingFeeData(fields: string[], input: any, row: any) {
   const montantField = pickFirst(fields, ["montant", "amount", "tarif"]);
 
   if (schoolYearField) data[schoolYearField] = input.schoolYearName;
+  if (siteIdField) data[siteIdField] = input.siteId;
   if (siteField) data[siteField] = input.site;
   if (levelIdField) data[levelIdField] = input.levelId;
   if (levelNameField) data[levelNameField] = input.levelName;
@@ -239,8 +334,9 @@ function buildTrainingFeeData(fields: string[], input: any, row: any) {
 /**
  * GET /api/training-fees
  *
- * Filtre fiable par année + classe.
+ * Filtre fiable par site + année + classe.
  * Accepte:
+ * - siteId / site / siteCode
  * - schoolYearName / year / anneeScolaire
  * - classRoomId / classId / classeId
  * - classe / className / classRoomName
@@ -256,6 +352,7 @@ export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
     const fields = modelFieldNames("TrainingFee");
+    const selectedSite = await resolveSiteFromUrl(url);
 
     const schoolYearField = pickFirst(fields, [
       "schoolYearName",
@@ -265,17 +362,17 @@ export async function GET(req: Request) {
     ]);
     const classIdField = pickFirst(fields, ["classRoomId", "classId", "classeId"]);
     const classNameField = pickFirst(fields, ["classe", "className", "classRoomName"]);
+    const siteIdField = pickFirst(fields, ["siteId"]);
     const siteField = pickFirst(fields, ["site", "schoolSite"]);
 
     const year =
       url.searchParams.get("schoolYearName") ||
       url.searchParams.get("year") ||
       url.searchParams.get("anneeScolaire") ||
-      "";
+      (await getActiveYear());
 
-    const site = url.searchParams.get("site") || "";
     const classeName = await resolveClassNameFromRequest(url);
-    const classRoomId = await resolveClassRoomIdFromRequest(url, classeName);
+    const classRoomId = await resolveClassRoomIdFromRequest(url, classeName, selectedSite.id);
 
     const where: any = {};
 
@@ -283,16 +380,12 @@ export async function GET(req: Request) {
       where[schoolYearField] = year;
     }
 
-    if (siteField && site) {
-      where[siteField] = site;
+    if (siteIdField) {
+      where[siteIdField] = selectedSite.id;
+    } else if (siteField) {
+      where[siteField] = selectedSite.name;
     }
 
-    /**
-     * IMPORTANT:
-     * Raha misy champ ID classe ao amin'ny schema vaovao dia ampiasaina.
-     * Raha schema taloha no misy classe String fotsiny dia ampiasaina className.
-     * Izany no manakana ny frais Grade 1 tsy hifangaro amin'ny Grade 2.
-     */
     if (classIdField && classRoomId) {
       where[classIdField] = classRoomId;
     } else if (classNameField && classeName) {
@@ -304,17 +397,20 @@ export async function GET(req: Request) {
       orderBy: has(fields, "id") ? { id: "asc" } : undefined,
     });
 
-    /**
-     * Sécurité fanampiny:
-     * Raha schema misy classe String ary nisy données taloha tsy mitovy casse/espace,
-     * dia ataontsika filtre côté code ihany koa.
-     */
     const filtered =
       classNameField && classeName
         ? data.filter((item: any) => normalizeUpper(item[classNameField]) === normalizeUpper(classeName))
         : data;
 
-    return NextResponse.json(filtered);
+    return NextResponse.json({
+      data: filtered,
+      trainingFees: filtered,
+      siteId: selectedSite.id,
+      site: selectedSite.name,
+      siteCode: selectedSite.code,
+      schoolYearName: year,
+      anneeScolaire: year,
+    });
   } catch (error: any) {
     console.error("GET /api/training-fees", error);
     return NextResponse.json(apiError(error), { status: 500 });
@@ -331,6 +427,7 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const fields = modelFieldNames("TrainingFee");
+    const selectedSite = await resolveSiteFromBody(body);
 
     if (!fields.length) {
       return NextResponse.json(
@@ -383,6 +480,18 @@ export async function POST(req: Request) {
       );
     }
 
+    if ((classe as any).siteId && Number((classe as any).siteId) !== selectedSite.id) {
+      return NextResponse.json(
+        {
+          error: "Cette classe n'appartient pas au site sélectionné",
+          classRoomId,
+          selectedSiteId: selectedSite.id,
+          realSiteId: (classe as any).siteId,
+        },
+        { status: 400 }
+      );
+    }
+
     let feeModelTitle = body.feeModelTitle || "";
 
     if ((prisma as any).feeModel?.findUnique) {
@@ -393,6 +502,18 @@ export async function POST(req: Request) {
       if (!feeModel) {
         return NextResponse.json(
           { error: "Modèle de frais introuvable", feeModelId },
+          { status: 400 }
+        );
+      }
+
+      if ((feeModel as any).siteId && Number((feeModel as any).siteId) !== selectedSite.id) {
+        return NextResponse.json(
+          {
+            error: "Ce modèle de frais n'appartient pas au site sélectionné",
+            feeModelId,
+            selectedSiteId: selectedSite.id,
+            realSiteId: (feeModel as any).siteId,
+          },
           { status: 400 }
         );
       }
@@ -408,7 +529,8 @@ export async function POST(req: Request) {
         body.anneeScolaire ||
         (classe as any).schoolYearName ||
         (await getActiveYear()),
-      site: body.site || "Strelitzia School",
+      siteId: selectedSite.id,
+      site: selectedSite.name,
       levelId,
       levelName: (classe as any).level?.name || body.levelName || "",
       classRoomId,
@@ -470,6 +592,8 @@ export async function POST(req: Request) {
       "anneeScolaire",
       "academicYear",
     ]);
+    const siteIdField = pickFirst(fields, ["siteId"]);
+    const siteField = pickFirst(fields, ["site", "schoolSite"]);
 
     if (!classIdField && !classNameField) {
       return NextResponse.json(
@@ -499,10 +623,16 @@ export async function POST(req: Request) {
       deleteWhere[schoolYearField] = input.schoolYearName;
     }
 
+    if (siteIdField) {
+      deleteWhere[siteIdField] = input.siteId;
+    } else if (siteField) {
+      deleteWhere[siteField] = input.site;
+    }
+
     /**
      * Recréation propre UNIQUEMENT amin'ilay:
-     * même année + même classe + même modèle.
-     * Tsy mikitika Grade hafa.
+     * même site + même année + même classe + même modèle.
+     * Tsy mikitika site hafa na Grade hafa.
      */
     await prisma.trainingFee.deleteMany({
       where: deleteWhere,
@@ -519,6 +649,12 @@ export async function POST(req: Request) {
       success: true,
       count: created.length,
       data: created,
+      trainingFees: created,
+      siteId: selectedSite.id,
+      site: selectedSite.name,
+      siteCode: selectedSite.code,
+      schoolYearName: input.schoolYearName,
+      anneeScolaire: input.schoolYearName,
     });
   } catch (error: any) {
     console.error("POST /api/training-fees", error);
@@ -536,17 +672,19 @@ export async function PATCH(req: Request) {
   try {
     const body = await req.json();
     const id = Number(body.id);
+    const fields = modelFieldNames("TrainingFee");
+    const selectedSite = await resolveSiteFromBody(body);
 
     if (!id) {
       return NextResponse.json({ error: "ID frais manquant" }, { status: 400 });
     }
 
-    const fields = modelFieldNames("TrainingFee");
-
     const libelleField = pickFirst(fields, ["libelle", "intitule", "title", "name"]);
     const codeField = pickFirst(fields, ["code"]);
     const montantField = pickFirst(fields, ["montant", "amount", "tarif"]);
     const specialsField = specialTarifsField(fields);
+    const siteIdField = pickFirst(fields, ["siteId"]);
+    const siteField = pickFirst(fields, ["site", "schoolSite"]);
 
     const data: any = {};
 
@@ -560,6 +698,14 @@ export async function PATCH(req: Request) {
 
     if (montantField && body.montant !== undefined) {
       data[montantField] = amountToNumber(body.montant);
+    }
+
+    if (siteIdField && body.siteId !== undefined) {
+      data[siteIdField] = selectedSite.id;
+    }
+
+    if (siteField && (body.site !== undefined || body.siteName !== undefined || body.siteId !== undefined)) {
+      data[siteField] = selectedSite.name;
     }
 
     if (
@@ -604,6 +750,7 @@ export async function DELETE(req: Request) {
   try {
     const url = new URL(req.url);
     const fields = modelFieldNames("TrainingFee");
+    const selectedSite = await resolveSiteFromUrl(url);
 
     const id = Number(url.searchParams.get("id") || 0);
 
@@ -640,6 +787,8 @@ export async function DELETE(req: Request) {
       "modelId",
       "modeleFraisId",
     ]);
+    const siteIdField = pickFirst(fields, ["siteId"]);
+    const siteField = pickFirst(fields, ["site", "schoolSite"]);
 
     const schoolYearName =
       url.searchParams.get("schoolYearName") ||
@@ -648,7 +797,7 @@ export async function DELETE(req: Request) {
       (await getActiveYear());
 
     const classeName = await resolveClassNameFromRequest(url);
-    const classRoomId = await resolveClassRoomIdFromRequest(url, classeName);
+    const classRoomId = await resolveClassRoomIdFromRequest(url, classeName, selectedSite.id);
     const feeModelId = Number(
       url.searchParams.get("feeModelId") ||
         url.searchParams.get("modelId") ||
@@ -684,12 +833,21 @@ export async function DELETE(req: Request) {
       where[modelField] = feeModelId;
     }
 
+    if (siteIdField) {
+      where[siteIdField] = selectedSite.id;
+    } else if (siteField) {
+      where[siteField] = selectedSite.name;
+    }
+
     const deleted = await prisma.trainingFee.deleteMany({ where });
 
     return NextResponse.json({
       success: true,
       deletedBy: "class",
       count: deleted.count,
+      siteId: selectedSite.id,
+      site: selectedSite.name,
+      schoolYearName,
     });
   } catch (error: any) {
     console.error("DELETE /api/training-fees", error);

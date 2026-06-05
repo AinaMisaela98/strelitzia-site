@@ -6,6 +6,8 @@ import { useSearchParams } from "next/navigation";
 
 type Student = {
   id: number;
+  siteId?: number | null;
+  site?: string | null;
   matricule: string;
   photoUrl?: string | null;
   nom: string;
@@ -33,14 +35,29 @@ type Student = {
   niveau?: string | null;
 };
 
+type Site = {
+  id: number;
+  name: string;
+  code?: string | null;
+  active?: boolean;
+};
+
 type SchoolYear = { id: number; name: string; active: boolean };
 type Serie = { id: number; name: string; classRoomId: number; schoolYearName: string };
 type ClassRoom = { id: number; name: string; schoolYearName: string; series: Serie[] };
 
 type TarifsSpeciaux = Record<string, number | string | null | undefined>;
 
+type FeeSpecialTariff = {
+  id?: number;
+  feeTariffId?: number;
+  name: string;
+  amount: number | string;
+};
+
 type TrainingFee = {
   id: number;
+  siteId?: number | string | null;
   libelle?: string | null;
   label?: string | null;
   name?: string | null;
@@ -59,17 +76,9 @@ type TrainingFee = {
   tarifsSpeciaux?: TarifsSpeciaux | string | null;
 };
 
-
-
-type FeeSpecialTariff = {
-  id?: number;
-  feeTariffId?: number;
-  name: string;
-  amount: number | string;
-};
-
 type FeeTariff = {
   id: number;
+  siteId?: number | string | null;
   feeModelId?: number;
   libelle?: string | null;
   label?: string | null;
@@ -83,6 +92,7 @@ type FeeTariff = {
 
 type FeeModel = {
   id: number;
+  siteId?: number | string | null;
   title?: string | null;
   name?: string | null;
   libelle?: string | null;
@@ -189,6 +199,8 @@ function ReinscriptionPage() {
   const [results, setResults] = useState<Student[]>([]);
   const [selected, setSelected] = useState<Student | null>(null);
 
+  const [sites, setSites] = useState<Site[]>([]);
+  const [selectedSiteId, setSelectedSiteId] = useState("");
   const [schoolYears, setSchoolYears] = useState<SchoolYear[]>([]);
   const [classRooms, setClassRooms] = useState<ClassRoom[]>([]);
   const [trainingFees, setTrainingFees] = useState<TrainingFee[]>([]);
@@ -199,6 +211,14 @@ function ReinscriptionPage() {
 
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const selectedSite = useMemo(
+    () => sites.find((site) => String(site.id) === String(selectedSiteId)) || null,
+    [sites, selectedSiteId]
+  );
+
+  const selectedSiteName = selectedSite?.name || "Strelitzia School";
+  const selectedSiteCode = selectedSite?.code || "";
 
   const classes = useMemo(
     () => classRooms.filter((c) => c.schoolYearName === form.anneeScolaire),
@@ -222,6 +242,7 @@ function ReinscriptionPage() {
 
     return rows.map((tariff) => ({
       id: tariff.id,
+      siteId: tariff.siteId || selectedFeeModel.siteId || null,
       libelle: tariff.libelle || tariff.label || tariff.name || "Frais",
       label: tariff.label || tariff.libelle || tariff.name || "Frais",
       name: tariff.name || tariff.libelle || tariff.label || "Frais",
@@ -284,11 +305,55 @@ function ReinscriptionPage() {
     setForm((prev) => ({ ...prev, [name]: value }));
   }
 
+  async function loadSites() {
+    try {
+      const savedSiteId =
+        typeof window !== "undefined"
+          ? localStorage.getItem("strelitzia-selected-site-id") || ""
+          : "";
+
+      const res = await fetch(`/api/sites?_ts=${Date.now()}`, {
+        cache: "no-store",
+      });
+
+      const data = await res.json().catch(() => ({}));
+      const list: Site[] = Array.isArray(data?.sites) ? data.sites : [];
+
+      setSites(list);
+
+      const savedSite = list.find((site) => String(site.id) === savedSiteId && site.active !== false);
+      const firstActive = list.find((site) => site.active !== false) || list[0];
+      const siteToUse = savedSite || firstActive;
+
+      if (siteToUse) {
+        const nextSiteId = String(siteToUse.id);
+        setSelectedSiteId(nextSiteId);
+
+        if (typeof window !== "undefined") {
+          localStorage.setItem("strelitzia-selected-site-id", nextSiteId);
+        }
+
+        return nextSiteId;
+      }
+
+      return "";
+    } catch {
+      setSites([]);
+      return "";
+    }
+  }
+
   async function loadTrainingFees() {
     if (!form.anneeScolaire || !form.classe) {
       setTrainingFees([]);
       setSelectedFeeIds([]);
-      setForm((prev) => ({ ...prev, reinscriptionFeeId: "", fraisInscription: "", fraisReinscriptionLibelle: "", fraisReinscriptionDetails: "" }));
+      setForm((prev) => ({
+        ...prev,
+        reinscriptionFeeId: "",
+        fraisInscription: "",
+        fraisReinscriptionLibelle: "",
+        fraisReinscriptionDetails: "",
+      }));
       return;
     }
 
@@ -301,6 +366,12 @@ function ReinscriptionPage() {
         classe: form.classe,
         classRoomName: form.classe,
       });
+
+      if (selectedSiteId) {
+        params.set("siteId", selectedSiteId);
+        params.set("site", selectedSiteName);
+        if (selectedSiteCode) params.set("siteCode", selectedSiteCode);
+      }
 
       if (form.section) {
         params.set("section", form.section);
@@ -317,14 +388,13 @@ function ReinscriptionPage() {
         const sameClass = !fee.classe && !fee.classRoomName ? true : (fee.classe || fee.classRoomName) === form.classe;
         const feeSerie = fee.section || fee.serie || fee.serieName || "";
         const sameSerie = !form.section || !feeSerie || feeSerie === form.section;
-        return sameYear && sameClass && sameSerie;
+        const feeSiteId = fee.siteId ? String(fee.siteId) : "";
+        const sameSite = !selectedSiteId || !feeSiteId || feeSiteId === String(selectedSiteId);
+        return sameYear && sameClass && sameSerie && sameSite;
       });
 
       setTrainingFees(filtered);
       setSelectedFeeIds(filtered.map((fee) => fee.id));
-
-      // Ne pas modifier reinscriptionFeeId ici : ce champ correspond au modèle créé dans /api/fee-models.
-      // Les training-fees restent seulement pour la liste des frais de scolarité sélectionnables.
     } catch {
       setTrainingFees([]);
       setSelectedFeeIds([]);
@@ -356,6 +426,12 @@ function ReinscriptionPage() {
         classRoomName: form.classe,
       });
 
+      if (selectedSiteId) {
+        params.set("siteId", selectedSiteId);
+        params.set("site", selectedSiteName);
+        if (selectedSiteCode) params.set("siteCode", selectedSiteCode);
+      }
+
       const res = await fetch(`/api/fee-models?${params.toString()}`, { cache: "no-store" });
       const data = await res.json();
       const rawModels: FeeModel[] = Array.isArray(data) ? data : data.models || data.feeModels || [];
@@ -363,9 +439,11 @@ function ReinscriptionPage() {
       const filtered = rawModels.filter((model) => {
         const modelYear = model.schoolYearName || model.anneeScolaire || "";
         const modelClass = model.classe || model.classRoomName || "";
+        const modelSiteId = model.siteId ? String(model.siteId) : "";
         const sameYear = !modelYear || modelYear === form.anneeScolaire;
         const sameClass = !modelClass || modelClass === "GENERAL" || modelClass === form.classe;
-        return sameYear && sameClass;
+        const sameSite = !selectedSiteId || !modelSiteId || modelSiteId === String(selectedSiteId);
+        return sameYear && sameClass && sameSite;
       });
 
       setFeeModels(filtered);
@@ -418,7 +496,10 @@ function ReinscriptionPage() {
     }
 
     try {
-      const res = await fetch(`/api/students/search?q=${encodeURIComponent(value)}`);
+      const params = new URLSearchParams({ q: value });
+      if (selectedSiteId) params.set("siteId", selectedSiteId);
+
+      const res = await fetch(`/api/students/search?${params.toString()}`);
       const data = await res.json();
       setResults(Array.isArray(data) ? data : []);
     } catch {
@@ -428,7 +509,10 @@ function ReinscriptionPage() {
 
   async function loadInitialStudent(id: string) {
     try {
-      const res = await fetch(`/api/students/search?studentId=${encodeURIComponent(id)}`);
+      const params = new URLSearchParams({ studentId: id });
+      if (selectedSiteId) params.set("siteId", selectedSiteId);
+
+      const res = await fetch(`/api/students/search?${params.toString()}`);
       const data = await res.json();
       const found = Array.isArray(data) ? data[0] : null;
 
@@ -472,24 +556,48 @@ function ReinscriptionPage() {
 
   useEffect(() => {
     loadOptions();
+    loadSites();
   }, []);
 
   useEffect(() => {
     if (initialStudentId) loadInitialStudent(initialStudentId);
-  }, [initialStudentId]);
+  }, [initialStudentId, selectedSiteId]);
 
   useEffect(() => {
     setForm((p) => ({ ...p, classe: "", section: "" }));
   }, [form.anneeScolaire]);
 
   useEffect(() => {
-    setForm((p) => ({ ...p, section: "", tarifReinscription: "", reinscriptionFeeId: "", fraisInscription: "", fraisReinscriptionLibelle: "", fraisReinscriptionDetails: "" }));
+    setForm((p) => ({
+      ...p,
+      section: "",
+      tarifReinscription: "",
+      reinscriptionFeeId: "",
+      fraisInscription: "",
+      fraisReinscriptionLibelle: "",
+      fraisReinscriptionDetails: "",
+    }));
   }, [form.classe]);
+
+  useEffect(() => {
+    if (!selectedSiteId) return;
+
+    if (typeof window !== "undefined") {
+      localStorage.setItem("strelitzia-selected-site-id", selectedSiteId);
+    }
+
+    setResults([]);
+    setSelected(null);
+    setQ("");
+    setSelectedFeeIds([]);
+    loadTrainingFees();
+    loadFeeModels();
+  }, [selectedSiteId]);
 
   useEffect(() => {
     loadTrainingFees();
     loadFeeModels();
-  }, [form.anneeScolaire, form.classe, form.section]);
+  }, [form.anneeScolaire, form.classe, form.section, selectedSiteId]);
 
   useEffect(() => {
     if (!form.tarifReinscription) return;
@@ -512,13 +620,14 @@ function ReinscriptionPage() {
       return;
     }
 
-    // IMPORTANT : tsy asiana duplication intsony.
-    // Raha "Ancien" no voafidy dia montant Ancien ihany no atao rows.
-    // Raha "Principal" no voafidy dia montant Principal ihany no atao rows.
     const rows = selectedFeeModelTariffsForSelectedTarif.map((fee) => ({
       id: fee.id,
       trainingFeeId: fee.id,
       sourceTrainingFeeId: fee.id,
+      siteId: selectedSiteId ? Number(selectedSiteId) : undefined,
+      site: selectedSiteName,
+      siteName: selectedSiteName,
+      siteCode: selectedSiteCode || undefined,
       code: fee.code || "",
       libelle: getFeeLabel(fee),
       tarif: form.tarifReinscription,
@@ -532,6 +641,8 @@ function ReinscriptionPage() {
       modelTitle: getFeeModelTitle(model),
       tarif: form.tarifReinscription,
       total: fraisReinscriptionAmount,
+      siteId: selectedSiteId ? Number(selectedSiteId) : undefined,
+      site: selectedSiteName,
       rows,
     };
 
@@ -550,15 +661,18 @@ function ReinscriptionPage() {
     selectedFeeModelTariffsForSelectedTarif,
     fraisReinscriptionAmount,
     form.tarifReinscription,
+    selectedSiteId,
+    selectedSiteName,
+    selectedSiteCode,
   ]);
 
   useEffect(() => {
-    // Rehefa misy modèle + tarif voafidy dia ilay modèle/tarif ihany no ampiasaina.
-    // Tsy averina intsony ny frais principal ao amin'ny liste training-fees, mba tsy hiteraka duplication.
     if (selectedFeeModel && form.tarifReinscription) return;
 
     const details = selectedTrainingFees.map((fee) => ({
       id: fee.id,
+      siteId: selectedSiteId ? Number(selectedSiteId) : undefined,
+      site: selectedSiteName,
       code: fee.code || "",
       libelle: getFeeLabel(fee),
       tarif: form.tarifReinscription || "Principal",
@@ -572,12 +686,25 @@ function ReinscriptionPage() {
       trainingFeesTotal: totalTrainingFees ? String(totalTrainingFees) : "",
       trainingFeesDetails: JSON.stringify(details),
     }));
-  }, [selectedFeeModel, selectedTrainingFees, selectedFeeIds, totalTrainingFees, form.tarifReinscription]);
+  }, [
+    selectedFeeModel,
+    selectedTrainingFees,
+    selectedFeeIds,
+    totalTrainingFees,
+    form.tarifReinscription,
+    selectedSiteId,
+    selectedSiteName,
+  ]);
 
   function validateStep() {
     setMessage("");
 
     if (step === 1) {
+      if (!selectedSiteId) {
+        setMessage("Veuillez sélectionner le site de réinscription.");
+        return false;
+      }
+
       if (!selected) {
         setMessage("Veuillez choisir un étudiant.");
         return false;
@@ -620,10 +747,6 @@ function ReinscriptionPage() {
   }
 
   function buildReinscriptionStudentFeeRows() {
-    // Source unique des frais à créer pour le nouvel étudiant réinscrit.
-    // Si un modèle + tarif est sélectionné, on n'utilise QUE les lignes de ce tarif.
-    // Exemple: tarif "Ancien" => seuls les montants Ancien sont envoyés.
-    // Exemple: tarif "Principal" => seuls les montants Principal sont envoyés.
     const selectedTarif = form.tarifReinscription || "Principal";
 
     if (selectedFeeModel && selectedTarif) {
@@ -634,6 +757,10 @@ function ReinscriptionPage() {
           return {
             id: fee.id,
             sourceTrainingFeeId: fee.id,
+            siteId: selectedSiteId ? Number(selectedSiteId) : undefined,
+            site: selectedSiteName,
+            siteName: selectedSiteName,
+            siteCode: selectedSiteCode || undefined,
             code: fee.code || "",
             libelle: getFeeLabel(fee),
             tarif: selectedTarif,
@@ -655,6 +782,10 @@ function ReinscriptionPage() {
           id: fee.id,
           trainingFeeId: fee.id,
           sourceTrainingFeeId: fee.id,
+          siteId: selectedSiteId ? Number(selectedSiteId) : undefined,
+          site: selectedSiteName,
+          siteName: selectedSiteName,
+          siteCode: selectedSiteCode || undefined,
           code: fee.code || "",
           libelle: getFeeLabel(fee),
           tarif: selectedTarif,
@@ -675,14 +806,11 @@ function ReinscriptionPage() {
     const modelId = selectedFeeModel?.id || "NO_MODEL";
 
     const feesPayload = rows
-      .map((row) => {
+      .map((row: any) => {
         const amount = Number(row.montantTotal || row.montant || row.amount || 0);
         if (!amount || amount <= 0) return null;
 
         return {
-          // Raha avy amin'ny /api/training-fees dia misy trainingFeeId.
-          // Raha avy amin'ny /api/fee-models dia tsy terena eto ny trainingFeeId,
-          // fa ny /api/student-fees no mitady fallback amin'ny code/classe/année.
           trainingFeeId: "trainingFeeId" in row ? row.trainingFeeId || undefined : undefined,
           sourceTrainingFeeId:
             row.sourceTrainingFeeId ||
@@ -690,27 +818,26 @@ function ReinscriptionPage() {
             row.id ||
             undefined,
           feeModelId:
-  "feeModelId" in row
-    ? row.feeModelId || selectedFeeModel?.id || undefined
-    : selectedFeeModel?.id || undefined,
-
-      feeModelTitle:
-        "feeModelTitle" in row
-          ? row.feeModelTitle || (selectedFeeModel ? getFeeModelTitle(selectedFeeModel) : "")
-          : selectedFeeModel
-            ? getFeeModelTitle(selectedFeeModel)
-            : "",
+            "feeModelId" in row
+              ? row.feeModelId || selectedFeeModel?.id || undefined
+              : selectedFeeModel?.id || undefined,
+          feeModelTitle:
+            "feeModelTitle" in row
+              ? row.feeModelTitle || (selectedFeeModel ? getFeeModelTitle(selectedFeeModel) : "")
+              : selectedFeeModel
+                ? getFeeModelTitle(selectedFeeModel)
+                : "",
+          siteId: selectedSiteId ? Number(selectedSiteId) : undefined,
+          site: selectedSiteName,
+          siteName: selectedSiteName,
+          siteCode: selectedSiteCode || undefined,
           code: row.code || row.libelle || "FRAIS",
           libelle: row.libelle || row.code || "Frais de formation",
-
-          // Montant de la ligne du tarif choisi uniquement.
-          // Ancien => montant Ancien, Principal => montant Principal, etc.
           montant: amount,
           amount,
           montantTotal: amount,
           reste: amount,
           montantPaye: 0,
-
           tarifName: selectedTarif,
           tarifReinscription: selectedTarif,
           selectedTarif,
@@ -720,12 +847,10 @@ function ReinscriptionPage() {
           montantTarifSelectionne: amount,
           montantChoisi: amount,
           montantApplique: amount,
-
           status: "NON_PAYE",
           statut: "NON_PAYE",
           paid: false,
           isPaid: false,
-
           schoolYearName,
           anneeScolaire: schoolYearName,
           classe: form.classe,
@@ -749,6 +874,7 @@ function ReinscriptionPage() {
       modelId,
       selectedTarif,
       schoolYearName,
+      selectedSiteId,
     ]
       .map((item) => String(item ?? "").trim())
       .join("|");
@@ -764,7 +890,10 @@ function ReinscriptionPage() {
         studentId: newStudentId,
         action: "SYNC_REINSCRIPTION",
         source: "REINSCRIPTION",
-
+        siteId: selectedSiteId ? Number(selectedSiteId) : undefined,
+        site: selectedSiteName,
+        siteName: selectedSiteName,
+        siteCode: selectedSiteCode || undefined,
         schoolYearName,
         anneeScolaire: schoolYearName,
         classe: form.classe,
@@ -773,17 +902,12 @@ function ReinscriptionPage() {
         section: form.section,
         serie: form.section,
         serieName: form.section,
-
         feeModelId: selectedFeeModel?.id || undefined,
         feeModelTitle: selectedFeeModel ? getFeeModelTitle(selectedFeeModel) : "",
-
         tarifName: selectedTarif,
         tarifReinscription: selectedTarif,
         selectedTarif,
         appliedTarif: selectedTarif,
-
-        // Logique vaovao: tsy miankina amin'ny montantTotal global intsony.
-        // Ny API student-fees no mamorona StudentFee isaky ny ligne ato.
         fees: feesPayload,
       }),
     });
@@ -810,8 +934,16 @@ function ReinscriptionPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           studentId: selected?.id,
+          siteId: selectedSiteId ? Number(selectedSiteId) : undefined,
+          site: selectedSiteName,
+          siteName: selectedSiteName,
+          siteCode: selectedSiteCode || undefined,
           data: {
             ...form,
+            siteId: selectedSiteId ? Number(selectedSiteId) : undefined,
+            site: selectedSiteName,
+            siteName: selectedSiteName,
+            siteCode: selectedSiteCode || undefined,
             tarifReinscription: form.tarifReinscription,
             fraisInscription: fraisReinscriptionAmount ? String(fraisReinscriptionAmount) : form.fraisInscription,
             fraisScolarite: fraisReinscriptionAmount ? String(fraisReinscriptionAmount) : form.fraisScolarite,
@@ -826,6 +958,8 @@ function ReinscriptionPage() {
                   modelTitle: getFeeModelTitle(selectedFeeModel),
                   tarif: form.tarifReinscription,
                   total: fraisReinscriptionAmount,
+                  siteId: selectedSiteId ? Number(selectedSiteId) : undefined,
+                  site: selectedSiteName,
                   rows: buildReinscriptionStudentFeeRows(),
                 })
               : form.fraisReinscriptionDetails,
@@ -836,20 +970,18 @@ function ReinscriptionPage() {
       const data = await res.json();
 
       if (!res.ok) {
-        setMessage(data.message || "Erreur pendant la réinscription.");
+        setMessage(data.message || data.error || "Erreur pendant la réinscription.");
         return;
       }
 
       const newStudent = data.student || data;
       const newStudentId = newStudent?.id;
 
-      // Sécurité finale: mamorona StudentFee amin'ilay tarif sélectionné ihany
-      // mba ao amin'ny StudentDetails > FRAIS DE FORMATION dia io montant io no hiseho.
       await createStudentFeesFromSelectedTarif(newStudentId);
 
       window.location.href = `/user/student/${newStudentId}`;
-    } catch {
-      setMessage("Erreur serveur pendant la réinscription.");
+    } catch (error: any) {
+      setMessage(error?.message || "Erreur serveur pendant la réinscription.");
     } finally {
       setLoading(false);
     }
@@ -905,7 +1037,7 @@ function ReinscriptionPage() {
             <div className="bg-slate-950 px-4 py-5 text-white sm:px-6">
               <h1 className="text-xl font-black sm:text-2xl">Réinscription étudiant</h1>
               <p className="mt-1 text-xs text-slate-300">
-                Informations modifiables avec photo automatique.
+                Réinscription séparée par site et année scolaire.
               </p>
             </div>
 
@@ -921,6 +1053,35 @@ function ReinscriptionPage() {
             <div className="p-4 lg:p-6">
               {step === 1 && (
                 <div className="space-y-4">
+                  <Card title="Site de réinscription">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="block text-xs font-black text-slate-700">
+                        Site
+                        <select
+                          value={selectedSiteId}
+                          onChange={(e) => setSelectedSiteId(e.target.value)}
+                          className="mt-1 w-full rounded-xl border px-3 py-3 text-sm font-bold"
+                        >
+                          {sites.length === 0 && <option value="">Aucun site disponible</option>}
+                          {sites.map((site) => (
+                            <option key={site.id} value={site.id}>
+                              {site.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <div className="rounded-xl border bg-slate-50 px-3 py-3 text-sm font-bold text-slate-700">
+                        <div className="text-xs font-black uppercase text-slate-400">Site sélectionné</div>
+                        <div className="mt-1 text-slate-950">{selectedSiteName}</div>
+                      </div>
+                    </div>
+
+                    <p className="mt-3 text-xs font-semibold text-slate-500">
+                      La réinscription et les frais créés seront rattachés à ce site.
+                    </p>
+                  </Card>
+
                   <SearchBox
                     q={q}
                     setQ={searchStudents}
@@ -938,7 +1099,7 @@ function ReinscriptionPage() {
                             {selected.nom} {selected.prenoms}
                           </div>
                           <div className="text-xs font-bold text-slate-500">
-                            {selected.matricule} • {selected.anneeScolaire} • {selected.classe} • {selected.section}
+                            {selected.matricule} • Ancien site : {selected.site || "-"} • Nouveau site : {selectedSiteName} • {selected.anneeScolaire} • {selected.classe} • {selected.section}
                           </div>
                         </div>
                       </div>
@@ -1053,14 +1214,14 @@ function ReinscriptionPage() {
                               </div>
                             </>
                           ) : (
-                            <div className="mt-3 rounded-xl bg-white px-3 py-3 text-xs font-black text-slate-500 shadow-sm">
-                              Choisissez un tarif pour afficher les frais du modèle sélectionné.
+                            <div className="mt-3 rounded-xl bg-white px-3 py-3 text-xs font-black text-indigo-700 shadow-sm">
+                              Sélectionnez le tarif à appliquer.
                             </div>
                           )}
                         </>
                       ) : (
                         <div className="mt-3 rounded-xl bg-white px-3 py-3 text-xs font-black text-amber-700 shadow-sm">
-                          Aucun modèle trouvé. Créez d’abord un modèle dans Modèles de frais / fee-models pour cette classe.
+                          Aucun modèle trouvé. Créez d’abord un modèle dans Modèles de frais / fee-models pour cette classe et ce site.
                         </div>
                       )}
                     </div>
@@ -1103,7 +1264,7 @@ function ReinscriptionPage() {
                         {form.nom} {form.prenoms}
                       </div>
                       <div className="text-xs font-bold text-emerald-700">
-                        {form.matricule} • {form.anneeScolaire} • {form.classe} • {form.section}
+                        Site : {selectedSiteName} • {form.matricule} • {form.anneeScolaire} • {form.classe} • {form.section}
                       </div>
                       <div className="mt-1 text-xs font-black text-emerald-800">
                         Tarif choisi : {form.tarifReinscription || "Non choisi"} • Frais à créer : {formatAr(fraisReinscriptionAmount || totalTrainingFees)}
@@ -1156,7 +1317,6 @@ function ReinscriptionPage() {
   );
 }
 
-
 function TrainingFeesChooser({
   fees,
   selectedFeeIds,
@@ -1197,176 +1357,22 @@ function TrainingFeesChooser({
         const selectedAmount = getFeeAmountByTarif(fee, selectedTarif);
 
         return (
-          <label key={fee.id} className="grid cursor-pointer gap-3 border-b px-4 py-4 last:border-b-0 hover:bg-slate-50 md:grid-cols-[60px_1fr_130px_130px] md:items-center">
+          <label key={fee.id} className="grid cursor-pointer gap-3 border-b px-4 py-3 text-sm font-bold last:border-b-0 md:grid-cols-[60px_1fr_130px_130px] md:items-center">
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={() => onToggle(fee.id)}
+              className="h-5 w-5 accent-slate-950"
+            />
             <div>
-              <input type="checkbox" checked={checked} onChange={() => onToggle(fee.id)} className="h-5 w-5 rounded border-slate-300" />
+              <div className="font-black text-slate-900">{getFeeLabel(fee)}</div>
+              <div className="text-xs text-slate-500">{fee.code || "-"}</div>
             </div>
-
-            <div>
-              <div className="text-sm font-black text-slate-900">{getFeeLabel(fee)}</div>
-              {fee.code && <div className="mt-1 text-[11px] font-bold text-slate-500">Code : {fee.code}</div>}
-            </div>
-
-            <div className="text-left text-sm font-black text-slate-600 md:text-right">
-              <span className="md:hidden">Principal : </span>{formatAr(principal)}
-            </div>
-
-            <div className="text-left text-sm font-black text-emerald-700 md:text-right">
-              <span className="md:hidden">Montant choisi : </span>{formatAr(selectedAmount)}
-            </div>
+            <div className="text-right text-slate-600">{formatAr(principal)}</div>
+            <div className="text-right font-black text-slate-950">{formatAr(selectedAmount)}</div>
           </label>
         );
       })}
-    </div>
-  );
-}
-
-function getFeeModelTitle(model: FeeModel) {
-  return model.title || model.name || model.libelle || `Modèle #${model.id}`;
-}
-
-function getFeeModelRows(model: FeeModel): TrainingFee[] {
-  const rows = model.tariffs || model.fees || [];
-
-  return rows.map((tariff) => ({
-    id: tariff.id,
-    libelle: tariff.libelle || tariff.label || tariff.name || "Frais",
-    label: tariff.label || tariff.libelle || tariff.name || "Frais",
-    name: tariff.name || tariff.libelle || tariff.label || "Frais",
-    code: tariff.code || "",
-    montant: tariff.montant ?? tariff.amount ?? 0,
-    amount: tariff.amount ?? tariff.montant ?? 0,
-    specials: normalizeModelSpecials(tariff.specials),
-    tarifsSpeciaux: tariff.tarifsSpeciaux || null,
-  }));
-}
-
-function getFeeModelTotal(model: FeeModel, tarif: string) {
-  return getFeeModelRows(model).reduce((sum, fee) => sum + getFeeAmountByTarif(fee, tarif), 0);
-}
-
-function findBestFeeModel(models: FeeModel[]) {
-  return (
-    models.find((model) => {
-      const text = getFeeModelTitle(model).toLowerCase();
-      return text.includes("reinscription") || text.includes("réinscription") || text.includes("ancien");
-    }) || models[0] || null
-  );
-}
-
-function normalizeModelSpecials(raw: FeeTariff["specials"]): TarifsSpeciaux {
-  if (Array.isArray(raw)) {
-    return raw.reduce<TarifsSpeciaux>((acc, item) => {
-      if (item.name?.trim()) acc[item.name.trim()] = item.amount;
-      return acc;
-    }, {});
-  }
-
-  if (typeof raw === "string") {
-    try {
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === "object" ? parsed : {};
-    } catch {
-      return {};
-    }
-  }
-
-  return raw && typeof raw === "object" ? raw : {};
-}
-
-function findBestReinscriptionFee(fees: TrainingFee[]) {
-  return (
-    fees.find((fee) => {
-      const text = `${getFeeLabel(fee)} ${fee.code || ""}`.toLowerCase();
-      return text.includes("reinscription") || text.includes("réinscription") || text.includes("ancien");
-    }) || fees[0] || null
-  );
-}
-
-function getFeeLabel(fee: TrainingFee) {
-  return fee.libelle || fee.label || fee.name || "Frais";
-}
-
-function parseAmount(value: number | string | null | undefined) {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const cleaned = value.replace(/\s/g, "").replace(/,/g, ".");
-    const n = Number(cleaned);
-    return Number.isFinite(n) ? n : 0;
-  }
-  return 0;
-}
-
-function getPrincipalAmount(fee: TrainingFee) {
-  return parseAmount(fee.montantPrincipal ?? fee.montant ?? fee.amount);
-}
-
-function getSpecialTarifs(fee: TrainingFee): TarifsSpeciaux {
-  const raw = fee.tarifsSpeciaux ?? fee.specials ?? {};
-
-  if (Array.isArray(raw)) {
-    return raw.reduce<TarifsSpeciaux>((acc, item: any) => {
-      if (item?.name?.trim()) acc[item.name.trim()] = item.amount;
-      return acc;
-    }, {});
-  }
-
-  if (typeof raw === "string") {
-    try {
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === "object" ? parsed : {};
-    } catch {
-      return {};
-    }
-  }
-
-  return raw && typeof raw === "object" ? raw : {};
-}
-
-function hasAmountForTarif(fee: TrainingFee, tarif: string) {
-  if (!tarif) return false;
-  if (tarif === "Principal") return getPrincipalAmount(fee) > 0;
-
-  const specials = getSpecialTarifs(fee);
-  return Object.prototype.hasOwnProperty.call(specials, tarif);
-}
-
-function getFeeAmountByTarif(fee: TrainingFee, tarif: string) {
-  if (!tarif) return 0;
-  if (tarif === "Principal") return getPrincipalAmount(fee);
-
-  const specials = getSpecialTarifs(fee);
-
-  // TENA ZAVA-DEHIBE:
-  // Raha "Ancien" na tarif hafa no voafidy dia io montant io ihany no ampiasaina.
-  // Tsy miverina automatique amin'ny Principal intsony, mba tsy hiditra montant diso.
-  if (Object.prototype.hasOwnProperty.call(specials, tarif)) {
-    return parseAmount(specials[tarif]);
-  }
-
-  return 0;
-}
-
-function formatAr(value: number) {
-  return `${Math.round(value || 0).toLocaleString("fr-FR")} Ar`;
-}
-
-function StudentPhoto({ student }: { student: Student }) {
-  const initials = `${student.nom?.[0] || ""}${student.prenoms?.[0] || ""}`.toUpperCase();
-
-  if (student.photoUrl) {
-    return (
-      <img
-        src={student.photoUrl}
-        alt={`${student.nom} ${student.prenoms}`}
-        className="h-24 w-24 rounded-3xl border-4 border-white object-cover shadow-lg"
-      />
-    );
-  }
-
-  return (
-    <div className="flex h-24 w-24 items-center justify-center rounded-3xl border-4 border-white bg-slate-900 text-2xl font-black text-white shadow-lg">
-      {initials || "?"}
     </div>
   );
 }
@@ -1406,16 +1412,27 @@ function SelectObject({ label, value, onChange, options }: { label: string; valu
 function SearchBox({ q, setQ, results, selectStudent }: { q: string; setQ: (v: string) => void; results: Student[]; selectStudent: (s: Student) => void }) {
   return (
     <div className="relative rounded-2xl border bg-white p-4 shadow-sm">
-      <label className="block text-sm font-black">Rechercher étudiant</label>
-      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Matricule, nom ou prénom..." className="mt-2 w-full rounded-xl border px-3 py-3 text-sm font-bold" />
+      <label className="block text-xs font-black text-slate-700">Rechercher l’étudiant à réinscrire</label>
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Matricule, nom ou prénom..."
+        className="mt-1 w-full rounded-xl border px-3 py-3 text-sm font-bold outline-none focus:ring-4 focus:ring-slate-200"
+      />
+
       {results.length > 0 && (
-        <div className="absolute left-4 right-4 top-[92px] z-50 max-h-[320px] overflow-auto rounded-xl border bg-white shadow-xl">
-          {results.map((s) => (
-            <button key={s.id} type="button" onClick={() => selectStudent(s)} className="flex w-full items-center gap-3 border-b px-4 py-3 text-left text-sm hover:bg-slate-50">
-              <StudentPhotoSmall student={s} />
+        <div className="absolute left-4 right-4 top-[88px] z-30 max-h-[280px] overflow-auto rounded-2xl border bg-white shadow-2xl">
+          {results.map((student) => (
+            <button
+              key={student.id}
+              type="button"
+              onClick={() => selectStudent(student)}
+              className="flex w-full items-center gap-3 border-b px-4 py-3 text-left hover:bg-slate-50"
+            >
+              <StudentPhoto student={student} small />
               <div>
-                <b>{s.matricule}</b> — {s.nom} {s.prenoms}
-                <div className="text-xs text-slate-500">{s.anneeScolaire} • {s.classe} • {s.section}</div>
+                <div className="text-sm font-black text-slate-900">{student.matricule} — {student.nom} {student.prenoms}</div>
+                <div className="text-xs font-bold text-slate-500">{student.site || "-"} • {student.anneeScolaire} • {student.classe} • {student.section}</div>
               </div>
             </button>
           ))}
@@ -1425,15 +1442,116 @@ function SearchBox({ q, setQ, results, selectStudent }: { q: string; setQ: (v: s
   );
 }
 
-function StudentPhotoSmall({ student }: { student: Student }) {
+function StudentPhoto({ student, small = false }: { student: Student; small?: boolean }) {
+  const size = small ? "h-10 w-10" : "h-20 w-20";
+
   if (student.photoUrl) {
-    return <img src={student.photoUrl} alt="" className="h-10 w-10 rounded-xl object-cover" />;
+    return <img src={student.photoUrl} alt={student.nom} className={`${size} shrink-0 rounded-2xl border object-cover shadow-sm`} />;
   }
 
-  return <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 text-xs font-black text-white">{student.nom?.[0] || "?"}</div>;
+  return (
+    <div className={`${size} grid shrink-0 place-items-center rounded-2xl border bg-white text-3xl shadow-sm`}>
+      👤
+    </div>
+  );
 }
 
 function toInputDate(value?: string | null) {
   if (!value) return "";
-  return new Date(value).toISOString().slice(0, 10);
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+}
+
+function toNumber(value: unknown) {
+  const n = Number(
+    String(value ?? "")
+      .replace(/\s/g, "")
+      .replace(",", ".")
+  );
+  return Number.isFinite(n) ? n : 0;
+}
+
+function formatAr(value: unknown) {
+  return `${toNumber(value).toLocaleString("fr-FR")} Ar`;
+}
+
+function getFeeLabel(fee: TrainingFee | FeeTariff | any) {
+  return String(fee.libelle || fee.label || fee.name || fee.code || "Frais");
+}
+
+function getPrincipalAmount(fee: TrainingFee | FeeTariff | any) {
+  return toNumber(fee.montantPrincipal ?? fee.montant ?? fee.amount ?? 0);
+}
+
+function getSpecialTarifs(fee: TrainingFee | FeeTariff | any): TarifsSpeciaux {
+  const raw = fee?.tarifsSpeciaux ?? fee?.specials;
+
+  if (!raw) return {};
+
+  if (Array.isArray(raw)) {
+    return raw.reduce((acc: TarifsSpeciaux, item: FeeSpecialTariff) => {
+      const name = String(item?.name || "").trim();
+      if (name) acc[name] = item.amount;
+      return acc;
+    }, {});
+  }
+
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  return raw && typeof raw === "object" ? raw : {};
+}
+
+function normalizeModelSpecials(raw: FeeTariff["specials"]) {
+  if (!raw) return {};
+
+  if (Array.isArray(raw)) {
+    return raw.reduce((acc: TarifsSpeciaux, item) => {
+      const name = String(item?.name || "").trim();
+      if (name) acc[name] = item.amount;
+      return acc;
+    }, {});
+  }
+
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  return raw;
+}
+
+function getFeeAmountByTarif(fee: TrainingFee | FeeTariff | any, tarifName: string) {
+  const tarif = String(tarifName || "Principal").trim();
+
+  if (!tarif || tarif.toLowerCase() === "principal") {
+    return getPrincipalAmount(fee);
+  }
+
+  const specials = getSpecialTarifs(fee);
+  return toNumber(specials[tarif] ?? getPrincipalAmount(fee));
+}
+
+function hasAmountForTarif(fee: TrainingFee | FeeTariff | any, tarifName: string) {
+  return getFeeAmountByTarif(fee, tarifName) > 0;
+}
+
+function getFeeModelTitle(model: FeeModel | null | undefined) {
+  if (!model) return "";
+  return String(model.title || model.name || model.libelle || `Modèle ${model.id}`);
+}
+
+function findBestFeeModel(models: FeeModel[]) {
+  return models[0] || null;
 }

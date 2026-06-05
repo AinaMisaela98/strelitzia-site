@@ -2,17 +2,16 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthUser } from "@/lib/auth";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function text(value: unknown) {
   return String(value ?? "").trim();
 }
 
-function amountToNumber(value: unknown) {
-  const n = Number(
-    String(value ?? "")
-      .replace(/\s/g, "")
-      .replace(/[^\d.-]/g, "")
-  );
-
+function toNumber(value: unknown) {
+  const cleaned = String(value ?? "0").replace(/[^\d.-]/g, "");
+  const n = Number(cleaned);
   return Number.isFinite(n) ? n : 0;
 }
 
@@ -24,204 +23,547 @@ function safeDate(value: unknown) {
   return Number.isNaN(d.getTime()) ? new Date() : d;
 }
 
-async function getActiveSchoolYear() {
-  const activeYear = await prisma.schoolYear.findFirst({
+async function getActiveYear() {
+  const year = await prisma.schoolYear.findFirst({
     where: { active: true },
     select: { name: true },
   });
 
-  return activeYear?.name || "2025-2026";
+  return year?.name || "2025-2026";
 }
 
-async function resolveSchoolYear(input?: unknown) {
-  return text(input) || (await getActiveSchoolYear());
+function getSchoolYearFromUrl(req: Request) {
+  const url = new URL(req.url);
+
+  return (
+    text(url.searchParams.get("schoolYearName")) ||
+    text(url.searchParams.get("anneeScolaire")) ||
+    text(url.searchParams.get("year"))
+  );
 }
 
-function makeStudentLabel(student?: any | null) {
-  if (!student) return "-";
-  return `${student.nom || ""} ${student.prenoms || ""}`.trim() || "-";
+function getSchoolYearFromBody(body: any) {
+  return (
+    text(body?.schoolYearName) ||
+    text(body?.anneeScolaire) ||
+    text(body?.year)
+  );
 }
 
-function makeFeeLabel(fee?: any | null, movement?: any | null) {
-  if (fee?.libelle && fee?.code) return `${fee.code} - ${fee.libelle}`;
-  if (fee?.libelle) return fee.libelle;
-  if (fee?.code) return fee.code;
+async function resolveSchoolYearName(value?: string) {
+  return text(value) || (await getActiveYear());
+}
 
-  const desc = text(movement?.description);
-  if (desc) return desc;
+async function getDefaultSite() {
+  let site = await prisma.site.findFirst({
+    where: { active: true },
+    orderBy: { id: "asc" },
+    select: { id: true, name: true, code: true },
+  });
 
-  return "-";
+  if (!site) {
+    site = await prisma.site.create({
+      data: {
+        name: "Strelitzia School",
+        code: "STRELITZIA",
+        active: true,
+      },
+      select: { id: true, name: true, code: true },
+    });
+  }
+
+  return site;
+}
+
+async function resolveSiteFromBody(body: any) {
+  const siteId = Number(body?.siteId || 0);
+  const siteName = text(body?.site || body?.siteName);
+  const siteCode = text(body?.siteCode);
+
+  if (siteId) {
+    const site = await prisma.site.findUnique({
+      where: { id: siteId },
+      select: { id: true, name: true, code: true },
+    });
+
+    if (site) return site;
+  }
+
+  if (siteCode) {
+    const site = await prisma.site.findUnique({
+      where: { code: siteCode },
+      select: { id: true, name: true, code: true },
+    });
+
+    if (site) return site;
+  }
+
+  if (siteName) {
+    const site = await prisma.site.findFirst({
+      where: { name: siteName },
+      select: { id: true, name: true, code: true },
+    });
+
+    if (site) return site;
+  }
+
+  return getDefaultSite();
+}
+
+async function resolveSiteFromUrl(req: Request) {
+  const url = new URL(req.url);
+
+  return resolveSiteFromBody({
+    siteId: url.searchParams.get("siteId"),
+    site: url.searchParams.get("site"),
+    siteName: url.searchParams.get("siteName"),
+    siteCode: url.searchParams.get("siteCode"),
+  });
+}
+
+function normalizeMovementType(value: any) {
+  const raw = text(value).toUpperCase();
+
+  if (
+    raw === "DEBIT" ||
+    raw === "SORTIE" ||
+    raw === "DEPENSE" ||
+    raw === "DÉPENSE"
+  ) {
+    return "SORTIE";
+  }
+
+  if (
+    raw === "CREDIT" ||
+    raw === "ENTREE" ||
+    raw === "ENTRÉE" ||
+    raw === "RECETTE"
+  ) {
+    return "ENTREE";
+  }
+
+  return "ENTREE";
+}
+
+function normalizeCategory(value: any, movementType: string) {
+  const raw = text(value).toUpperCase();
+
+  if (raw) return raw;
+
+  return movementType === "SORTIE" ? "SORTIE_MANUELLE" : "ENTREE_MANUELLE";
+}
+
+function getAmountFromBody(body: any) {
+  const movementType = normalizeMovementType(
+    body?.movementType || body?.type || body?.operation || body?.sens || body?.nature
+  );
+
+  if (movementType === "SORTIE") {
+    return (
+      toNumber(body?.amount) ||
+      toNumber(body?.montant) ||
+      toNumber(body?.debit)
+    );
+  }
+
+  return (
+    toNumber(body?.amount) ||
+    toNumber(body?.montant) ||
+    toNumber(body?.credit)
+  );
+}
+
+function modelFieldMetas(modelName: string) {
+  const runtimeModel = (prisma as any)?._runtimeDataModel?.models?.[modelName];
+  return runtimeModel?.fields || [];
+}
+
+function modelFieldNames(modelName: string) {
+  return modelFieldMetas(modelName).map((field: any) => field.name) as string[];
+}
+
+function modelHasField(modelName: string, fieldName: string) {
+  return modelFieldNames(modelName).includes(fieldName);
+}
+
+function addSiteWhere(modelName: string, where: any, site: any) {
+  if (!site) return where;
+
+  if (modelHasField(modelName, "siteId")) {
+    where.siteId = Number(site.id);
+  } else if (modelHasField(modelName, "site")) {
+    where.site = String(site.name || "");
+  }
+
+  return where;
+}
+
+function addSiteData(modelName: string, data: any, site: any) {
+  if (!site) return data;
+
+  if (modelHasField(modelName, "siteId")) {
+    data.siteId = Number(site.id);
+  }
+
+  if (modelHasField(modelName, "site")) {
+    data.site = String(site.name || "");
+  }
+
+  return data;
+}
+
+function getRelationInclude(modelName: string) {
+  const include: any = {};
+
+  if (modelHasField(modelName, "treasury")) include.treasury = true;
+
+  if (modelHasField(modelName, "student")) {
+    include.student = {
+      select: {
+        id: true,
+        matricule: true,
+        nom: true,
+        prenoms: true,
+        classe: true,
+        section: true,
+      },
+    };
+  }
+
+  if (modelHasField(modelName, "studentFee")) {
+    include.studentFee = {
+      select: {
+        id: true,
+        libelle: true,
+        code: true,
+        montantTotal: true,
+        montantPaye: true,
+        reste: true,
+        status: true,
+        studentId: true,
+        trainingFeeId: true,
+      },
+    };
+  }
+
+  if (modelHasField(modelName, "trainingFee")) {
+    include.trainingFee = {
+      select: {
+        id: true,
+        libelle: true,
+        code: true,
+        montant: true,
+      },
+    };
+  }
+
+  return include;
+}
+
+async function getStudentInfo(studentId: number) {
+  if (!studentId) return null;
+
+  try {
+    return await prisma.student.findUnique({
+      where: { id: studentId },
+      select: {
+        id: true,
+        matricule: true,
+        nom: true,
+        prenoms: true,
+        classe: true,
+        section: true,
+      },
+    });
+  } catch {
+    return null;
+  }
+}
+
+function buildStudentName(student: any, body: any = {}) {
+  return (
+    text(body.studentName) ||
+    text(body.nomComplet) ||
+    `${text(student?.nom)} ${text(student?.prenoms)}`.trim() ||
+    "-"
+  );
+}
+
+function buildStudentMatricule(student: any, body: any = {}) {
+  return text(body.studentMatricule || body.matricule) || text(student?.matricule) || "-";
+}
+
+function buildStudentClasse(student: any, body: any = {}) {
+  const direct =
+    text(body.studentClassLabel) ||
+    text(body.studentClasse) ||
+    text(body.studentClass) ||
+    text(body.className);
+
+  if (direct) return direct;
+
+  const classe = text(student?.classe);
+  const section = text(student?.section);
+
+  if (!classe && !section) return "-";
+  return `${classe || "-"}${section ? ` / ${section}` : ""}`;
+}
+
+function buildFeeCode(body: any = {}, movement: any = {}) {
+  return (
+    text(body.feeCode) ||
+    text(body.code) ||
+    text(body.studentFee?.code) ||
+    text(body.trainingFee?.code) ||
+    text(movement.studentFee?.code) ||
+    text(movement.trainingFee?.code) ||
+    ""
+  );
+}
+
+function buildFeeLabel(body: any = {}, movement: any = {}) {
+  return (
+    text(body.feeLabel) ||
+    text(body.feeLibelle) ||
+    text(body.libelleFrais) ||
+    text(body.studentFee?.libelle) ||
+    text(body.trainingFee?.libelle) ||
+    text(movement.studentFee?.libelle) ||
+    text(movement.trainingFee?.libelle) ||
+    ""
+  );
+}
+
+function buildMotifOnly(body: any, movementType: string, category: string) {
+  const normalizedCategory = text(category).toUpperCase();
+  const feeCode = buildFeeCode(body);
+  const feeLabel = buildFeeLabel(body);
+
+  if (normalizedCategory === "PAIEMENT_FRAIS") {
+    return feeCode
+      ? `Paiement frais de formation - ${feeCode}`
+      : feeLabel
+        ? `Paiement frais de formation - ${feeLabel}`
+        : "Paiement frais de formation";
+  }
+
+  if (normalizedCategory === "ANNULATION_PAIEMENT_FRAIS") {
+    return feeCode
+      ? `Annulation frais de formation - ${feeCode}`
+      : feeLabel
+        ? `Annulation frais de formation - ${feeLabel}`
+        : "Annulation frais de formation";
+  }
+
+  return (
+    text(body.motif) ||
+    text(body.description) ||
+    text(body.libelle) ||
+    text(body.label) ||
+    (movementType === "SORTIE" ? "Sortie manuelle" : "Entrée manuelle")
+  );
+}
+
+function addMovementStudentData(data: any, student: any, body: any = {}) {
+  const studentName = buildStudentName(student, body);
+  const studentMatricule = buildStudentMatricule(student, body);
+  const studentClasse = buildStudentClasse(student, body);
+
+  if (modelHasField("TreasuryMovement", "studentName")) data.studentName = studentName;
+  if (modelHasField("TreasuryMovement", "studentMatricule")) data.studentMatricule = studentMatricule;
+  if (modelHasField("TreasuryMovement", "studentClasse")) data.studentClasse = studentClasse;
+  if (modelHasField("TreasuryMovement", "studentClassLabel")) data.studentClassLabel = studentClasse;
+  if (modelHasField("TreasuryMovement", "studentSection")) {
+    data.studentSection = text(body.studentSection) || text(student?.section) || null;
+  }
+
+  const feeCode = buildFeeCode(body);
+  const feeLabel = buildFeeLabel(body);
+
+  if (feeCode && modelHasField("TreasuryMovement", "feeCode")) data.feeCode = feeCode;
+  if (feeLabel && modelHasField("TreasuryMovement", "feeLabel")) data.feeLabel = feeLabel;
+
+  return data;
+}
+
+function formatMovementForClient(movement: any) {
+  const type = normalizeMovementType(movement?.movementType);
+  const amount = Number(movement?.amount || 0);
+
+  const studentName =
+    text(movement?.studentName) ||
+    `${text(movement?.student?.nom)} ${text(movement?.student?.prenoms)}`.trim() ||
+    "-";
+
+  const studentMatricule =
+    text(movement?.studentMatricule) ||
+    text(movement?.student?.matricule) ||
+    "-";
+
+  const classe = text(movement?.studentClasse) || text(movement?.student?.classe);
+  const section = text(movement?.studentSection) || text(movement?.student?.section);
+  const studentClassLabel =
+    text(movement?.studentClassLabel) ||
+    (classe || section ? `${classe || "-"}${section ? ` / ${section}` : ""}` : "-");
+
+  const feeCode =
+    text(movement?.feeCode) ||
+    text(movement?.studentFee?.code) ||
+    text(movement?.trainingFee?.code) ||
+    "";
+
+  const feeLabel =
+    text(movement?.feeLabel) ||
+    text(movement?.studentFee?.libelle) ||
+    text(movement?.trainingFee?.libelle) ||
+    "";
+
+  const category = text(movement?.category).toUpperCase();
+  const motif =
+    category === "PAIEMENT_FRAIS"
+      ? feeCode
+        ? `Paiement frais de formation - ${feeCode}`
+        : feeLabel
+          ? `Paiement frais de formation - ${feeLabel}`
+          : "Paiement frais de formation"
+      : category === "ANNULATION_PAIEMENT_FRAIS"
+        ? feeCode
+          ? `Annulation frais de formation - ${feeCode}`
+          : feeLabel
+            ? `Annulation frais de formation - ${feeLabel}`
+            : "Annulation frais de formation"
+        : text(movement?.motif || movement?.description || movement?.libelle);
+
+  return {
+    ...movement,
+    type: type === "SORTIE" ? "DEBIT" : "CREDIT",
+    debit: type === "SORTIE" ? amount : 0,
+    credit: type === "ENTREE" ? amount : 0,
+    montant: amount,
+
+    // Champs propres pour la page Trésorerie mouvements
+    studentName,
+    studentMatricule,
+    studentClasse: classe || "-",
+    studentSection: section || "",
+    studentClassLabel,
+    feeCode,
+    feeLabel,
+    motif,
+    libelle: motif,
+    description: motif,
+  };
 }
 
 async function findTreasury({
   treasuryId,
   treasuryName,
   schoolYearName,
+  site,
 }: {
   treasuryId?: number;
   treasuryName?: string;
   schoolYearName: string;
+  site: any;
 }) {
-  if (treasuryId) {
-    const treasury = await prisma.treasury.findFirst({
-      where: {
-        id: treasuryId,
-        active: true,
-        schoolYearName,
-      },
+  const id = Number(treasuryId || 0);
+  const name = text(treasuryName);
+
+  // Correction mouvement manuel:
+  // Ny ID treasury dia unique ao amin'ny base, ka raha voafidy amin'ny dropdown ilay id
+  // dia tsy tokony hosakanana amin'ny filtre site/year tery loatra.
+  // Izay no niteraka: "Trésorerie obligatoire ou introuvable..."
+  if (id) {
+    const byId = await prisma.treasury.findUnique({
+      where: { id },
     });
 
-    if (treasury) return treasury;
+    if (byId) return byId;
   }
 
-  if (treasuryName) {
-    const treasury = await prisma.treasury.findFirst({
+  // Fallback par nom, raha tsy tonga ny id fa tonga ny anarana.
+  if (name) {
+    const byName = await prisma.treasury.findFirst({
       where: {
-        name: treasuryName,
+        name,
         active: true,
-        schoolYearName,
       },
+      orderBy: { id: "asc" },
     });
 
-    if (treasury) return treasury;
+    if (byName) return byName;
   }
 
-  return null;
+  // Fallback principal amin'ny site/year raha mbola tsy hita.
+  const fallbackWhere: any = { active: true };
+
+  if (modelHasField("Treasury", "schoolYearName")) {
+    fallbackWhere.schoolYearName = schoolYearName;
+  }
+
+  addSiteWhere("Treasury", fallbackWhere, site);
+
+  let principal = await prisma.treasury.findFirst({
+    where: {
+      ...fallbackWhere,
+      isPrincipal: true,
+    },
+    orderBy: { id: "asc" },
+  });
+
+  if (principal) return principal;
+
+  const fallback = await prisma.treasury.findFirst({
+    where: fallbackWhere,
+    orderBy: { id: "asc" },
+  });
+
+  if (fallback) return fallback;
+
+  // Dernier fallback global raha tsy mitovy site/year ny ancien trésorerie.
+  principal = await prisma.treasury.findFirst({
+    where: { active: true, isPrincipal: true },
+    orderBy: { id: "asc" },
+  });
+
+  if (principal) return principal;
+
+  return prisma.treasury.findFirst({
+    where: { active: true },
+    orderBy: { id: "asc" },
+  });
 }
 
-async function enrichMovements(rawMovements: any[]) {
-  const studentIds = new Set<number>();
-  const studentFeeIds = new Set<number>();
-  const trainingFeeIds = new Set<number>();
+function computeTotals(movements: any[]) {
+  let totalCredit = 0;
+  let totalDebit = 0;
 
-  for (const movement of rawMovements) {
-    if (movement.studentId) studentIds.add(Number(movement.studentId));
-    if (movement.studentFeeId) studentFeeIds.add(Number(movement.studentFeeId));
-    if (movement.trainingFeeId) trainingFeeIds.add(Number(movement.trainingFeeId));
+  for (const movement of movements) {
+    const type = normalizeMovementType(movement?.movementType);
+    const amount = Number(movement?.amount || 0);
+
+    if (type === "SORTIE") {
+      totalDebit += amount;
+    } else {
+      totalCredit += amount;
+    }
   }
 
-  const studentFees = studentFeeIds.size
-    ? await prisma.studentFee.findMany({
-        where: {
-          id: { in: Array.from(studentFeeIds) },
-        },
-        select: {
-          id: true,
-          studentId: true,
-          trainingFeeId: true,
-          schoolYearName: true,
-          libelle: true,
-          code: true,
-          montantTotal: true,
-          montantPaye: true,
-          reste: true,
-          status: true,
-          paidAt: true,
-        },
-      })
-    : [];
+  const solde = totalCredit - totalDebit;
 
-  const studentFeeMap = new Map(studentFees.map((item) => [Number(item.id), item]));
-
-  for (const movement of rawMovements) {
-    const fee = movement.studentFeeId
-      ? studentFeeMap.get(Number(movement.studentFeeId))
-      : null;
-
-    if (fee?.studentId) studentIds.add(Number(fee.studentId));
-    if (fee?.trainingFeeId) trainingFeeIds.add(Number(fee.trainingFeeId));
-  }
-
-  const movementsSchoolYears = Array.from(
-    new Set(rawMovements.map((m) => text(m.schoolYearName)).filter(Boolean))
-  );
-
-  const students = studentIds.size
-    ? await prisma.student.findMany({
-        where: {
-          id: { in: Array.from(studentIds) },
-          ...(movementsSchoolYears.length === 1
-            ? { anneeScolaire: movementsSchoolYears[0] }
-            : {}),
-        },
-        select: {
-          id: true,
-          matricule: true,
-          nom: true,
-          prenoms: true,
-          classe: true,
-          section: true,
-          anneeScolaire: true,
-        },
-      })
-    : [];
-
-  const trainingFees = trainingFeeIds.size
-    ? await prisma.trainingFee.findMany({
-        where: {
-          id: { in: Array.from(trainingFeeIds) },
-          ...(movementsSchoolYears.length === 1
-            ? { schoolYearName: movementsSchoolYears[0] }
-            : {}),
-        },
-        select: {
-          id: true,
-          libelle: true,
-          code: true,
-          montant: true,
-          classe: true,
-          schoolYearName: true,
-        },
-      })
-    : [];
-
-  const studentMap = new Map(students.map((student) => [Number(student.id), student]));
-  const trainingFeeMap = new Map(trainingFees.map((fee) => [Number(fee.id), fee]));
-
-  return rawMovements.map((movement) => {
-    const studentFee = movement.studentFeeId
-      ? studentFeeMap.get(Number(movement.studentFeeId))
-      : null;
-
-    const trainingFeeId = Number(
-      movement.trainingFeeId || studentFee?.trainingFeeId || 0
-    );
-
-    const trainingFee = trainingFeeId ? trainingFeeMap.get(trainingFeeId) : null;
-
-    const finalStudentId = Number(movement.studentId || studentFee?.studentId || 0);
-    const student = finalStudentId ? studentMap.get(finalStudentId) : null;
-
-    const feeCode = studentFee?.code || trainingFee?.code || "";
-    const feeLibelle = studentFee?.libelle || trainingFee?.libelle || "";
-    const feeLabel = makeFeeLabel(studentFee || trainingFee, movement);
-
-    return {
-      ...movement,
-      studentId: finalStudentId || movement.studentId || null,
-      student,
-      studentName: makeStudentLabel(student),
-      studentMatricule: student?.matricule || "-",
-      studentClasse: student?.classe || "-",
-      studentSection: student?.section || "-",
-      studentLabel: student
-        ? `${student.matricule || "-"} - ${makeStudentLabel(student)}`
-        : "-",
-      trainingFeeId: trainingFeeId || null,
-      studentFee,
-      trainingFee,
-      feeCode,
-      feeLibelle,
-      feeLabel,
-      treasuryName: movement.treasury?.name || "-",
-      treasuryType: movement.treasury?.type || "-",
-      amount: Number(movement.amount || 0),
-    };
-  });
+  return {
+    totalCredit,
+    totalDebit,
+    solde,
+    balance: solde,
+    soldeReel: solde,
+    isNegative: solde < 0,
+  };
 }
 
 export async function GET(req: Request) {
   const user = await getAuthUser();
+
   if (!user) {
     return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   }
@@ -229,90 +571,82 @@ export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
 
-    const schoolYearName = await resolveSchoolYear(
-      url.searchParams.get("schoolYearName") ||
-        url.searchParams.get("anneeScolaire") ||
-        url.searchParams.get("year")
-    );
+    const schoolYearName = await resolveSchoolYearName(getSchoolYearFromUrl(req));
+    const site = await resolveSiteFromUrl(req);
 
     const treasuryId = Number(url.searchParams.get("treasuryId") || 0);
     const studentId = Number(url.searchParams.get("studentId") || 0);
-    const studentFeeId = Number(url.searchParams.get("studentFeeId") || 0);
     const trainingFeeId = Number(url.searchParams.get("trainingFeeId") || 0);
-    const movementType = text(url.searchParams.get("movementType")).toUpperCase();
+    const studentFeeId = Number(url.searchParams.get("studentFeeId") || 0);
+    const movementType = text(url.searchParams.get("movementType"));
     const category = text(url.searchParams.get("category"));
-    const q = text(url.searchParams.get("q")).toLowerCase();
+    const q = text(url.searchParams.get("q"));
 
-    const limitParam = Number(url.searchParams.get("limit") || 200);
-    const limit = Math.min(Math.max(limitParam || 200, 1), 1000);
+    const dateFrom = text(url.searchParams.get("dateFrom") || url.searchParams.get("from"));
+    const dateTo = text(url.searchParams.get("dateTo") || url.searchParams.get("to"));
 
-    const movements = await prisma.treasuryMovement.findMany({
-      where: {
-        schoolYearName,
-        ...(treasuryId ? { treasuryId } : {}),
-        ...(studentId ? { studentId } : {}),
-        ...(studentFeeId ? { studentFeeId } : {}),
-        ...(trainingFeeId ? { trainingFeeId } : {}),
-        ...(movementType ? { movementType } : {}),
-        ...(category ? { category } : {}),
-      },
-      include: {
-        treasury: true,
-      },
-      orderBy: { createdAt: "desc" },
-      take: limit,
-    });
+    const where: any = {
+      schoolYearName,
+    };
 
-    let rows = await enrichMovements(movements);
+    addSiteWhere("TreasuryMovement", where, site);
 
-    if (q) {
-      rows = rows.filter((row) => {
-        const haystack = [
-          row.reference,
-          row.description,
-          row.category,
-          row.movementType,
-          row.treasuryName,
-          row.studentName,
-          row.studentMatricule,
-          row.studentClasse,
-          row.studentSection,
-          row.feeCode,
-          row.feeLibelle,
-          row.feeLabel,
-          row.createdBy,
-        ]
-          .map((item) => text(item).toLowerCase())
-          .join(" ");
+    if (treasuryId) where.treasuryId = treasuryId;
+    if (studentId) where.studentId = studentId;
+    if (trainingFeeId) where.trainingFeeId = trainingFeeId;
+    if (studentFeeId) where.studentFeeId = studentFeeId;
+    if (movementType) where.movementType = normalizeMovementType(movementType);
+    if (category) where.category = category;
 
-        return haystack.includes(q);
-      });
+    if (dateFrom || dateTo) {
+      where.createdAt = {};
+
+      if (dateFrom) {
+        where.createdAt.gte = new Date(`${dateFrom}T00:00:00`);
+      }
+
+      if (dateTo) {
+        where.createdAt.lte = new Date(`${dateTo}T23:59:59`);
+      }
     }
 
-    const totalEntree = rows
-      .filter((row) => row.movementType === "ENTREE")
-      .reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    if (q) {
+      where.OR = [
+        { description: { contains: q, mode: "insensitive" } },
+        { reference: { contains: q, mode: "insensitive" } },
+        { category: { contains: q, mode: "insensitive" } },
+      ];
+    }
 
-    const totalSortie = rows
-      .filter((row) => row.movementType === "SORTIE")
-      .reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const movements = await prisma.treasuryMovement.findMany({
+      where,
+      include: getRelationInclude("TreasuryMovement"),
+      orderBy: [
+        { createdAt: "desc" },
+        { id: "desc" },
+      ],
+    });
+
+    const formatted = movements.map(formatMovementForClient);
+    const totals = computeTotals(movements);
 
     return NextResponse.json({
-      movements: rows,
-      rows,
-      totals: {
-        totalEntree,
-        totalSortie,
-        solde: totalEntree - totalSortie,
-        soldeGlobal: totalEntree - totalSortie,
-      },
+      movements: formatted,
+      treasuryMovements: formatted,
+      data: formatted,
+      totals,
+      siteId: site.id,
+      site: site.name,
+      siteCode: site.code,
       schoolYearName,
+      anneeScolaire: schoolYearName,
     });
   } catch (error: any) {
-    console.error("TREASURY_MOVEMENTS_GET_ERROR", error);
+    console.error("GET /api/treasury-movements:", error);
+
     return NextResponse.json(
       {
-        error: "Erreur chargement mouvements trésorerie",
+        error: "Erreur serveur",
         message: error?.message || String(error),
       },
       { status: 500 }
@@ -322,177 +656,258 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const user = await getAuthUser();
+
   if (!user) {
     return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   }
 
   try {
-    const body = await req.json().catch(() => ({}));
+    const body = await req.json();
 
-    const schoolYearName = await resolveSchoolYear(
-      body.schoolYearName || body.anneeScolaire || body.year
-    );
+    const schoolYearName = await resolveSchoolYearName(getSchoolYearFromBody(body));
+    const site = await resolveSiteFromBody(body);
 
     const treasuryId = Number(body.treasuryId || body.tresorerieId || 0);
-    const treasuryName = text(
-      body.treasuryName || body.tresorerie || body.treasury || body.caisse
-    );
+    const treasuryName = text(body.treasuryName || body.tresorerie || body.treasury || body.caisse);
 
     const treasury = await findTreasury({
       treasuryId,
       treasuryName,
       schoolYearName,
+      site,
     });
 
     if (!treasury) {
       return NextResponse.json(
-        {
-          error:
-            "Trésorerie obligatoire ou introuvable pour cette année scolaire.",
-        },
+        { error: "Trésorerie obligatoire ou introuvable pour cette année scolaire et ce site" },
         { status: 400 }
       );
     }
 
-   const rawMovementType = text(
-  body.movementType || body.type
-).toUpperCase();
-
-let movementType = "CREDIT";
-
-if (
-  rawMovementType === "DEBIT" ||
-  rawMovementType === "SORTIE" ||
-  rawMovementType === "DEPENSE"
-) {
-  movementType = "DEBIT";
-}
-
-if (
-  rawMovementType === "CREDIT" ||
-  rawMovementType === "ENTREE" ||
-  rawMovementType === "RECETTE"
-) {
-  movementType = "CREDIT";
-}
-    const amount = amountToNumber(body.amount || body.montant);
-    const category = text(body.category || body.categorie || "AUTRE").toUpperCase();
-    const description = text(body.description || body.motif || body.note);
-    const reference =
-      text(body.reference) ||
-      `${movementType}-${treasury.id}-${Date.now()}`;
-
-    const studentId = Number(body.studentId || 0);
-    const trainingFeeId = Number(body.trainingFeeId || 0);
-    const studentFeeId = Number(body.studentFeeId || 0);
+    const movementType = normalizeMovementType(
+      body.movementType || body.type || body.operation || body.sens || body.nature
+    );
+    const category = normalizeCategory(body.category, movementType);
+    const amount = getAmountFromBody(body);
 
     if (!amount || amount <= 0) {
-      return NextResponse.json({ error: "Montant invalide" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Montant obligatoire" },
+        { status: 400 }
+      );
     }
 
-    if (studentId) {
-      const student = await prisma.student.findFirst({
-        where: {
-          id: studentId,
-          anneeScolaire: schoolYearName,
-        },
-        select: { id: true },
-      });
+    const studentId = Number(body.studentId || 0) || null;
+    const student = studentId ? await getStudentInfo(studentId) : null;
+    const motifOnly = buildMotifOnly(body, movementType, category);
 
-      if (!student) {
-        return NextResponse.json(
-          { error: "Étudiant introuvable dans cette année scolaire." },
-          { status: 400 }
-        );
-      }
-    }
+    const reference = text(body.reference || body.ref || body.idempotencyKey || "");
 
-    if (trainingFeeId) {
-      const trainingFee = await prisma.trainingFee.findFirst({
-        where: {
-          id: trainingFeeId,
-          schoolYearName,
-        },
-        select: { id: true },
-      });
-
-      if (!trainingFee) {
-        return NextResponse.json(
-          { error: "Frais introuvable dans cette année scolaire." },
-          { status: 400 }
-        );
-      }
-    }
-
-    if (studentFeeId) {
-      const studentFee = await prisma.studentFee.findFirst({
-        where: {
-          id: studentFeeId,
-          schoolYearName,
-        },
-        select: { id: true },
-      });
-
-      if (!studentFee) {
-        return NextResponse.json(
-          { error: "Frais étudiant introuvable dans cette année scolaire." },
-          { status: 400 }
-        );
-      }
-    }
-
-    const duplicate = await prisma.treasuryMovement.findFirst({
-      where: {
+    if (reference) {
+      const existingWhere: any = {
         treasuryId: treasury.id,
         schoolYearName,
-        movementType,
         reference,
-        ...(studentId ? { studentId } : {}),
-        ...(trainingFeeId ? { trainingFeeId } : {}),
-        ...(studentFeeId ? { studentFeeId } : {}),
-      },
-    });
+      };
 
-    if (duplicate) {
-      return NextResponse.json({
-        movement: duplicate,
-        duplicated: true,
-        schoolYearName,
+      addSiteWhere("TreasuryMovement", existingWhere, site);
+
+      const existing = await prisma.treasuryMovement.findFirst({
+        where: existingWhere,
+        orderBy: { id: "desc" },
       });
+
+      if (existing) {
+        return NextResponse.json({
+          success: true,
+          duplicate: true,
+          movement: formatMovementForClient(existing),
+          data: formatMovementForClient(existing),
+          siteId: site.id,
+          site: site.name,
+          schoolYearName,
+        });
+      }
     }
+
+    const data: any = {
+      treasuryId: treasury.id,
+      movementType,
+      category,
+      amount,
+      description: motifOnly,
+      reference: reference || null,
+      studentId,
+      trainingFeeId: Number(body.trainingFeeId || 0) || null,
+      studentFeeId: Number(body.studentFeeId || 0) || null,
+      schoolYearName,
+      createdBy: user?.email || user?.name || null,
+      createdAt: safeDate(body.createdAt || body.date || body.datePaiement || body.paymentDate),
+    };
+
+    if (modelHasField("TreasuryMovement", "motif")) data.motif = motifOnly;
+    if (modelHasField("TreasuryMovement", "libelle")) data.libelle = motifOnly;
+    if (modelHasField("TreasuryMovement", "debit")) data.debit = movementType === "SORTIE" ? amount : 0;
+    if (modelHasField("TreasuryMovement", "credit")) data.credit = movementType === "ENTREE" ? amount : 0;
+
+    addMovementStudentData(data, student, body);
+    addSiteData("TreasuryMovement", data, site);
 
     const movement = await prisma.treasuryMovement.create({
-      data: {
-        treasuryId: treasury.id,
-        movementType,
-        category,
-        amount,
-        description: description || null,
-        reference,
-        studentId: studentId || null,
-        trainingFeeId: trainingFeeId || null,
-        studentFeeId: studentFeeId || null,
-        schoolYearName,
-        createdBy: user?.email || user?.name || null,
-        createdAt: safeDate(body.createdAt || body.date || body.datePaiement),
-      },
-      include: {
-        treasury: true,
-      },
+      data,
+      include: getRelationInclude("TreasuryMovement"),
     });
 
-    const [row] = await enrichMovements([movement]);
+    return NextResponse.json(
+      {
+        success: true,
+        movement: formatMovementForClient(movement),
+        data: formatMovementForClient(movement),
+        siteId: site.id,
+        site: site.name,
+        schoolYearName,
+      },
+      { status: 201 }
+    );
+  } catch (error: any) {
+    console.error("POST /api/treasury-movements:", error);
+
+    return NextResponse.json(
+      {
+        error: "Erreur serveur",
+        message: error?.message || String(error),
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PUT(req: Request) {
+  const user = await getAuthUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  }
+
+  try {
+    const body = await req.json();
+
+    const id = Number(body.id || 0);
+    const schoolYearName = await resolveSchoolYearName(getSchoolYearFromBody(body));
+    const site = await resolveSiteFromBody(body);
+
+    if (!id) {
+      return NextResponse.json({ error: "ID obligatoire" }, { status: 400 });
+    }
+
+    const where: any = {
+      id,
+      schoolYearName,
+    };
+
+    addSiteWhere("TreasuryMovement", where, site);
+
+    const current = await prisma.treasuryMovement.findFirst({
+      where,
+      include: getRelationInclude("TreasuryMovement"),
+    });
+
+    if (!current) {
+      return NextResponse.json(
+        { error: "Mouvement introuvable pour cette année scolaire et ce site" },
+        { status: 404 }
+      );
+    }
+
+    const movementType = normalizeMovementType(
+      body.movementType || body.type || current.movementType
+    );
+    const category = normalizeCategory(body.category || current.category, movementType);
+
+    const amount =
+      body.amount !== undefined ||
+      body.montant !== undefined ||
+      body.credit !== undefined ||
+      body.debit !== undefined
+        ? getAmountFromBody({ ...body, movementType })
+        : Number(current.amount || 0);
+
+    if (!amount || amount <= 0) {
+      return NextResponse.json(
+        { error: "Montant obligatoire" },
+        { status: 400 }
+      );
+    }
+
+    const nextStudentId =
+      body.studentId !== undefined
+        ? Number(body.studentId || 0) || null
+        : current.studentId;
+
+    const student = nextStudentId ? await getStudentInfo(Number(nextStudentId)) : current.student || null;
+    const motifOnly = buildMotifOnly(
+      {
+        ...body,
+        feeCode: body.feeCode || current.feeCode || current.studentFee?.code || current.trainingFee?.code,
+        feeLabel: body.feeLabel || current.feeLabel || current.studentFee?.libelle || current.trainingFee?.libelle,
+        description: body.description ?? current.description,
+        libelle: body.libelle ?? current.libelle,
+        motif: body.motif ?? current.motif,
+      },
+      movementType,
+      category
+    );
+
+    const updateData: any = {
+      movementType,
+      category,
+      amount,
+      description: motifOnly,
+      reference: text(body.reference ?? current.reference ?? "") || null,
+      studentId: nextStudentId,
+      trainingFeeId:
+        body.trainingFeeId !== undefined
+          ? Number(body.trainingFeeId || 0) || null
+          : current.trainingFeeId,
+      studentFeeId:
+        body.studentFeeId !== undefined
+          ? Number(body.studentFeeId || 0) || null
+          : current.studentFeeId,
+      schoolYearName,
+      createdAt:
+        body.createdAt || body.date || body.datePaiement || body.paymentDate
+          ? safeDate(body.createdAt || body.date || body.datePaiement || body.paymentDate)
+          : current.createdAt,
+    };
+
+    if (modelHasField("TreasuryMovement", "motif")) updateData.motif = motifOnly;
+    if (modelHasField("TreasuryMovement", "libelle")) updateData.libelle = motifOnly;
+    if (modelHasField("TreasuryMovement", "debit")) updateData.debit = movementType === "SORTIE" ? amount : 0;
+    if (modelHasField("TreasuryMovement", "credit")) updateData.credit = movementType === "ENTREE" ? amount : 0;
+
+    addMovementStudentData(updateData, student, body);
+    addSiteData("TreasuryMovement", updateData, site);
+
+    const movement = await prisma.treasuryMovement.update({
+      where: { id },
+      data: updateData,
+      include: getRelationInclude("TreasuryMovement"),
+    });
 
     return NextResponse.json({
-      movement: row,
       success: true,
+      movement: formatMovementForClient(movement),
+      data: formatMovementForClient(movement),
+      siteId: site.id,
+      site: site.name,
       schoolYearName,
     });
   } catch (error: any) {
-    console.error("TREASURY_MOVEMENTS_POST_ERROR", error);
+    console.error("PUT /api/treasury-movements:", error);
+
     return NextResponse.json(
       {
-        error: "Erreur création mouvement trésorerie",
+        error: "Erreur serveur",
         message: error?.message || String(error),
       },
       { status: 500 }
@@ -502,6 +917,7 @@ if (
 
 export async function DELETE(req: Request) {
   const user = await getAuthUser();
+
   if (!user) {
     return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   }
@@ -510,71 +926,46 @@ export async function DELETE(req: Request) {
     const url = new URL(req.url);
 
     const id = Number(url.searchParams.get("id") || 0);
-    const requestedSchoolYearName = text(
-      url.searchParams.get("schoolYearName") ||
-        url.searchParams.get("anneeScolaire") ||
-        url.searchParams.get("year")
-    );
+    const schoolYearName = await resolveSchoolYearName(getSchoolYearFromUrl(req));
+    const site = await resolveSiteFromUrl(req);
 
     if (!id) {
       return NextResponse.json({ error: "ID obligatoire" }, { status: 400 });
     }
 
-    // Suppression fiable: on récupère d'abord le mouvement par son ID réel.
-    // Ensuite on utilise l'année scolaire enregistrée dans la donnée elle-même.
-    // Cela évite l'erreur 404 quand l'écran a encore une ancienne année active
-    // alors que le mouvement appartient à une autre année scolaire.
-    const existing = await prisma.treasuryMovement.findUnique({
-      where: { id },
-      select: {
-        id: true,
-        schoolYearName: true,
-      },
-    });
+    const where: any = {
+      id,
+      schoolYearName,
+    };
 
-    if (!existing) {
+    addSiteWhere("TreasuryMovement", where, site);
+
+    const current = await prisma.treasuryMovement.findFirst({ where });
+
+    if (!current) {
       return NextResponse.json(
-        { error: "Mouvement introuvable." },
+        { error: "Mouvement introuvable pour cette année scolaire et ce site" },
         { status: 404 }
       );
     }
 
-    const movementSchoolYearName = text(existing.schoolYearName);
-
-    // Sécurité année scolaire: si le frontend envoie une année, elle doit
-    // correspondre à l'année stockée sur le mouvement. Sinon on refuse pour
-    // empêcher une suppression dans une mauvaise année scolaire.
-    if (
-      requestedSchoolYearName &&
-      movementSchoolYearName &&
-      requestedSchoolYearName !== movementSchoolYearName
-    ) {
-      return NextResponse.json(
-        {
-          error: "Mouvement hors année scolaire sélectionnée.",
-          requestedSchoolYearName,
-          movementSchoolYearName,
-        },
-        { status: 409 }
-      );
-    }
-
     await prisma.treasuryMovement.delete({
-      where: { id: existing.id },
+      where: { id },
     });
 
     return NextResponse.json({
       ok: true,
-      success: true,
       deleted: true,
-      id: existing.id,
-      schoolYearName: movementSchoolYearName || requestedSchoolYearName,
+      siteId: site.id,
+      site: site.name,
+      schoolYearName,
     });
   } catch (error: any) {
-    console.error("TREASURY_MOVEMENTS_DELETE_ERROR", error);
+    console.error("DELETE /api/treasury-movements:", error);
+
     return NextResponse.json(
       {
-        error: "Erreur suppression mouvement trésorerie",
+        error: "Erreur serveur",
         message: error?.message || String(error),
       },
       { status: 500 }

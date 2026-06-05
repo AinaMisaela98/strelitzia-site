@@ -12,8 +12,95 @@ function cleanString(value: unknown): string {
 
 function cleanDate(value: unknown): Date | null {
   if (!value) return null;
+
   const date = new Date(String(value));
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function cleanId(value: unknown): number | null {
+  const id = Number(value);
+  return Number.isFinite(id) && id > 0 ? id : null;
+}
+
+function modelFieldMetas(modelName: string) {
+  const runtimeModel = (prisma as any)?._runtimeDataModel?.models?.[modelName];
+  return runtimeModel?.fields || [];
+}
+
+function modelFieldNames(modelName: string) {
+  return modelFieldMetas(modelName).map((field: any) => field.name) as string[];
+}
+
+function modelHasField(modelName: string, fieldName: string) {
+  return modelFieldNames(modelName).includes(fieldName);
+}
+
+function addSiteWhere(modelName: string, where: any, site: any) {
+  if (!site) return where;
+
+  if (modelHasField(modelName, "siteId")) {
+    where.siteId = Number(site.id);
+  } else if (modelHasField(modelName, "site")) {
+    where.site = String(site.name || "");
+  }
+
+  return where;
+}
+
+function addSiteData(modelName: string, data: any, site: any) {
+  if (!site) return data;
+
+  if (modelHasField(modelName, "siteId")) {
+    data.siteId = Number(site.id);
+  }
+
+  if (modelHasField(modelName, "site")) {
+    data.site = String(site.name || "");
+  }
+
+  return data;
+}
+
+function buildStudentSelect() {
+  const select: any = {
+    id: true,
+    matricule: true,
+    anneeScolaire: true,
+    dateInscription: true,
+    photoUrl: true,
+    nom: true,
+    prenoms: true,
+    sexe: true,
+    classe: true,
+    section: true,
+    contact: true,
+    dateNaissance: true,
+    lieuNaissance: true,
+    adresse: true,
+    signeParticulier: true,
+    maladieAllergie: true,
+    email: true,
+    pereNom: true,
+    pereTel: true,
+    mereNom: true,
+    mereTel: true,
+    parentAdresse: true,
+    tuteurNom: true,
+    tuteurLien: true,
+    tuteurTel: true,
+    tuteurAdresse: true,
+    niveau: true,
+    fraisInscription: true,
+    fraisScolarite: true,
+    activite: true,
+    remarque: true,
+    createdAt: true,
+  };
+
+  if (modelHasField("Student", "siteId")) select.siteId = true;
+  if (modelHasField("Student", "site")) select.site = true;
+
+  return select;
 }
 
 async function getActiveSchoolYearName(): Promise<string> {
@@ -41,41 +128,70 @@ async function resolveSchoolYearNameFromBody(body: any): Promise<string> {
   return schoolYearName || anneeScolaire || year || (await getActiveSchoolYearName());
 }
 
-const studentSelect = {
-  id: true,
-  matricule: true,
-  site: true,
-  anneeScolaire: true,
-  dateInscription: true,
-  photoUrl: true,
-  nom: true,
-  prenoms: true,
-  sexe: true,
-  classe: true,
-  section: true,
-  contact: true,
-  dateNaissance: true,
-  lieuNaissance: true,
-  adresse: true,
-  signeParticulier: true,
-  maladieAllergie: true,
-  email: true,
-  pereNom: true,
-  pereTel: true,
-  mereNom: true,
-  mereTel: true,
-  parentAdresse: true,
-  tuteurNom: true,
-  tuteurLien: true,
-  tuteurTel: true,
-  tuteurAdresse: true,
-  niveau: true,
-  fraisInscription: true,
-  fraisScolarite: true,
-  activite: true,
-  remarque: true,
-  createdAt: true,
-} as const;
+async function getDefaultSite() {
+  let site = await prisma.site.findFirst({
+    where: { active: true },
+    orderBy: { id: "asc" },
+    select: { id: true, name: true, code: true },
+  });
+
+  if (!site) {
+    site = await prisma.site.create({
+      data: {
+        name: "Strelitzia School",
+        code: "STRELITZIA",
+        active: true,
+      },
+      select: { id: true, name: true, code: true },
+    });
+  }
+
+  return site;
+}
+
+async function resolveSiteFromBody(body: any) {
+  const siteId = cleanId(body?.siteId);
+  const siteName = cleanString(body?.site || body?.siteName);
+  const siteCode = cleanString(body?.siteCode);
+
+  if (siteId) {
+    const site = await prisma.site.findUnique({
+      where: { id: siteId },
+      select: { id: true, name: true, code: true },
+    });
+
+    if (site) return site;
+  }
+
+  if (siteCode) {
+    const site = await prisma.site.findUnique({
+      where: { code: siteCode },
+      select: { id: true, name: true, code: true },
+    });
+
+    if (site) return site;
+  }
+
+  if (siteName) {
+    const site = await prisma.site.findFirst({
+      where: { name: siteName },
+      select: { id: true, name: true, code: true },
+    });
+
+    if (site) return site;
+  }
+
+  return getDefaultSite();
+}
+
+async function resolveSiteFromUrl(url: URL) {
+  return resolveSiteFromBody({
+    siteId: url.searchParams.get("siteId"),
+    site: url.searchParams.get("site"),
+    siteName: url.searchParams.get("siteName"),
+    siteCode: url.searchParams.get("siteCode"),
+  });
+}
 
 export async function GET(req: Request) {
   try {
@@ -86,29 +202,38 @@ export async function GET(req: Request) {
     }
 
     const url = new URL(req.url);
+
     const selectedYear = await resolveSchoolYearNameFromUrl(url);
+    const selectedSite = await resolveSiteFromUrl(url);
 
     const q = cleanString(url.searchParams.get("q"));
     const classe = cleanString(url.searchParams.get("classe"));
     const section = cleanString(url.searchParams.get("section"));
+
     const takeParam = Number(url.searchParams.get("take") || 500);
-    const take = Number.isFinite(takeParam) ? Math.min(Math.max(takeParam, 1), 1000) : 500;
+    const take = Number.isFinite(takeParam)
+      ? Math.min(Math.max(takeParam, 1), 1000)
+      : 500;
 
     const where: any = {
       anneeScolaire: selectedYear,
     };
+
+    addSiteWhere("Student", where, selectedSite);
 
     if (classe) where.classe = classe;
     if (section) where.section = section;
 
     if (q) {
       where.OR = [
-        { matricule: { contains: q, mode: "insensitive" } },
-        { nom: { contains: q, mode: "insensitive" } },
-        { prenoms: { contains: q, mode: "insensitive" } },
-        { contact: { contains: q, mode: "insensitive" } },
+        { matricule: { contains: q } },
+        { nom: { contains: q } },
+        { prenoms: { contains: q } },
+        { contact: { contains: q } },
       ];
     }
+
+    const studentSelect = buildStudentSelect();
 
     const [students, total] = await Promise.all([
       prisma.student.findMany({
@@ -123,7 +248,11 @@ export async function GET(req: Request) {
     return NextResponse.json(
       {
         students,
+        data: students,
         total,
+        siteId: selectedSite.id,
+        site: selectedSite.name,
+        siteCode: selectedSite.code,
         schoolYearName: selectedYear,
         anneeScolaire: selectedYear,
       },
@@ -143,8 +272,8 @@ export async function GET(req: Request) {
           error?.code === "P2024"
             ? "Base de données occupée. Réessayez dans quelques secondes."
             : error?.code === "P1017"
-            ? "Connexion base de données fermée. Vérifiez Supabase."
-            : "Erreur récupération étudiants",
+              ? "Connexion base de données fermée. Vérifiez Supabase."
+              : error?.message || "Erreur récupération étudiants",
       },
       { status: 500 }
     );
@@ -178,55 +307,85 @@ export async function POST(req: Request) {
     }
 
     const selectedYear = await resolveSchoolYearNameFromBody(body);
+    const selectedSite = await resolveSiteFromBody(body);
+
+    const duplicateWhere: any = {
+      matricule,
+      anneeScolaire: selectedYear,
+    };
+
+    addSiteWhere("Student", duplicateWhere, selectedSite);
+
+    const duplicate = await prisma.student.findFirst({
+      where: duplicateWhere,
+      select: { id: true },
+    });
+
+    if (duplicate) {
+      return NextResponse.json(
+        {
+          error:
+            "Ce matricule existe déjà pour cette année scolaire et ce site.",
+        },
+        { status: 400 }
+      );
+    }
+
+    const data: any = {
+      matricule,
+      anneeScolaire: selectedYear,
+      dateInscription: cleanDate(body.dateInscription) || new Date(),
+
+      photoUrl: cleanString(body.photoUrl),
+
+      nom,
+      prenoms,
+      sexe: body.sexe === "Feminin" ? "Feminin" : "Masculin",
+      classe,
+      section,
+
+      contact: cleanString(body.telephone || body.contact),
+      dateNaissance: cleanDate(body.dateNaissance),
+      lieuNaissance: cleanString(body.lieuNaissance),
+      adresse: cleanString(body.adresse),
+
+      signeParticulier: cleanString(body.signeParticulier),
+      maladieAllergie: cleanString(body.maladieAllergie),
+      email: cleanString(body.email),
+
+      pereNom: cleanString(body.pereNom),
+      pereTel: cleanString(body.pereTel),
+      mereNom: cleanString(body.mereNom),
+      mereTel: cleanString(body.mereTel),
+      parentAdresse: cleanString(body.parentAdresse),
+
+      tuteurNom: cleanString(body.tuteurNom),
+      tuteurLien: cleanString(body.tuteurLien),
+      tuteurTel: cleanString(body.tuteurTel),
+      tuteurAdresse: cleanString(body.tuteurAdresse),
+
+      niveau: cleanString(body.niveau),
+      fraisInscription: cleanString(body.fraisInscription),
+      fraisScolarite: cleanString(body.fraisScolarite),
+
+      activite: cleanString(body.activite),
+      remarque: cleanString(body.remarque),
+    };
+
+    addSiteData("Student", data, selectedSite);
 
     const student = await prisma.student.create({
-      data: {
-        matricule,
-        site: cleanString(body.site) || "Strelitzia School",
-        anneeScolaire: selectedYear,
-        dateInscription: cleanDate(body.dateInscription) || new Date(),
-
-        photoUrl: cleanString(body.photoUrl),
-
-        nom,
-        prenoms,
-        sexe: body.sexe === "Feminin" ? "Feminin" : "Masculin",
-        classe,
-        section,
-
-        contact: cleanString(body.telephone || body.contact),
-        dateNaissance: cleanDate(body.dateNaissance),
-        lieuNaissance: cleanString(body.lieuNaissance),
-        adresse: cleanString(body.adresse),
-
-        signeParticulier: cleanString(body.signeParticulier),
-        maladieAllergie: cleanString(body.maladieAllergie),
-        email: cleanString(body.email),
-
-        pereNom: cleanString(body.pereNom),
-        pereTel: cleanString(body.pereTel),
-        mereNom: cleanString(body.mereNom),
-        mereTel: cleanString(body.mereTel),
-        parentAdresse: cleanString(body.parentAdresse),
-
-        tuteurNom: cleanString(body.tuteurNom),
-        tuteurLien: cleanString(body.tuteurLien),
-        tuteurTel: cleanString(body.tuteurTel),
-        tuteurAdresse: cleanString(body.tuteurAdresse),
-
-        niveau: cleanString(body.niveau),
-        fraisInscription: cleanString(body.fraisInscription),
-        fraisScolarite: cleanString(body.fraisScolarite),
-
-        activite: cleanString(body.activite),
-        remarque: cleanString(body.remarque),
-      },
-      select: studentSelect,
+      data,
+      select: buildStudentSelect(),
     });
 
     return NextResponse.json(
       {
         student,
+        data: student,
+        siteId: selectedSite.id,
+        site: selectedSite.name,
+        siteCode: selectedSite.code,
         schoolYearName: selectedYear,
         anneeScolaire: selectedYear,
       },
@@ -242,7 +401,10 @@ export async function POST(req: Request) {
 
     if (error?.code === "P2002") {
       return NextResponse.json(
-        { error: "Ce matricule existe déjà pour cette année scolaire." },
+        {
+          error:
+            "Ce matricule existe déjà pour cette année scolaire et ce site.",
+        },
         { status: 400 }
       );
     }

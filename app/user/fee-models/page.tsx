@@ -17,6 +17,13 @@ type SchoolYear = {
   active: boolean;
 };
 
+type Site = {
+  id: number;
+  name: string;
+  code: string;
+  active: boolean;
+};
+
 type FeeTariff = {
   id: number;
   feeModelId: number;
@@ -31,6 +38,12 @@ type FeeModel = {
   title: string;
   classe: string;
   schoolYearName: string;
+  siteId?: number | null;
+  siteRef?: {
+    id: number;
+    name: string;
+    code: string;
+  } | null;
   tariffs: FeeTariff[];
 };
 
@@ -53,30 +66,11 @@ export default function FeeModelsPage() {
   const pathname = usePathname();
 
   const sidebarLinks = [
-    {
-      label: "Année scolaire",
-      href: "/user/school-years",
-    },
-
-    {
-      label: "Liste des niveaux",
-      href: "/user/academics",
-    },
-
-    {
-      label: "Modèles de frais",
-      href: "/user/fee-models",
-    },
-
-    {
-      label: "Frais de formation",
-      href: "/user/training-fees",
-    },
-
-    {
-      label: "Activités scolaires",
-      href: "/user/school-activities",
-    },
+    { label: "Année scolaire", href: "/user/school-years" },
+    { label: "Liste des niveaux", href: "/user/academics" },
+    { label: "Modèles de frais", href: "/user/fee-models" },
+    { label: "Frais de formation", href: "/user/training-fees" },
+    { label: "Activités scolaires", href: "/user/school-activities" },
   ];
 
   const [models, setModels] = useState<FeeModel[]>([]);
@@ -93,28 +87,27 @@ export default function FeeModelsPage() {
   const [schoolYearName, setSchoolYearName] = useState("");
   const [yearFilter, setYearFilter] = useState("");
 
+  const [sites, setSites] = useState<Site[]>([]);
+  const [selectedSiteId, setSelectedSiteId] = useState("");
+
   const [specialColumns, setSpecialColumns] = useState<string[]>([]);
   const [newSpecialColumn, setNewSpecialColumn] = useState("");
 
   const [draftRows, setDraftRows] = useState<DraftRow[]>([]);
-  const [savedTariffInputs, setSavedTariffInputs] = useState<
-    Record<number, SavedTariffDraft>
-  >({});
-  const [cellSpecialInputs, setCellSpecialInputs] = useState<
-    Record<string, string>
-  >({});
+  const [savedTariffInputs, setSavedTariffInputs] = useState<Record<number, SavedTariffDraft>>({});
+  const [cellSpecialInputs, setCellSpecialInputs] = useState<Record<string, string>>({});
 
   const [message, setMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
   const activeSchoolYearName = useMemo(() => {
-    return (
-      schoolYears.find((year) => year.active)?.name ||
-      schoolYears[0]?.name ||
-      ""
-    );
+    return schoolYears.find((year) => year.active)?.name || schoolYears[0]?.name || "";
   }, [schoolYears]);
+
+  const selectedSite = useMemo(() => {
+    return sites.find((site) => String(site.id) === String(selectedSiteId)) || null;
+  }, [sites, selectedSiteId]);
 
   const filteredModels = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -123,9 +116,12 @@ export default function FeeModelsPage() {
     return models.filter((model) => {
       const modelYear = String(model.schoolYearName || "").trim();
       const sameYear = !selectedYear || modelYear === selectedYear;
+      const modelSite = String(model.siteRef?.name || "").trim();
       const matchSearch =
         !q ||
-        `${model.title} ${model.schoolYearName}`.toLowerCase().includes(q);
+        `${model.title} ${model.schoolYearName} ${model.classe} ${modelSite}`
+          .toLowerCase()
+          .includes(q);
 
       return sameYear && matchSearch;
     });
@@ -133,11 +129,13 @@ export default function FeeModelsPage() {
 
   useEffect(() => {
     loadSchoolYears();
+    loadSites();
   }, []);
 
   useEffect(() => {
+    if (!yearFilter || !selectedSiteId) return;
     loadModels();
-  }, [yearFilter]);
+  }, [yearFilter, selectedSiteId]);
 
   function showSuccess(text: string) {
     setSuccessMessage(text);
@@ -174,31 +172,23 @@ export default function FeeModelsPage() {
   }
 
   function buildSavedTariffInputs(model: FeeModel) {
-    return model.tariffs.reduce<Record<number, SavedTariffDraft>>(
-      (acc, tariff) => {
-        acc[tariff.id] = {
-          libelle: tariff.libelle || "",
-          code: tariff.code || "",
-          montant: formatAmountInput(tariff.montant),
-        };
-
-        return acc;
-      },
-      {},
-    );
+    return (model.tariffs || []).reduce<Record<number, SavedTariffDraft>>((acc, tariff) => {
+      acc[tariff.id] = {
+        libelle: tariff.libelle || "",
+        code: tariff.code || "",
+        montant: formatAmountInput(tariff.montant),
+      };
+      return acc;
+    }, {});
   }
 
   function buildCellSpecialInputs(model: FeeModel, columns: string[]) {
     const inputs: Record<string, string> = {};
 
-    for (const tariff of model.tariffs) {
+    for (const tariff of model.tariffs || []) {
       for (const column of columns) {
-        const found = tariff.specials.find(
-          (special) => special.name === column,
-        );
-        inputs[`${tariff.id}-${column}`] = found
-          ? formatAmountInput(found.amount)
-          : "";
+        const found = (tariff.specials || []).find((special) => special.name === column);
+        inputs[`${tariff.id}-${column}`] = found ? formatAmountInput(found.amount) : "";
       }
     }
 
@@ -206,12 +196,12 @@ export default function FeeModelsPage() {
   }
 
   function sortedTariffs(model: FeeModel) {
-    return [...model.tariffs].sort((a, b) => a.id - b.id);
+    return [...(model.tariffs || [])].sort((a, b) => a.id - b.id);
   }
 
   function extractSpecialColumns(model: FeeModel) {
-    const names = model.tariffs.flatMap((tariff) =>
-      tariff.specials.map((special) => special.name),
+    const names = (model.tariffs || []).flatMap((tariff) =>
+      (tariff.specials || []).map((special) => special.name),
     );
 
     return Array.from(new Set(names));
@@ -229,12 +219,7 @@ export default function FeeModelsPage() {
       const saved = raw ? JSON.parse(raw) : [];
 
       if (Array.isArray(saved)) {
-        return Array.from(
-          new Set([
-            ...fromDb,
-            ...saved.filter((name) => typeof name === "string"),
-          ]),
-        );
+        return Array.from(new Set([...fromDb, ...saved.filter((name) => typeof name === "string")]));
       }
     } catch (error) {
       console.error("Erreur lecture colonnes tarifs:", error);
@@ -269,6 +254,24 @@ export default function FeeModelsPage() {
     );
   }
 
+  async function loadSites() {
+    try {
+      const res = await fetch(`/api/sites?_ts=${Date.now()}`, { cache: "no-store" });
+      const data = await safeJson(res);
+      const list: Site[] = Array.isArray(data?.sites) ? data.sites : [];
+
+      setSites(list);
+
+      const active = list.find((site) => site.active) || list[0];
+      if (active) setSelectedSiteId(String(active.id));
+    } catch (error) {
+      console.error(error);
+      setSites([]);
+      setSelectedSiteId("");
+      setMessage("Erreur chargement sites.");
+    }
+  }
+
   async function loadSchoolYears() {
     try {
       const res = await fetch("/api/school-years", { cache: "no-store" });
@@ -279,6 +282,7 @@ export default function FeeModelsPage() {
 
         const active = data.find((year: SchoolYear) => year.active);
         const defaultYear = active?.name || data[0]?.name || "";
+
         setSchoolYearName(defaultYear);
         setYearFilter(defaultYear);
       }
@@ -294,10 +298,15 @@ export default function FeeModelsPage() {
       const selectedYear = (yearFilter || activeSchoolYearName || "").trim();
 
       if (search.trim()) params.set("q", search.trim());
+
       if (selectedYear) {
         params.set("schoolYearName", selectedYear);
         params.set("anneeScolaire", selectedYear);
         params.set("year", selectedYear);
+      }
+
+      if (selectedSiteId) {
+        params.set("siteId", selectedSiteId);
       }
 
       const res = await fetch(`/api/fee-models?${params.toString()}`, {
@@ -332,11 +341,23 @@ export default function FeeModelsPage() {
   async function createModel() {
     setMessage("");
 
+    if (!selectedSiteId) {
+      setMessage("Veuillez choisir un site.");
+      return;
+    }
+
     try {
+      const finalYear = schoolYearName || activeSchoolYearName;
+
       const res = await fetch("/api/fee-models", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, classe: "GENERAL", schoolYearName }),
+        body: JSON.stringify({
+          title,
+          classe: "GENERAL",
+          schoolYearName: finalYear,
+          siteId: selectedSiteId,
+        }),
       });
 
       const data = await safeJson(res);
@@ -347,7 +368,7 @@ export default function FeeModelsPage() {
       }
 
       resetCreateForm();
-      setYearFilter(schoolYearName || yearFilter || activeSchoolYearName);
+      setYearFilter(finalYear);
       setCreateOpen(false);
       await loadModels();
 
@@ -375,6 +396,7 @@ export default function FeeModelsPage() {
       setTitle(data.title);
       setClasse(data.classe || "GENERAL");
       setSchoolYearName(data.schoolYearName);
+      if (data.siteId) setSelectedSiteId(String(data.siteId));
       const columns = loadPersistedSpecialColumns(data);
       setSpecialColumns(columns);
       setCellSpecialInputs(buildCellSpecialInputs(data, columns));
@@ -407,7 +429,8 @@ export default function FeeModelsPage() {
         body: JSON.stringify({
           title: `Copie - ${source.title}`,
           classe: source.classe || "GENERAL",
-          schoolYearName: source.schoolYearName,
+          schoolYearName: source.schoolYearName || yearFilter || activeSchoolYearName,
+          siteId: source.siteId || selectedSiteId,
         }),
       });
 
@@ -453,9 +476,7 @@ export default function FeeModelsPage() {
           const duplicatedSpecial = await safeJson(specialRes);
 
           if (!specialRes.ok) {
-            setMessage(
-              duplicatedSpecial.message || "Erreur duplication tarif spécial.",
-            );
+            setMessage(duplicatedSpecial.message || "Erreur duplication tarif spécial.");
             return;
           }
         }
@@ -463,16 +484,11 @@ export default function FeeModelsPage() {
 
       persistSpecialColumns(duplicatedModel.id, duplicatedSpecialColumns);
 
-      const fullDuplicatedRes = await fetch(
-        `/api/fee-models/${duplicatedModel.id}`,
-      );
+      const fullDuplicatedRes = await fetch(`/api/fee-models/${duplicatedModel.id}`);
       const fullDuplicated = await safeJson(fullDuplicatedRes);
 
       if (!fullDuplicatedRes.ok) {
-        setMessage(
-          fullDuplicated.message ||
-            "Modèle dupliqué, mais ouverture impossible.",
-        );
+        setMessage(fullDuplicated.message || "Modèle dupliqué, mais ouverture impossible.");
         await loadModels();
         return;
       }
@@ -482,10 +498,9 @@ export default function FeeModelsPage() {
       setTitle(fullDuplicated.title);
       setClasse(fullDuplicated.classe || "GENERAL");
       setSchoolYearName(fullDuplicated.schoolYearName);
+      if (fullDuplicated.siteId) setSelectedSiteId(String(fullDuplicated.siteId));
       setSpecialColumns(duplicatedSpecialColumns);
-      setCellSpecialInputs(
-        buildCellSpecialInputs(fullDuplicated, duplicatedSpecialColumns),
-      );
+      setCellSpecialInputs(buildCellSpecialInputs(fullDuplicated, duplicatedSpecialColumns));
       setDraftRows([]);
       setCreateOpen(false);
       setEditOpen(true);
@@ -510,9 +525,7 @@ export default function FeeModelsPage() {
       setSelectedModel(data);
       setSavedTariffInputs(buildSavedTariffInputs(data));
       setSpecialColumns((previous) => {
-        const merged = Array.from(
-          new Set([...previous, ...loadPersistedSpecialColumns(data)]),
-        );
+        const merged = Array.from(new Set([...previous, ...loadPersistedSpecialColumns(data)]));
 
         persistSpecialColumns(data.id, merged);
         setCellSpecialInputs(buildCellSpecialInputs(data, merged));
@@ -536,17 +549,10 @@ export default function FeeModelsPage() {
 
       for (const tariff of savedRows) {
         const input = savedTariffInputs[tariff.id];
-
         if (!input) continue;
 
-        if (
-          !input.libelle.trim() ||
-          !input.code.trim() ||
-          !input.montant.trim()
-        ) {
-          setMessage(
-            "Chaque ligne enregistrée doit avoir Libellé, Code et Montant.",
-          );
+        if (!input.libelle.trim() || !input.code.trim() || !input.montant.trim()) {
+          setMessage("Chaque ligne enregistrée doit avoir Libellé, Code et Montant.");
           return;
         }
       }
@@ -559,107 +565,18 @@ export default function FeeModelsPage() {
           Object.values(row.specials).some((v: string) => v.trim()),
       );
 
-      for (const tariff of savedRows) {
-        for (const columnName of specialColumns) {
-          const key = `${tariff.id}-${columnName}`;
-          const inputAmount = cellSpecialInputs[key] || "";
-          const found = tariff.specials.find(
-            (special) => special.name === columnName,
-          );
-          const numericAmount = amountToNumber(inputAmount);
-
-          if (inputAmount.trim()) {
-            if (found) {
-              if (found.amount !== numericAmount) {
-                const specialDeleteRes = await fetch(
-                  `/api/fee-special-tariffs/${found.id}`,
-                  {
-                    method: "DELETE",
-                  },
-                );
-
-                if (!specialDeleteRes.ok) {
-                  setMessage("Erreur modification tarif spécial.");
-                  return;
-                }
-
-                const specialCreateRes = await fetch(
-                  "/api/fee-special-tariffs",
-                  {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      feeTariffId: tariff.id,
-                      name: columnName,
-                      amount: numericAmount,
-                    }),
-                  },
-                );
-
-                const specialCreateData = await safeJson(specialCreateRes);
-
-                if (!specialCreateRes.ok) {
-                  setMessage(
-                    specialCreateData.message ||
-                      "Erreur modification tarif spécial.",
-                  );
-                  return;
-                }
-              }
-            } else {
-              const specialCreateRes = await fetch("/api/fee-special-tariffs", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  feeTariffId: tariff.id,
-                  name: columnName,
-                  amount: numericAmount,
-                }),
-              });
-
-              const specialCreateData = await safeJson(specialCreateRes);
-
-              if (!specialCreateRes.ok) {
-                setMessage(
-                  specialCreateData.message || "Erreur ajout tarif spécial.",
-                );
-                return;
-              }
-            }
-          } else if (found) {
-            const specialDeleteRes = await fetch(
-              `/api/fee-special-tariffs/${found.id}`,
-              {
-                method: "DELETE",
-              },
-            );
-
-            if (!specialDeleteRes.ok) {
-              setMessage("Erreur suppression montant spécial.");
-              return;
-            }
-          }
-        }
-      }
-
       for (const row of rowsToSave) {
         if (!row.libelle.trim() || !row.code.trim() || !row.montant.trim()) {
-          setMessage(
-            "Chaque nouvelle ligne doit avoir Libellé, Code et Montant.",
-          );
+          setMessage("Chaque nouvelle ligne doit avoir Libellé, Code et Montant.");
           return;
         }
       }
 
       const allCodes = [
         ...savedRows
-          .map((tariff) =>
-            savedTariffInputs[tariff.id]?.code.trim().toLowerCase(),
-          )
+          .map((tariff) => savedTariffInputs[tariff.id]?.code.trim().toLowerCase())
           .filter(Boolean),
-        ...rowsToSave
-          .map((row) => row.code.trim().toLowerCase())
-          .filter(Boolean),
+        ...rowsToSave.map((row) => row.code.trim().toLowerCase()).filter(Boolean),
       ];
 
       const duplicatedCode = allCodes.find(
@@ -673,13 +590,12 @@ export default function FeeModelsPage() {
 
       const updateRes = await fetch(`/api/fee-models/${selectedModel.id}`, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title,
           classe: "GENERAL",
-          schoolYearName,
+          schoolYearName: schoolYearName || activeSchoolYearName,
+          siteId: selectedSiteId,
         }),
       });
 
@@ -692,7 +608,6 @@ export default function FeeModelsPage() {
 
       for (const tariff of savedRows) {
         const input = savedTariffInputs[tariff.id];
-
         if (!input) continue;
 
         const hasChanged =
@@ -700,34 +615,95 @@ export default function FeeModelsPage() {
           input.code.trim() !== tariff.code ||
           amountToNumber(input.montant) !== tariff.montant;
 
-        if (!hasChanged) continue;
+        if (hasChanged) {
+          const tariffUpdateRes = await fetch(`/api/fee-tariffs/${tariff.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              libelle: input.libelle.trim(),
+              code: input.code.trim(),
+              montant: amountToNumber(input.montant),
+            }),
+          });
 
-        const tariffUpdateRes = await fetch(`/api/fee-tariffs/${tariff.id}`, {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            libelle: input.libelle.trim(),
-            code: input.code.trim(),
-            montant: amountToNumber(input.montant),
-          }),
-        });
+          const tariffUpdateData = await safeJson(tariffUpdateRes);
 
-        const tariffUpdateData = await safeJson(tariffUpdateRes);
+          if (!tariffUpdateRes.ok) {
+            setMessage(tariffUpdateData.message || "Erreur modification tarif.");
+            return;
+          }
+        }
 
-        if (!tariffUpdateRes.ok) {
-          setMessage(tariffUpdateData.message || "Erreur modification tarif.");
-          return;
+        for (const columnName of specialColumns) {
+          const key = `${tariff.id}-${columnName}`;
+          const inputAmount = cellSpecialInputs[key] || "";
+          const found = (tariff.specials || []).find((special) => special.name === columnName);
+          const numericAmount = amountToNumber(inputAmount);
+
+          if (inputAmount.trim()) {
+            if (found) {
+              if (found.amount !== numericAmount) {
+                const deleteRes = await fetch(`/api/fee-special-tariffs/${found.id}`, {
+                  method: "DELETE",
+                });
+
+                if (!deleteRes.ok) {
+                  setMessage("Erreur modification tarif spécial.");
+                  return;
+                }
+
+                const createRes = await fetch("/api/fee-special-tariffs", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    feeTariffId: tariff.id,
+                    name: columnName,
+                    amount: numericAmount,
+                  }),
+                });
+
+                const createData = await safeJson(createRes);
+
+                if (!createRes.ok) {
+                  setMessage(createData.message || "Erreur modification tarif spécial.");
+                  return;
+                }
+              }
+            } else {
+              const createRes = await fetch("/api/fee-special-tariffs", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  feeTariffId: tariff.id,
+                  name: columnName,
+                  amount: numericAmount,
+                }),
+              });
+
+              const createData = await safeJson(createRes);
+
+              if (!createRes.ok) {
+                setMessage(createData.message || "Erreur ajout tarif spécial.");
+                return;
+              }
+            }
+          } else if (found) {
+            const deleteRes = await fetch(`/api/fee-special-tariffs/${found.id}`, {
+              method: "DELETE",
+            });
+
+            if (!deleteRes.ok) {
+              setMessage("Erreur suppression montant spécial.");
+              return;
+            }
+          }
         }
       }
 
       for (const row of rowsToSave) {
         const tariffRes = await fetch("/api/fee-tariffs", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             feeModelId: selectedModel.id,
             libelle: row.libelle.trim(),
@@ -749,9 +725,7 @@ export default function FeeModelsPage() {
           if (amount && amount.trim()) {
             const specialRes = await fetch("/api/fee-special-tariffs", {
               method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
+              headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 feeTariffId: tariff.id,
                 name: columnName,
@@ -805,22 +779,14 @@ export default function FeeModelsPage() {
       return;
     }
 
-    if (
-      specialColumns.some(
-        (column) => column.toLowerCase() === name.toLowerCase(),
-      )
-    ) {
+    if (specialColumns.some((column) => column.toLowerCase() === name.toLowerCase())) {
       setMessage("Cette colonne existe déjà.");
       return;
     }
 
     setSpecialColumns((previous) => {
       const next = [...previous, name];
-
-      if (selectedModel) {
-        persistSpecialColumns(selectedModel.id, next);
-      }
-
+      if (selectedModel) persistSpecialColumns(selectedModel.id, next);
       return next;
     });
 
@@ -830,9 +796,7 @@ export default function FeeModelsPage() {
       if (selectedModel) {
         for (const tariff of sortedTariffs(selectedModel)) {
           const savedInput = savedTariffInputs[tariff.id];
-          next[`${tariff.id}-${name}`] = formatAmountInput(
-            savedInput?.montant || tariff.montant,
-          );
+          next[`${tariff.id}-${name}`] = formatAmountInput(savedInput?.montant || tariff.montant);
         }
       }
 
@@ -842,18 +806,13 @@ export default function FeeModelsPage() {
     setDraftRows((previous) =>
       previous.map((row) => ({
         ...row,
-        specials: {
-          ...row.specials,
-          [name]: formatAmountInput(row.montant),
-        },
+        specials: { ...row.specials, [name]: formatAmountInput(row.montant) },
       })),
     );
 
     setNewSpecialColumn("");
     setMessage("");
-    showSuccess(
-      `Tarif "${name}" ajouté avec duplication du montant principal.`,
-    );
+    showSuccess(`Tarif "${name}" ajouté avec duplication du montant principal.`);
   }
 
   function removeSpecialColumn(name: string) {
@@ -861,11 +820,7 @@ export default function FeeModelsPage() {
 
     setSpecialColumns((previous) => {
       const next = previous.filter((column) => column !== name);
-
-      if (selectedModel) {
-        persistSpecialColumns(selectedModel.id, next);
-      }
-
+      if (selectedModel) persistSpecialColumns(selectedModel.id, next);
       return next;
     });
 
@@ -873,7 +828,6 @@ export default function FeeModelsPage() {
       previous.map((row) => {
         const specials = { ...row.specials };
         delete specials[name];
-
         return { ...row, specials };
       }),
     );
@@ -883,9 +837,7 @@ export default function FeeModelsPage() {
 
   function clearDraftRow(tempId: string) {
     setDraftRows((previous) =>
-      previous.map((row) =>
-        row.tempId === tempId ? createEmptyDraftRow() : row,
-      ),
+      previous.map((row) => (row.tempId === tempId ? createEmptyDraftRow() : row)),
     );
   }
 
@@ -921,7 +873,9 @@ export default function FeeModelsPage() {
   ) {
     setDraftRows((previous) =>
       previous.map((row) =>
-        row.tempId === tempId ? { ...row, [field]: value } : row,
+        row.tempId === tempId
+          ? { ...row, [field]: field === "montant" ? formatAmountInput(value) : value }
+          : row,
       ),
     );
   }
@@ -930,23 +884,13 @@ export default function FeeModelsPage() {
     setDraftRows((previous) =>
       previous.map((row) =>
         row.tempId === tempId
-          ? {
-              ...row,
-              specials: {
-                ...row.specials,
-                [column]: formatAmountInput(value),
-              },
-            }
+          ? { ...row, specials: { ...row.specials, [column]: formatAmountInput(value) } }
           : row,
       ),
     );
   }
 
-  function updateCellInput(
-    tariffId: number,
-    columnName: string,
-    value: string,
-  ) {
+  function updateCellInput(tariffId: number, columnName: string, value: string) {
     setCellSpecialInputs((previous) => ({
       ...previous,
       [`${tariffId}-${columnName}`]: formatAmountInput(value),
@@ -997,8 +941,8 @@ export default function FeeModelsPage() {
           </nav>
         </aside>
 
-        <section className="flex-1 p-2 md:p-3 overflow-hidden">
-          <div className="mb-2 flex items-center justify-between">
+        <section className="flex-1 overflow-hidden p-2 md:p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
             <h1 className="text-[16px] font-semibold">
               Modèles de frais ({models.length})
             </h1>
@@ -1024,6 +968,26 @@ export default function FeeModelsPage() {
           </div>
 
           <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <label className="mb-1 block text-xs font-bold">
+                Site
+              </label>
+              <select
+                value={selectedSiteId}
+                onChange={(event) => setSelectedSiteId(event.target.value)}
+                className="h-[30px] min-w-[230px] border border-slate-300 bg-white px-2 text-[11px]"
+              >
+                {sites.length === 0 && <option value="">Aucun site</option>}
+
+                {sites.map((site) => (
+                  <option key={site.id} value={String(site.id)}>
+                    Site : {site.name}
+                    {site.active ? " — Actif" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div>
               <label className="mb-1 block text-xs font-bold">
                 Filtre Année scolaire
@@ -1056,8 +1020,8 @@ export default function FeeModelsPage() {
             </div>
           </div>
 
-          <div className="overflow-auto max-h-[calc(100vh-145px)] border border-slate-300 bg-white">
-            <table className="w-full min-w-[620px] border-collapse text-[11px]">
+          <div className="max-h-[calc(100vh-145px)] overflow-auto border border-slate-300 bg-white">
+            <table className="w-full min-w-[720px] border-collapse text-[11px]">
               <thead className="bg-[#2d333d] text-white">
                 <tr>
                   <th className="border border-slate-400 px-2 py-1.5 text-left">
@@ -1065,6 +1029,9 @@ export default function FeeModelsPage() {
                   </th>
                   <th className="border border-slate-400 px-2 py-1.5 text-left">
                     Année scolaire
+                  </th>
+                  <th className="border border-slate-400 px-2 py-1.5 text-left">
+                    Site
                   </th>
                   <th className="border border-slate-400 px-2 py-2 text-center">
                     Action
@@ -1081,6 +1048,10 @@ export default function FeeModelsPage() {
 
                     <td className="border border-slate-300 px-2 py-[4px]">
                       {model.schoolYearName}
+                    </td>
+
+                    <td className="border border-slate-300 px-2 py-[4px]">
+                      {model.siteRef?.name || selectedSite?.name || "-"}
                     </td>
 
                     <td className="border border-slate-300 px-2 py-[4px]">
@@ -1117,8 +1088,8 @@ export default function FeeModelsPage() {
 
                 {filteredModels.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="p-8 text-center text-slate-500">
-                      Aucun modèle de frais.
+                    <td colSpan={4} className="p-8 text-center text-slate-500">
+                      Aucun modèle de frais pour ce site et cette année scolaire.
                     </td>
                   </tr>
                 )}
@@ -1139,6 +1110,21 @@ export default function FeeModelsPage() {
             </div>
 
             <div className="space-y-3 p-4">
+              <Field label="Site">
+                <select
+                  value={selectedSiteId}
+                  onChange={(event) => setSelectedSiteId(event.target.value)}
+                  className="w-full border border-slate-300 bg-white px-2 py-2"
+                >
+                  {sites.map((site) => (
+                    <option key={site.id} value={String(site.id)}>
+                      {site.name}
+                      {site.active ? " — Actif" : ""}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+
               <Field label="Titre">
                 <input
                   value={title}
@@ -1173,14 +1159,14 @@ export default function FeeModelsPage() {
               <div className="flex justify-end gap-2 pt-3">
                 <button
                   onClick={() => setCreateOpen(false)}
-                  className="rounded bg-slate-500 px-3 py-1.5 text-white text-[12px]"
+                  className="rounded bg-slate-500 px-3 py-1.5 text-[12px] text-white"
                 >
                   Fermer
                 </button>
 
                 <button
                   onClick={createModel}
-                  className="rounded bg-blue-600 px-3 py-1.5 text-white text-[12px]"
+                  className="rounded bg-blue-600 px-3 py-1.5 text-[12px] text-white"
                 >
                   Enregistrer
                 </button>
@@ -1198,30 +1184,57 @@ export default function FeeModelsPage() {
                 Editer un modèle de frais
               </h2>
 
-              <button
-                onClick={() => setEditOpen(false)}
-                className="text-lg font-black"
-              >
+              <button onClick={() => setEditOpen(false)} className="text-lg font-black">
                 ×
               </button>
             </div>
 
             <div className="min-h-0 flex-1 overflow-hidden p-3">
               <div className="mb-2 grid gap-2 md:grid-cols-[1fr_auto] md:items-end">
-                <Field label="Titre">
-                  <input
-                    value={title}
-                    onChange={(event) => setTitle(event.target.value)}
-                    className="w-full border border-slate-300 px-2 py-1.5 text-[12px]"
-                  />
-                </Field>
+                <div className="grid gap-2 md:grid-cols-3">
+                  <Field label="Site">
+                    <select
+                      value={selectedSiteId}
+                      onChange={(event) => setSelectedSiteId(event.target.value)}
+                      className="w-full border border-slate-300 bg-white px-2 py-1.5 text-[12px]"
+                    >
+                      {sites.map((site) => (
+                        <option key={site.id} value={String(site.id)}>
+                          {site.name}
+                          {site.active ? " — Actif" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+
+                  <Field label="Année scolaire">
+                    <select
+                      value={schoolYearName}
+                      onChange={(event) => setSchoolYearName(event.target.value)}
+                      className="w-full border border-slate-300 bg-white px-2 py-1.5 text-[12px]"
+                    >
+                      {schoolYears.map((year) => (
+                        <option key={year.id} value={year.name}>
+                          {year.name}
+                          {year.active ? " — Principale" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+
+                  <Field label="Titre">
+                    <input
+                      value={title}
+                      onChange={(event) => setTitle(event.target.value)}
+                      className="w-full border border-slate-300 px-2 py-1.5 text-[12px]"
+                    />
+                  </Field>
+                </div>
 
                 <div className="flex flex-wrap items-center gap-2">
                   <input
                     value={newSpecialColumn}
-                    onChange={(event) =>
-                      setNewSpecialColumn(event.target.value)
-                    }
+                    onChange={(event) => setNewSpecialColumn(event.target.value)}
                     placeholder="Ex: Ancien élève, Famille..."
                     className="h-[30px] w-[180px] border border-slate-300 px-2 text-[11px]"
                   />
@@ -1240,14 +1253,16 @@ export default function FeeModelsPage() {
                   {message}
                 </div>
               )}
+
               <button
                 type="button"
                 onClick={addDraftRow}
                 disabled={isSaving}
-                className="mb-2 rounded bg-emerald-600 px-2.5 py-1.5 text-[11px] text-white font-black disabled:cursor-not-allowed disabled:opacity-60"
+                className="mb-2 rounded bg-emerald-600 px-2.5 py-1.5 text-[11px] font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
               >
                 + Ajouter une ligne
               </button>
+
               <div className="max-h-[54vh] overflow-auto border border-slate-300">
                 <table className="w-full min-w-[760px] border-collapse text-[11px]">
                   <thead className="bg-[#2d333d] text-white">
@@ -1255,11 +1270,9 @@ export default function FeeModelsPage() {
                       <th className="sticky top-0 z-20 w-[190px] min-w-[190px] border border-slate-400 bg-[#2d333d] px-1.5 py-1.5 text-left">
                         LIBELLÉ
                       </th>
-
                       <th className="sticky top-0 z-20 w-[70px] min-w-[70px] border border-slate-400 bg-[#2d333d] px-1.5 py-1.5 text-center">
                         CODE
                       </th>
-
                       <th className="sticky top-0 z-20 w-[92px] min-w-[92px] border border-slate-400 bg-[#2d333d] px-1.5 py-1.5 text-right">
                         MONTANT
                       </th>
@@ -1271,7 +1284,6 @@ export default function FeeModelsPage() {
                         >
                           <div className="flex items-center justify-center gap-1">
                             <span>{column}</span>
-
                             <button
                               onClick={() => removeSpecialColumn(column)}
                               className="rounded bg-red-600 px-1.5 py-[1px] text-[10px] text-white"
@@ -1300,19 +1312,12 @@ export default function FeeModelsPage() {
                       };
 
                       return (
-                        <tr
-                          key={tariff.id}
-                          className="odd:bg-[#eaf2fb] even:bg-white"
-                        >
+                        <tr key={tariff.id} className="odd:bg-[#eaf2fb] even:bg-white">
                           <td className="border border-slate-300 p-[3px]">
                             <input
                               value={savedInput.libelle}
                               onChange={(event) =>
-                                updateSavedTariffInput(
-                                  tariff.id,
-                                  "libelle",
-                                  event.target.value,
-                                )
+                                updateSavedTariffInput(tariff.id, "libelle", event.target.value)
                               }
                               disabled={isSaving}
                               className="h-[30px] w-full border border-slate-300 bg-white px-1.5 py-1 text-[11px] outline-none disabled:bg-slate-100"
@@ -1323,11 +1328,7 @@ export default function FeeModelsPage() {
                             <input
                               value={savedInput.code}
                               onChange={(event) =>
-                                updateSavedTariffInput(
-                                  tariff.id,
-                                  "code",
-                                  event.target.value,
-                                )
+                                updateSavedTariffInput(tariff.id, "code", event.target.value)
                               }
                               disabled={isSaving}
                               className="h-[30px] w-full border border-slate-300 bg-white px-1.5 py-1 text-center text-[11px] outline-none disabled:bg-slate-100"
@@ -1338,11 +1339,7 @@ export default function FeeModelsPage() {
                             <input
                               value={savedInput.montant}
                               onChange={(event) =>
-                                updateSavedTariffInput(
-                                  tariff.id,
-                                  "montant",
-                                  event.target.value,
-                                )
+                                updateSavedTariffInput(tariff.id, "montant", event.target.value)
                               }
                               disabled={isSaving}
                               className="h-[30px] w-full border border-slate-300 bg-white px-1.5 py-1 text-right text-[11px] font-semibold outline-none disabled:bg-slate-100"
@@ -1353,18 +1350,11 @@ export default function FeeModelsPage() {
                             const key = `${tariff.id}-${column}`;
 
                             return (
-                              <td
-                                key={column}
-                                className="border border-slate-300 p-[3px]"
-                              >
+                              <td key={column} className="border border-slate-300 p-[3px]">
                                 <input
                                   value={cellSpecialInputs[key] || ""}
                                   onChange={(event) =>
-                                    updateCellInput(
-                                      tariff.id,
-                                      column,
-                                      event.target.value,
-                                    )
+                                    updateCellInput(tariff.id, column, event.target.value)
                                   }
                                   placeholder="0"
                                   disabled={isSaving}
@@ -1406,13 +1396,7 @@ export default function FeeModelsPage() {
                         <td className="border border-slate-300 p-[3px]">
                           <input
                             value={row.libelle}
-                            onChange={(event) =>
-                              updateDraftRow(
-                                row.tempId,
-                                "libelle",
-                                event.target.value,
-                              )
-                            }
+                            onChange={(event) => updateDraftRow(row.tempId, "libelle", event.target.value)}
                             placeholder="Libellé"
                             disabled={isSaving}
                             className="h-[30px] w-full border border-slate-300 px-1.5 py-1 text-[11px] outline-none disabled:bg-slate-100"
@@ -1422,13 +1406,7 @@ export default function FeeModelsPage() {
                         <td className="border border-slate-300 p-[3px]">
                           <input
                             value={row.code}
-                            onChange={(event) =>
-                              updateDraftRow(
-                                row.tempId,
-                                "code",
-                                event.target.value,
-                              )
-                            }
+                            onChange={(event) => updateDraftRow(row.tempId, "code", event.target.value)}
                             placeholder="Code"
                             disabled={isSaving}
                             className="h-[30px] w-full border border-slate-300 px-1.5 py-1 text-center text-[11px] outline-none disabled:bg-slate-100"
@@ -1438,13 +1416,7 @@ export default function FeeModelsPage() {
                         <td className="border border-slate-300 p-[3px]">
                           <input
                             value={row.montant}
-                            onChange={(event) =>
-                              updateDraftRow(
-                                row.tempId,
-                                "montant",
-                                formatAmountInput(event.target.value),
-                              )
-                            }
+                            onChange={(event) => updateDraftRow(row.tempId, "montant", event.target.value)}
                             placeholder="Montant"
                             disabled={isSaving}
                             className="h-[30px] w-full border border-slate-300 px-1.5 py-1 text-right text-[11px] outline-none disabled:bg-slate-100"
@@ -1452,18 +1424,11 @@ export default function FeeModelsPage() {
                         </td>
 
                         {specialColumns.map((column) => (
-                          <td
-                            key={column}
-                            className="border border-slate-300 p-[3px]"
-                          >
+                          <td key={column} className="border border-slate-300 p-[3px]">
                             <input
                               value={row.specials[column] || ""}
                               onChange={(event) =>
-                                updateDraftSpecial(
-                                  row.tempId,
-                                  column,
-                                  event.target.value,
-                                )
+                                updateDraftSpecial(row.tempId, column, event.target.value)
                               }
                               placeholder={column}
                               disabled={isSaving}
@@ -1493,11 +1458,7 @@ export default function FeeModelsPage() {
                               }
                               disabled={isSaving}
                               className="rounded bg-red-600 px-2 py-1.5 text-[11px] font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
-                              title={
-                                draftRows.length > 1
-                                  ? "Supprimer cette ligne"
-                                  : "Vider cette ligne"
-                              }
+                              title={draftRows.length > 1 ? "Supprimer cette ligne" : "Vider cette ligne"}
                             >
                               ×
                             </button>
