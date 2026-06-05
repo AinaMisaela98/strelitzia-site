@@ -36,14 +36,17 @@ export default function SchoolYearsPage() {
 
     const res = await fetch("/api/school-years", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({ name: name.trim() }),
     });
 
     setLoading(false);
 
+    const data = await res.json().catch(() => null);
+
     if (!res.ok) {
-      const data = await res.json().catch(() => null);
       alert(data?.error || "Erreur création année scolaire");
       return;
     }
@@ -57,8 +60,10 @@ export default function SchoolYearsPage() {
       method: "PUT",
     });
 
+    const data = await res.json().catch(() => null);
+
     if (!res.ok) {
-      alert("Erreur activation");
+      alert(data?.error || "Erreur activation");
       return;
     }
 
@@ -76,11 +81,12 @@ export default function SchoolYearsPage() {
 
     setDeletingId(year.id);
 
-    const res = await fetch(`/api/school-years/${year.id}`, {
+    const res = await fetch(`/api/school-years?id=${year.id}`, {
       method: "DELETE",
     });
 
     const data = await res.json().catch(() => null);
+
     setDeletingId(null);
 
     if (!res.ok) {
@@ -88,6 +94,7 @@ export default function SchoolYearsPage() {
       return;
     }
 
+    alert(data?.message || "Année scolaire supprimée.");
     loadYears();
   }
 
@@ -134,7 +141,6 @@ export default function SchoolYearsPage() {
             </form>
           </div>
 
-          {/* Mobile */}
           <div className="space-y-3 p-3 sm:hidden">
             {years.map((year) => (
               <div
@@ -186,7 +192,6 @@ export default function SchoolYearsPage() {
             )}
           </div>
 
-          {/* Desktop */}
           <div className="hidden p-4 sm:block">
             <table className="w-full text-sm">
               <thead>

@@ -23,7 +23,7 @@ async function requireUser() {
 }
 
 async function ensureActiveSchoolYear() {
-  const activeYear = await prisma.schoolYear.findFirst({
+  let activeYear = await prisma.schoolYear.findFirst({
     where: { active: true },
     orderBy: { id: "desc" },
   });
@@ -49,40 +49,9 @@ async function ensureActiveSchoolYear() {
   });
 }
 
-async function getYearLinks(yearName: string) {
-  const [
-    students,
-    levels,
-    classes,
-    series,
-    feeModels,
-    trainingFees,
-    studentFees,
-    studentPayments,
-    treasuries,
-    treasuryMovements,
-  ] = await Promise.all([
+async function countYearLinks(yearName: string) {
+  const results = await Promise.allSettled([
     prisma.student.count({
-      where: { anneeScolaire: yearName },
-    }),
-
-    prisma.level.count({
-      where: { schoolYearName: yearName },
-    }),
-
-    prisma.classRoom.count({
-      where: { schoolYearName: yearName },
-    }),
-
-    prisma.serie.count({
-      where: { schoolYearName: yearName },
-    }),
-
-    prisma.feeModel.count({
-      where: { schoolYearName: yearName },
-    }),
-
-    prisma.trainingFee.count({
       where: { schoolYearName: yearName },
     }),
 
@@ -94,42 +63,22 @@ async function getYearLinks(yearName: string) {
       where: { schoolYearName: yearName },
     }),
 
-    prisma.treasury.count({
+    prisma.treasuryMovement.count({
       where: { schoolYearName: yearName },
     }),
 
-    prisma.treasuryMovement.count({
+    prisma.treasury.count({
       where: { schoolYearName: yearName },
     }),
   ]);
 
-  const total =
-    students +
-    levels +
-    classes +
-    series +
-    feeModels +
-    trainingFees +
-    studentFees +
-    studentPayments +
-    treasuries +
-    treasuryMovements;
+  return results.reduce((total, result) => {
+    if (result.status === "fulfilled") {
+      return total + result.value;
+    }
 
-  return {
-    total,
-    details: {
-      students,
-      levels,
-      classes,
-      series,
-      feeModels,
-      trainingFees,
-      studentFees,
-      studentPayments,
-      treasuries,
-      treasuryMovements,
-    },
-  };
+    return total;
+  }, 0);
 }
 
 export async function GET() {
@@ -312,14 +261,13 @@ export async function DELETE(req: Request) {
       );
     }
 
-    const links = await getYearLinks(year.name);
+    const totalLinks = await countYearLinks(year.name);
 
-    if (links.total > 0) {
+    if (totalLinks > 0) {
       return NextResponse.json(
         {
           error:
             "Suppression impossible : cette année scolaire contient déjà des données liées.",
-          details: links.details,
         },
         { status: 409 }
       );
