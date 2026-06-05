@@ -837,12 +837,16 @@ export default function TreasuryMovementsPage() {
       const studentById = new Map<number, any>();
       const feeByKey = new Map<string, any>();
 
-      const candidateStudentIds = Array.from(
-        new Set(apiMovements.map((m: any) => getStudentIdFromMovement(m)).filter((id: number) => id > 0))
+      const candidateStudentIds: number[] = Array.from(
+        new Set<number>(
+          apiMovements
+            .map((m: any) => Number(getStudentIdFromMovement(m)))
+            .filter((id: number): id is number => Number.isFinite(id) && id > 0)
+        )
       );
 
       await Promise.all(
-        candidateStudentIds.map(async (studentId: number) => {
+        candidateStudentIds.map(async (studentId) => {
           try {
             const paramsStudent = new URLSearchParams();
             paramsStudent.set("schoolYearName", schoolYearName);
@@ -861,7 +865,7 @@ export default function TreasuryMovementsPage() {
       );
 
       await Promise.all(
-        candidateStudentIds.map(async (studentId: number) => {
+        candidateStudentIds.map(async (studentId) => {
           try {
             const paramsFees = new URLSearchParams();
             paramsFees.set("studentId", String(studentId));
