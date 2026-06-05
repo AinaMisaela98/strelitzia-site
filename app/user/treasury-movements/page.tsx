@@ -672,8 +672,8 @@ export default function TreasuryMovementsPage() {
   const [formMotif, setFormMotif] = useState("");
   const [formDescription, setFormDescription] = useState("");
 
-  const [filterFrom, setFilterFrom] = useState("");
-  const [filterTo, setFilterTo] = useState("");
+  const [filterFrom, setFilterFrom] = useState(todayInput());
+  const [filterTo, setFilterTo] = useState(todayInput());
   const [filterMatricule, setFilterMatricule] = useState("");
   const [filterClasse, setFilterClasse] = useState("");
   const [filterTreasury, setFilterTreasury] = useState("");
@@ -697,22 +697,6 @@ export default function TreasuryMovementsPage() {
   }, [sites, selectedSiteId]);
 
   const selectedSiteName = selectedSite?.name || DEFAULT_DEFAULT_SITE_NAME;
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const params = new URLSearchParams(window.location.search);
-    const urlSiteId = cleanText(params.get("siteId"));
-    const urlYear = cleanText(params.get("schoolYearName") || params.get("year"));
-    const urlTreasuryId = cleanText(params.get("treasuryId"));
-
-    if (urlSiteId) setSelectedSiteId(urlSiteId);
-    if (urlYear) setSchoolYearName(urlYear);
-    if (urlTreasuryId) {
-      setFilterTreasury(urlTreasuryId);
-      setFormTreasuryId(urlTreasuryId);
-    }
-  }, []);
 
   function getValidFormTreasury() {
     const selectedId = Number(formTreasuryId || 0);
@@ -848,14 +832,7 @@ export default function TreasuryMovementsPage() {
       if (activeMain?.id && !formTreasuryId) {
         setFormTreasuryId(String(activeMain.id));
       }
-      const apiMovements = Array.isArray(movementJson.movements)
-        ? movementJson.movements
-        : Array.isArray(movementJson.treasuryMovements)
-          ? movementJson.treasuryMovements
-          : Array.isArray(movementJson.data)
-            ? movementJson.data
-            : [];
-      const apiRealIds = new Set(apiMovements.map((item: any) => String(item?.id || "")).filter(Boolean));
+      const apiMovements = Array.isArray(movementJson.movements) ? movementJson.movements : [];
 
       const studentById = new Map<number, any>();
       const feeByKey = new Map<string, any>();
@@ -1007,12 +984,7 @@ export default function TreasuryMovementsPage() {
         } as Movement;
 
         const itemKeys = getMovementDeleteKeys(item);
-        const comesFromApi = apiRealIds.has(String(item.id || ""));
-
-        // Important: raha mbola miverina avy amin'ny API/base de données ilay mouvement,
-        // dia aseho foana izy. Ny localStorage deletedTreasuryMovementIds dia natao
-        // hanadiovana anciens mouvements localStorage ihany, fa tsy hanakona données API.
-        if (!comesFromApi && itemKeys.some((key) => deletedIds.has(key))) continue;
+        if (itemKeys.some((key) => deletedIds.has(key))) continue;
 
         const key = getMovementStorageKey(item);
         if (!key) continue;
@@ -1322,8 +1294,8 @@ export default function TreasuryMovementsPage() {
       setShowNewModal(false);
       // Affichage filtré par vraie date/heure d'insertion:
       // rehefa mamorona mouvement vaovao dia aseho avy hatrany amin'ny Aujourd'hui.
-      setFilterFrom("");
-      setFilterTo("");
+      setFilterFrom(todayInput());
+      setFilterTo(todayInput());
       setFormDate(todayInput());
       setFormTreasuryId(selectedTreasury?.id ? String(selectedTreasury.id) : mainActiveTreasury?.id ? String(mainActiveTreasury.id) : "");
       setFormType("");
@@ -1385,8 +1357,9 @@ export default function TreasuryMovementsPage() {
   }
 
   function resetFilters() {
-    setFilterFrom("");
-    setFilterTo("");
+    const today = todayInput();
+    setFilterFrom(today);
+    setFilterTo(today);
     setFilterMatricule("");
     setFilterClasse("");
     setFilterTreasury("");
