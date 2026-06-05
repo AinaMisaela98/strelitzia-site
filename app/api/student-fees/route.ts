@@ -1386,17 +1386,17 @@ export async function PATCH(req: Request) {
 
       if (
         modelHasField("StudentFee", "siteId") &&
-        existingFeeAny.siteId &&
-        Number(existingFeeAny.siteId) !== Number(requestedSite.id)
+        (existingFee as any).siteId &&
+        Number((existingFee as any).siteId) !== Number(requestedSite.id)
       ) {
         throw new Error("Ce frais n'appartient pas au site sélectionné");
       }
 
       const existingSite =
-        existingFee.siteId || existingFee.site
+        (existingFee as any).siteId || (existingFee as any).site
           ? {
-              id: existingFee.siteId || requestedSite.id,
-              name: existingFee.site || requestedSite.name,
+              id: (existingFee as any).siteId || requestedSite.id,
+              name: (existingFee as any).site || requestedSite.name,
               code: requestedSite.code,
             }
           : requestedSite;
