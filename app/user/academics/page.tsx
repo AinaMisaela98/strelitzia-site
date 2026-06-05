@@ -371,18 +371,18 @@ export default function AcademicsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 px-2 py-3 sm:px-4 sm:py-5">
-      <div className="mx-auto max-w-5xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
-        <div className="flex flex-col gap-3 border-b bg-slate-950 px-4 py-4 text-white sm:flex-row sm:items-center sm:justify-between">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,#172554_0%,#020617_42%,#020617_100%)] px-2 py-3 text-slate-100 sm:px-4 sm:py-5">
+      <div className="mx-auto max-w-6xl overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.04] shadow-2xl shadow-black/30 backdrop-blur-xl">
+        <div className="flex flex-col gap-4 border-b border-white/10 bg-white/[0.03] px-4 py-5 text-white sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-blue-300">
-              Paramètres académiques
+            <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-amber-300/90">
+              Espace académique
             </p>
-            <h1 className="text-xl font-black sm:text-2xl">
-              Niveaux / Classes / Séries
+            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+              Gestion Académique
             </h1>
-            <p className="text-xs font-semibold text-slate-300">
-              Année scolaire principale : {selectedYear || data.year || "-"} • Site : {currentSiteName}
+            <p className="mt-1 text-xs font-normal text-slate-300/90">
+              Niveaux, classes et séries • {selectedYear || data.year || "-"} • {currentSiteName}
             </p>
           </div>
 
@@ -391,7 +391,7 @@ export default function AcademicsPage() {
               value={selectedSiteId}
               onChange={(event) => setSelectedSiteId(event.target.value)}
               disabled={loadingSites || sites.length === 0}
-              className="h-10 min-w-[220px] rounded-xl border border-white/15 bg-white px-3 text-xs font-black text-slate-950 outline-none disabled:cursor-not-allowed disabled:opacity-60"
+              className="h-10 min-w-[220px] rounded-2xl border border-white/10 bg-slate-950/60 px-3 text-xs font-medium text-slate-100 outline-none transition focus:border-amber-300/50 focus:ring-2 focus:ring-amber-300/10 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {sites.length === 0 && <option value="">Aucun site</option>}
 
@@ -406,7 +406,7 @@ export default function AcademicsPage() {
               value={selectedYear}
               onChange={(event) => setSelectedYear(event.target.value)}
               disabled={loadingYears || schoolYears.length === 0}
-              className="h-10 min-w-[220px] rounded-xl border border-white/15 bg-white px-3 text-xs font-black text-slate-950 outline-none disabled:cursor-not-allowed disabled:opacity-60"
+              className="h-10 min-w-[220px] rounded-2xl border border-white/10 bg-slate-950/60 px-3 text-xs font-medium text-slate-100 outline-none transition focus:border-amber-300/50 focus:ring-2 focus:ring-amber-300/10 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {schoolYears.length === 0 && <option value="">Année scolaire</option>}
 
@@ -419,7 +419,7 @@ export default function AcademicsPage() {
 
             <button
               onClick={() => (window.location.href = "/user")}
-              className="rounded-xl bg-white px-3 py-2 text-xs font-black text-slate-950 shadow sm:w-auto"
+              className="rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-xs font-medium text-slate-100 shadow-sm transition hover:bg-white/15 sm:w-auto"
             >
               ← Retour
             </button>
@@ -427,12 +427,12 @@ export default function AcademicsPage() {
         </div>
 
         {notice && (
-          <div className="mx-3 mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700">
+          <div className="mx-3 mt-3 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-200">
             ✓ {notice}
           </div>
         )}
 
-        <div className="grid grid-cols-1 gap-3 p-3 sm:p-4 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 p-3 sm:p-4 lg:grid-cols-3">
           <Box title="Créer niveau" subtitle="Ex: Primaire">
             <Input value={levelName} onChange={setLevelName} placeholder="Nom du niveau" />
             <PrimaryButton loading={loading} onClick={() => createItem("level")}>
@@ -492,7 +492,7 @@ export default function AcademicsPage() {
               value={serieName}
               onChange={(event) => setSerieName(event.target.value)}
               placeholder={"G6A, G6B, G6C\nou ligne par ligne"}
-              className="mb-2 min-h-[70px] w-full resize-none rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="mb-2 min-h-[78px] w-full resize-none rounded-2xl border border-white/10 bg-slate-950/50 px-3 py-2 text-xs font-normal text-slate-100 outline-none placeholder:text-slate-500 transition focus:border-amber-300/50 focus:ring-2 focus:ring-amber-300/10"
             />
 
             <PrimaryButton loading={loading} onClick={() => createItem("serie")}>
@@ -502,8 +502,8 @@ export default function AcademicsPage() {
         </div>
 
         {edit && (
-          <div className="mx-3 mb-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 shadow-sm sm:mx-4">
-            <p className="mb-2 text-xs font-black text-amber-900">
+          <div className="mx-3 mb-3 rounded-3xl border border-amber-300/20 bg-amber-400/10 p-3 shadow-sm sm:mx-4">
+            <p className="mb-2 text-xs font-semibold text-amber-200">
               Modifier {edit.type === "level" ? "niveau" : edit.type === "class" ? "classe" : "série"}
             </p>
 
@@ -519,7 +519,7 @@ export default function AcademicsPage() {
               <button
                 disabled={loading}
                 onClick={saveEdit}
-                className="rounded-xl bg-amber-600 px-4 py-2 text-xs font-black text-white disabled:opacity-60"
+                className="rounded-2xl bg-amber-400 px-4 py-2 text-xs font-semibold text-slate-950 shadow-sm transition hover:bg-amber-300 disabled:opacity-60"
               >
                 Enregistrer
               </button>
@@ -527,7 +527,7 @@ export default function AcademicsPage() {
               <button
                 disabled={loading}
                 onClick={() => setEdit(null)}
-                className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-black text-slate-700 disabled:opacity-60"
+                className="rounded-2xl border border-white/10 bg-white/10 px-4 py-2 text-xs font-medium text-slate-100 transition hover:bg-white/15 disabled:opacity-60"
               >
                 Annuler
               </button>
@@ -535,29 +535,29 @@ export default function AcademicsPage() {
           </div>
         )}
 
-        <div className="border-t bg-slate-50 p-3 sm:p-4">
+        <div className="border-t border-white/10 bg-slate-950/20 p-3 sm:p-4">
           <div className="mb-3 flex flex-row items-center justify-between gap-2">
             <div>
-              <h2 className="text-base font-black text-slate-950">Liste académique</h2>
-              <p className="text-[11px] font-bold text-slate-500">
+              <h2 className="text-lg font-semibold tracking-tight text-slate-50">Structure académique</h2>
+              <p className="text-[11px] font-normal text-slate-400">
                 {data.levels.length} niveau(x) • {allClasses.length} classe(s) • {totalSeries} série(s) • {currentSiteName}
               </p>
             </div>
 
             <button
               onClick={() => loadData(selectedSiteId, selectedYear)}
-              className="rounded-xl border bg-white px-3 py-2 text-xs font-black text-slate-700 shadow-sm"
+              className="rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-xs font-medium text-slate-100 shadow-sm transition hover:bg-white/15"
             >
               Actualiser
             </button>
           </div>
 
           {pageLoading ? (
-            <p className="rounded-xl bg-white p-5 text-center text-sm font-bold text-slate-500">
+            <p className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 text-center text-sm font-normal text-slate-400">
               Chargement...
             </p>
           ) : data.levels.length === 0 ? (
-            <p className="rounded-xl bg-white p-5 text-center text-sm font-bold text-slate-500">
+            <p className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 text-center text-sm font-normal text-slate-400">
               Aucun niveau créé pour ce site.
             </p>
           ) : (
@@ -571,14 +571,14 @@ export default function AcademicsPage() {
                 return (
                   <div
                     key={level.id}
-                    className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm"
+                    className="rounded-3xl border border-white/10 bg-white/[0.05] p-3 shadow-xl shadow-black/10 backdrop-blur-xl"
                   >
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-amber-300/80">
                           Niveau
                         </p>
-                        <h3 className="truncate text-base font-black text-slate-950">
+                        <h3 className="truncate text-lg font-semibold tracking-tight text-slate-50">
                           {level.name}
                         </h3>
                       </div>
@@ -600,7 +600,7 @@ export default function AcademicsPage() {
                     </div>
 
                     {level.classes.length === 0 ? (
-                      <p className="rounded-xl bg-slate-50 p-3 text-xs font-bold text-slate-400">
+                      <p className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 text-xs font-normal text-slate-400">
                         Aucune classe
                       </p>
                     ) : (
@@ -614,14 +614,14 @@ export default function AcademicsPage() {
                           return (
                             <div
                               key={classe.id}
-                              className="rounded-2xl border border-slate-200 bg-slate-50 p-3"
+                              className="rounded-2xl border border-white/10 bg-slate-950/35 p-3"
                             >
                               <div className="mb-2 flex items-center justify-between gap-2">
                                 <div className="min-w-0">
-                                  <p className="text-[10px] font-black uppercase tracking-widest text-green-600">
+                                  <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-sky-300/80">
                                     Classe
                                   </p>
-                                  <p className="truncate text-sm font-black text-slate-900">
+                                  <p className="truncate text-sm font-semibold text-slate-100">
                                     {classe.name}
                                   </p>
                                 </div>
@@ -649,7 +649,7 @@ export default function AcademicsPage() {
 
                               <div className="flex flex-wrap gap-1.5">
                                 {classe.series.length === 0 && (
-                                  <span className="text-xs font-bold text-slate-400">
+                                  <span className="text-xs font-normal text-slate-400">
                                     Aucune série
                                   </span>
                                 )}
@@ -657,7 +657,7 @@ export default function AcademicsPage() {
                                 {classe.series.map((serie) => (
                                   <span
                                     key={serie.id}
-                                    className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-white px-2 py-1 text-[11px] font-black text-blue-800"
+                                    className="inline-flex items-center gap-1 rounded-full border border-amber-300/20 bg-amber-300/10 px-2 py-1 text-[11px] font-medium text-amber-100"
                                   >
                                     {serie.name}
 
@@ -670,7 +670,7 @@ export default function AcademicsPage() {
                                           classRoomId: classe.id,
                                         })
                                       }
-                                      className="rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700"
+                                      className="rounded-full bg-sky-400/10 px-1.5 py-0.5 text-[10px] text-sky-200 transition hover:bg-sky-400/20"
                                       title="Modifier"
                                     >
                                       ✎
@@ -685,7 +685,7 @@ export default function AcademicsPage() {
                                           label: "série",
                                         })
                                       }
-                                      className="rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] text-red-700"
+                                      className="rounded-full bg-rose-400/10 px-1.5 py-0.5 text-[10px] text-rose-200 transition hover:bg-rose-400/20"
                                       title="Supprimer"
                                     >
                                       ×
@@ -707,16 +707,16 @@ export default function AcademicsPage() {
       </div>
 
       {deleteItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4">
-          <div className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-2xl">
-            <p className="text-sm font-black text-slate-950">Confirmer la suppression</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-slate-950 p-4 text-slate-100 shadow-2xl shadow-black/40">
+            <p className="text-sm font-semibold text-slate-50">Confirmer la suppression</p>
 
-            <p className="mt-2 text-xs font-semibold text-slate-600">
+            <p className="mt-2 text-xs font-normal text-slate-300">
               Supprimer {deleteItem.label} : <b>{deleteItem.name}</b> ?
             </p>
 
             {deleteItem.warning && (
-              <p className="mt-2 rounded-xl bg-red-50 p-2 text-xs font-bold text-red-700">
+              <p className="mt-2 rounded-2xl border border-rose-300/20 bg-rose-500/10 p-2 text-xs font-medium text-rose-200">
                 Attention : {deleteItem.warning}
               </p>
             )}
@@ -725,7 +725,7 @@ export default function AcademicsPage() {
               <button
                 disabled={loading}
                 onClick={() => setDeleteItem(null)}
-                className="flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:opacity-60"
+                className="flex-1 rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-xs font-medium text-slate-100 disabled:opacity-60"
               >
                 Annuler
               </button>
@@ -733,7 +733,7 @@ export default function AcademicsPage() {
               <button
                 disabled={loading}
                 onClick={confirmDelete}
-                className="flex-1 rounded-xl bg-red-600 px-3 py-2 text-xs font-black text-white disabled:opacity-60"
+                className="flex-1 rounded-2xl bg-rose-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-rose-500 disabled:opacity-60"
               >
                 {loading ? "Suppression..." : "Supprimer"}
               </button>
@@ -755,9 +755,9 @@ function Box({
   children: ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-      <h2 className="text-sm font-black text-slate-950">{title}</h2>
-      <p className="mb-2 text-[11px] font-semibold text-slate-500">{subtitle}</p>
+    <div className="rounded-3xl border border-white/10 bg-white/[0.05] p-3 shadow-xl shadow-black/10 backdrop-blur-xl">
+      <h2 className="text-sm font-semibold text-slate-50">{title}</h2>
+      <p className="mb-3 text-[11px] font-normal text-slate-400">{subtitle}</p>
       {children}
     </div>
   );
@@ -777,7 +777,7 @@ function Input({
       value={value}
       onChange={(event) => onChange(event.target.value)}
       placeholder={placeholder}
-      className="mb-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+      className="mb-2 w-full rounded-2xl border border-white/10 bg-slate-950/50 px-3 py-2 text-xs font-normal text-slate-100 outline-none placeholder:text-slate-500 transition focus:border-amber-300/50 focus:ring-2 focus:ring-amber-300/10"
     />
   );
 }
@@ -795,7 +795,7 @@ function Select({
     <select
       value={value}
       onChange={(event) => onChange(event.target.value)}
-      className="mb-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+      className="mb-2 w-full rounded-2xl border border-white/10 bg-slate-950/50 px-3 py-2 text-xs font-normal text-slate-100 outline-none transition focus:border-amber-300/50 focus:ring-2 focus:ring-amber-300/10"
     >
       {children}
     </select>
@@ -815,7 +815,7 @@ function PrimaryButton({
     <button
       disabled={loading}
       onClick={onClick}
-      className="w-full rounded-xl bg-slate-900 px-3 py-2 text-xs font-black text-white shadow-sm transition hover:bg-slate-800 disabled:opacity-60"
+      className="w-full rounded-2xl bg-gradient-to-r from-sky-700 to-sky-600 px-3 py-2 text-xs font-semibold text-white shadow-lg shadow-sky-950/20 transition hover:from-sky-600 hover:to-sky-500 disabled:opacity-60"
     >
       {loading ? "Miandry..." : children}
     </button>
@@ -833,14 +833,14 @@ function Actions({
     <div className="flex shrink-0 items-center gap-1">
       <button
         onClick={onEdit}
-        className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-black text-slate-700 shadow-sm"
+        className="rounded-xl border border-sky-300/20 bg-sky-400/10 px-2.5 py-1.5 text-[11px] font-medium text-sky-200 shadow-sm transition hover:bg-sky-400/20"
       >
         ✎
       </button>
 
       <button
         onClick={onDelete}
-        className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-[11px] font-black text-red-700 shadow-sm"
+        className="rounded-xl border border-rose-300/20 bg-rose-400/10 px-2.5 py-1.5 text-[11px] font-medium text-rose-200 shadow-sm transition hover:bg-rose-400/20"
       >
         🗑
       </button>

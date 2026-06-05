@@ -104,7 +104,18 @@ function formatMoney(value: unknown) {
 }
 
 function isPrincipalTreasury(item: Treasury) {
-  return Boolean(item.isPrincipal || item.isDefault || item.default || item.principale);
+  return Boolean(
+    item.isPrincipal || item.isDefault || item.default || item.principale,
+  );
+}
+
+function getTreasuryBalance(item: Treasury | null | undefined) {
+  if (!item) return 0;
+  return toNumber(item.solde ?? item.balance ?? item.soldeReel);
+}
+
+function canDeleteTreasury(item: Treasury | null | undefined) {
+  return Math.abs(getTreasuryBalance(item)) < 0.01;
 }
 
 function normalizeMovementType(movement: TreasuryMovement) {
@@ -112,14 +123,24 @@ function normalizeMovementType(movement: TreasuryMovement) {
     movement.movementType ||
       movement.type ||
       movement.sens ||
-      movement.operation
+      movement.operation,
   ).toUpperCase();
 
-  if (raw === "DEBIT" || raw === "SORTIE" || raw === "DEPENSE" || raw === "DÉPENSE") {
+  if (
+    raw === "DEBIT" ||
+    raw === "SORTIE" ||
+    raw === "DEPENSE" ||
+    raw === "DÉPENSE"
+  ) {
     return "DEBIT";
   }
 
-  if (raw === "CREDIT" || raw === "ENTREE" || raw === "ENTRÉE" || raw === "RECETTE") {
+  if (
+    raw === "CREDIT" ||
+    raw === "ENTREE" ||
+    raw === "ENTRÉE" ||
+    raw === "RECETTE"
+  ) {
     return "CREDIT";
   }
 
@@ -133,10 +154,18 @@ function getMovementAmount(movement: TreasuryMovement) {
   const type = normalizeMovementType(movement);
 
   if (type === "DEBIT") {
-    return toNumber(movement.debit) || toNumber(movement.amount) || toNumber(movement.montant);
+    return (
+      toNumber(movement.debit) ||
+      toNumber(movement.amount) ||
+      toNumber(movement.montant)
+    );
   }
 
-  return toNumber(movement.credit) || toNumber(movement.amount) || toNumber(movement.montant);
+  return (
+    toNumber(movement.credit) ||
+    toNumber(movement.amount) ||
+    toNumber(movement.montant)
+  );
 }
 
 function normalizeSchoolYears(data: any): SchoolYear[] {
@@ -155,7 +184,9 @@ function normalizeSchoolYears(data: any): SchoolYear[] {
 }
 
 function normalizeSites(data: any): Site[] {
-  const raw = Array.isArray(data) ? data : data?.sites || data?.data || data?.items || [];
+  const raw = Array.isArray(data)
+    ? data
+    : data?.sites || data?.data || data?.items || [];
 
   return (Array.isArray(raw) ? raw : [])
     .map((item: any) => ({
@@ -168,7 +199,9 @@ function normalizeSites(data: any): Site[] {
 }
 
 function normalizeTreasuries(data: any): Treasury[] {
-  const raw = Array.isArray(data) ? data : data?.treasuries || data?.data || data?.items || [];
+  const raw = Array.isArray(data)
+    ? data
+    : data?.treasuries || data?.data || data?.items || [];
 
   return (Array.isArray(raw) ? raw : []).map((item: any) => ({
     ...item,
@@ -178,7 +211,8 @@ function normalizeTreasuries(data: any): Treasury[] {
     active: item.active !== false,
     siteId: item.siteId ?? null,
     site: item.site ?? null,
-    schoolYearName: item.schoolYearName || item.anneeScolaire || item.year || DEFAULT_YEAR,
+    schoolYearName:
+      item.schoolYearName || item.anneeScolaire || item.year || DEFAULT_YEAR,
     totalEntree: Number(item.totalEntree ?? item.totalCredit ?? 0),
     totalSortie: Number(item.totalSortie ?? item.totalDebit ?? 0),
     solde: Number(item.solde ?? item.balance ?? item.soldeReel ?? 0),
@@ -188,12 +222,19 @@ function normalizeTreasuries(data: any): Treasury[] {
 function normalizeMovementRows(data: any): TreasuryMovement[] {
   const raw = Array.isArray(data)
     ? data
-    : data?.movements || data?.treasuryMovements || data?.data || data?.items || [];
+    : data?.movements ||
+      data?.treasuryMovements ||
+      data?.data ||
+      data?.items ||
+      [];
 
   return Array.isArray(raw) ? raw : [];
 }
 
-function applyRealBalancesToTreasuries(treasuries: Treasury[], movements: TreasuryMovement[]) {
+function applyRealBalancesToTreasuries(
+  treasuries: Treasury[],
+  movements: TreasuryMovement[],
+) {
   return treasuries.map((treasury) => {
     let totalEntree = 0;
     let totalSortie = 0;
@@ -224,8 +265,14 @@ function applyRealBalancesToTreasuries(treasuries: Treasury[], movements: Treasu
 }
 
 function getRealTotals(treasuries: Treasury[]) {
-  const totalEntree = treasuries.reduce((sum, item) => sum + toNumber(item.totalEntree), 0);
-  const totalSortie = treasuries.reduce((sum, item) => sum + toNumber(item.totalSortie), 0);
+  const totalEntree = treasuries.reduce(
+    (sum, item) => sum + toNumber(item.totalEntree),
+    0,
+  );
+  const totalSortie = treasuries.reduce(
+    (sum, item) => sum + toNumber(item.totalSortie),
+    0,
+  );
   const soldeGlobal = totalEntree - totalSortie;
 
   return {
@@ -246,9 +293,11 @@ export default function TreasuriesPage() {
   const [schoolYearName, setSchoolYearName] = useState(DEFAULT_YEAR);
   const [sites, setSites] = useState<Site[]>([]);
   const [selectedSiteId, setSelectedSiteId] = useState("");
+  const [selectedStatusTreasuryId, setSelectedStatusTreasuryId] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -257,14 +306,20 @@ export default function TreasuriesPage() {
   const [type, setType] = useState("CAISSE");
   const [isDefault, setIsDefault] = useState(false);
 
-  const [actionMenu, setActionMenu] = useState<{ id: number; top: number; left: number } | null>(null);
+  const [actionMenu, setActionMenu] = useState<{
+    id: number;
+    top: number;
+    left: number;
+  } | null>(null);
 
   const loadSeqRef = useRef(0);
   const initializedYearRef = useRef(false);
   const initializedSiteRef = useRef(false);
 
   const selectedSite = useMemo(() => {
-    return sites.find((item) => String(item.id) === String(selectedSiteId)) || null;
+    return (
+      sites.find((item) => String(item.id) === String(selectedSiteId)) || null
+    );
   }, [sites, selectedSiteId]);
 
   const selectedSiteName = selectedSite?.name || "Strelitzia School";
@@ -273,10 +328,28 @@ export default function TreasuriesPage() {
     return dashboard?.treasuries ?? treasuries;
   }, [dashboard, treasuries]);
 
-  const principalId = useMemo(() => {
-    const found = sourceRows.find(isPrincipalTreasury);
-    return found?.id || null;
+  const activeSourceRows = useMemo(() => {
+    return sourceRows.filter((item) => item.active !== false);
   }, [sourceRows]);
+
+  const principalId = useMemo(() => {
+    const found =
+      activeSourceRows.find(isPrincipalTreasury) ||
+      sourceRows.find(isPrincipalTreasury);
+    return found?.id || null;
+  }, [activeSourceRows, sourceRows]);
+
+  const statusTreasury = useMemo(() => {
+    return (
+      sourceRows.find(
+        (item) => String(item.id) === String(selectedStatusTreasuryId),
+      ) ||
+      activeSourceRows.find((item) => item.id === principalId) ||
+      activeSourceRows[0] ||
+      sourceRows[0] ||
+      null
+    );
+  }, [activeSourceRows, principalId, selectedStatusTreasuryId, sourceRows]);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -298,7 +371,7 @@ export default function TreasuriesPage() {
         .filter(Boolean)
         .join(" ")
         .toLowerCase()
-        .includes(q)
+        .includes(q),
     );
   }, [sourceRows, search]);
 
@@ -327,7 +400,9 @@ export default function TreasuriesPage() {
 
   const loadSites = useCallback(async () => {
     try {
-      const res = await fetch(`/api/sites?_ts=${Date.now()}`, { cache: "no-store" });
+      const res = await fetch(`/api/sites?_ts=${Date.now()}`, {
+        cache: "no-store",
+      });
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) return;
@@ -374,30 +449,39 @@ export default function TreasuriesPage() {
 
       const [treasuryRes, dashboardRes, movementRes] = await Promise.all([
         fetch(`/api/treasuries${qs}`, { cache: "no-store" }),
-        fetch(`/api/treasury-dashboard${qs}`, { cache: "no-store" }).catch(() => null),
+        fetch(`/api/treasury-dashboard${qs}`, { cache: "no-store" }).catch(
+          () => null,
+        ),
         fetch(`/api/treasury-movements${qs}`, { cache: "no-store" }),
       ]);
 
       const treasuryJson = await treasuryRes.json().catch(() => ({}));
-      const dashboardJson = dashboardRes ? await dashboardRes.json().catch(() => ({})) : {};
+      const dashboardJson = dashboardRes
+        ? await dashboardRes.json().catch(() => ({}))
+        : {};
       const movementJson = await movementRes.json().catch(() => ({}));
 
       if (seq !== loadSeqRef.current) return;
 
-      if (!treasuryRes.ok) throw new Error(treasuryJson.error || "Erreur chargement trésoreries");
-      if (dashboardRes && !dashboardRes.ok) throw new Error(dashboardJson.error || "Erreur chargement dashboard");
-      if (!movementRes.ok) throw new Error(movementJson.error || "Erreur chargement mouvements");
+      if (!treasuryRes.ok)
+        throw new Error(treasuryJson.error || "Erreur chargement trésoreries");
+      if (dashboardRes && !dashboardRes.ok)
+        throw new Error(dashboardJson.error || "Erreur chargement dashboard");
+      if (!movementRes.ok)
+        throw new Error(movementJson.error || "Erreur chargement mouvements");
 
       const movementRows = normalizeMovementRows(movementJson);
       const loadedTreasuries = applyRealBalancesToTreasuries(
         normalizeTreasuries(treasuryJson),
-        movementRows
+        movementRows,
       );
 
       const dashboardSourceTreasuries = normalizeTreasuries(dashboardJson);
       const loadedDashboardTreasuries = applyRealBalancesToTreasuries(
-        dashboardSourceTreasuries.length > 0 ? dashboardSourceTreasuries : loadedTreasuries,
-        movementRows
+        dashboardSourceTreasuries.length > 0
+          ? dashboardSourceTreasuries
+          : loadedTreasuries,
+        movementRows,
       );
       const realTotals = getRealTotals(loadedDashboardTreasuries);
 
@@ -423,8 +507,29 @@ export default function TreasuriesPage() {
     if (!selectedSiteId) return;
 
     setSearch("");
+    setSelectedStatusTreasuryId("");
     loadData(schoolYearName, selectedSiteId);
   }, [schoolYearName, selectedSiteId, loadData]);
+
+  useEffect(() => {
+    if (sourceRows.length === 0) {
+      setSelectedStatusTreasuryId("");
+      return;
+    }
+
+    const selectedStillExists = sourceRows.some(
+      (item) => String(item.id) === String(selectedStatusTreasuryId),
+    );
+
+    if (selectedStillExists) return;
+
+    const nextTreasury =
+      activeSourceRows.find((item) => item.id === principalId) ||
+      activeSourceRows[0] ||
+      sourceRows[0];
+
+    setSelectedStatusTreasuryId(nextTreasury ? String(nextTreasury.id) : "");
+  }, [activeSourceRows, principalId, selectedStatusTreasuryId, sourceRows]);
 
   function changeSite(siteId: string) {
     setSelectedSiteId(siteId);
@@ -455,17 +560,32 @@ export default function TreasuriesPage() {
     setModalOpen(true);
   }
 
-  function toggleActionMenu(e: React.MouseEvent<HTMLButtonElement>, id: number) {
+  function toggleActionMenu(
+    e: React.MouseEvent<HTMLButtonElement>,
+    id: number,
+  ) {
+    e.stopPropagation();
     const rect = e.currentTarget.getBoundingClientRect();
+    const menuWidth = 190;
+    const menuHeight = 204;
+    const margin = 12;
+    const left = Math.min(
+      Math.max(margin, rect.right - menuWidth),
+      Math.max(margin, window.innerWidth - menuWidth - margin),
+    );
+    const top =
+      rect.bottom + menuHeight + margin > window.innerHeight
+        ? Math.max(margin, rect.top - menuHeight - 8)
+        : rect.bottom + 8;
 
     setActionMenu((current) =>
       current?.id === id
         ? null
         : {
             id,
-            top: rect.bottom + 6,
-            left: Math.max(12, rect.right - 190),
-          }
+            top,
+            left,
+          },
     );
   }
 
@@ -524,7 +644,7 @@ export default function TreasuriesPage() {
     setActionMenu(null);
 
     const ok = confirm(
-      `Définir "${item.name}" comme trésorerie principale pour ${schoolYearName} sur ${selectedSiteName} ?`
+      `Définir "${item.name}" comme trésorerie principale pour ${schoolYearName} sur ${selectedSiteName} ?`,
     );
 
     if (!ok) return;
@@ -559,274 +679,694 @@ export default function TreasuriesPage() {
     await loadData(schoolYearName, selectedSiteId);
   }
 
-  async function deleteTreasury(id: number) {
-    setActionMenu(null);
-
-    const ok = confirm("Supprimer cette trésorerie ? Si elle contient déjà des mouvements, elle sera désactivée.");
-
-    if (!ok) return;
-
+  async function requestDeleteTreasury(item: Treasury) {
     const params = new URLSearchParams();
-    params.set("id", String(id));
-    params.set("schoolYearName", schoolYearName);
+    params.set("id", String(item.id));
+    params.set("schoolYearName", cleanYear(schoolYearName));
     if (selectedSiteId) params.set("siteId", selectedSiteId);
 
-    const res = await fetch(`/api/treasuries?${params.toString()}`, {
-      method: "DELETE",
-    });
+    const payload = {
+      id: item.id,
+      treasuryId: item.id,
+      schoolYearName: cleanYear(schoolYearName),
+      siteId: selectedSiteId ? Number(selectedSiteId) : undefined,
+      site: item.site || selectedSiteName,
+      siteName: item.site || selectedSiteName,
+    };
 
-    const data = await res.json().catch(() => ({}));
+    const attempts = [
+      () =>
+        fetch(`/api/treasuries?${params.toString()}`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }),
+      () =>
+        fetch(`/api/treasuries/${item.id}?${params.toString()}`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }),
+      () =>
+        fetch(`/api/treasuries?id=${item.id}`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }),
+    ];
 
-    if (!res.ok) {
-      alert(data.error || "Erreur suppression");
+    let lastData: any = {};
+    let lastStatus = 0;
+
+    for (const run of attempts) {
+      const res = await run();
+      lastStatus = res.status;
+      lastData = await res.json().catch(() => ({}));
+
+      if (res.ok) return lastData;
+
+      const message = text(lastData.error || lastData.message).toLowerCase();
+      const retryable =
+        res.status === 404 ||
+        res.status === 405 ||
+        message.includes("not found") ||
+        message.includes("method") ||
+        message.includes("id") ||
+        message.includes("introuvable");
+
+      if (!retryable) break;
+    }
+
+    throw new Error(
+      lastData.error ||
+        lastData.message ||
+        `Erreur suppression${lastStatus ? ` (${lastStatus})` : ""}`,
+    );
+  }
+
+  async function deleteTreasury(id: number) {
+    if (deletingId) return;
+
+    const item = sourceRows.find((row) => Number(row.id) === Number(id));
+    const solde = getTreasuryBalance(item);
+
+    setActionMenu(null);
+
+    if (!item) {
+      alert("Trésorerie introuvable. Veuillez actualiser la page.");
       return;
     }
 
-    await loadData(schoolYearName, selectedSiteId);
+    if (!canDeleteTreasury(item)) {
+      alert(
+        `Suppression bloquée : cette trésorerie contient encore un solde de ${formatMoney(solde)} Ar. Ramenez le solde à 0 Ar avant de la supprimer.`,
+      );
+      return;
+    }
+
+    const ok = confirm(
+      `Supprimer définitivement la trésorerie "${item.name}" ? Son solde est à 0 Ar, donc la suppression est autorisée.`,
+    );
+
+    if (!ok) return;
+
+    setDeletingId(item.id);
+
+    try {
+      await requestDeleteTreasury(item);
+
+      setTreasuries((current) =>
+        current.filter((row) => Number(row.id) !== Number(item.id)),
+      );
+      setDashboard((current) =>
+        current
+          ? {
+              ...current,
+              treasuries: (current.treasuries || []).filter(
+                (row) => Number(row.id) !== Number(item.id),
+              ),
+            }
+          : current,
+      );
+
+      await loadData(schoolYearName, selectedSiteId);
+      alert("Trésorerie supprimée avec succès.");
+    } catch (error: any) {
+      alert(error?.message || "Erreur suppression");
+    } finally {
+      setDeletingId(null);
+    }
   }
+
+  const totalEntree = statusTreasury
+    ? toNumber(statusTreasury.totalEntree ?? statusTreasury.totalCredit)
+    : toNumber(dashboard?.totals?.totalEntree);
+  const totalSortie = statusTreasury
+    ? toNumber(statusTreasury.totalSortie ?? statusTreasury.totalDebit)
+    : toNumber(dashboard?.totals?.totalSortie);
+  const soldeGlobal = statusTreasury
+    ? toNumber(
+        statusTreasury.solde ??
+          statusTreasury.balance ??
+          statusTreasury.soldeReel,
+      )
+    : toNumber(dashboard?.totals?.soldeGlobal ?? dashboard?.totals?.solde);
+  const activeTreasuriesCount = activeSourceRows.length;
+  const principalTreasury =
+    sourceRows.find((item) => item.id === principalId) || null;
 
   return (
     <main
-      className="min-h-screen bg-[#f4f6f8] text-[12px] text-slate-900"
+      className="min-h-screen overflow-hidden bg-[#080d16] text-[13px] font-normal text-slate-100 antialiased"
       onClick={() => actionMenu && setActionMenu(null)}
     >
-      <div className="px-3 py-3 md:px-4">
-        <div className="flex flex-col gap-2 border-b border-slate-300 pb-2 md:flex-row md:items-center md:justify-between">
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,rgba(220,38,38,0.13),transparent_30%),radial-gradient(circle_at_top_right,rgba(59,130,246,0.09),transparent_28%),linear-gradient(135deg,#070b12_0%,#0d1422_55%,#070b12_100%)]" />
+
+      <div className="relative mx-auto w-full max-w-[1380px] px-3 py-3 sm:px-4 lg:px-5">
+        <header className="mb-3 flex flex-col gap-3 border-b border-white/10 pb-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <h1 className="text-[16px] font-bold text-slate-800">
-              Listes des Trésoreries ({rows.length})
+            <div className="mb-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
+              <span>Accueil</span>
+              <span className="text-slate-600">›</span>
+              <span>Trésorerie</span>
+              <span className="text-slate-600">›</span>
+              <span className="font-normal text-white">Listes</span>
+            </div>
+            <h1 className="text-xl font-semibold tracking-tight text-white sm:text-2xl">
+              Gestion des trésoreries
             </h1>
-            <p className="mt-0.5 text-[11px] text-slate-500">
-              Année scolaire : <span className="font-bold text-blue-700">{schoolYearName}</span>
-              <span className="mx-2">•</span>
-              Site : <span className="font-bold text-blue-700">{selectedSiteName}</span>
+            <p className="mt-1.5 max-w-3xl text-[13px] leading-5 text-slate-400">
+              Affichage isolé par site et par année scolaire active. Les soldes
+              sont recalculés à partir des mouvements CREDIT et DEBIT.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => loadData(schoolYearName, selectedSiteId)}
               disabled={loading}
-              className="h-8 rounded-[3px] bg-[#0b9aad] px-3 text-[12px] font-bold text-white shadow-sm hover:bg-[#087f8f] disabled:opacity-50"
+              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 font-normal text-white shadow-lg shadow-black/20 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {loading ? "Chargement..." : "↻ Actualiser"}
+              <span className={loading ? "animate-spin" : ""}>↻</span>
+              {loading ? "Chargement..." : "Actualiser"}
             </button>
-
-            <select
-              value={schoolYearName}
-              onChange={(e) => setSchoolYearName(cleanYear(e.target.value))}
-              className="h-8 min-w-[145px] rounded-[3px] border border-blue-700 bg-blue-700 px-2 text-[12px] font-bold text-white outline-none"
-            >
-              {schoolYears.length === 0 ? (
-                <option value={DEFAULT_YEAR}>{DEFAULT_YEAR}</option>
-              ) : (
-                schoolYears.map((year) => {
-                  const value = getYearName(year);
-                  return (
-                    <option key={value} value={value}>
-                      {value}
-                      {year.active ? " • active" : ""}
-                    </option>
-                  );
-                })
-              )}
-            </select>
-
-            <select
-              value={selectedSiteId}
-              onChange={(e) => changeSite(e.target.value)}
-              className="h-8 rounded-[3px] border border-slate-700 bg-[#252b33] px-2 text-[12px] font-bold text-white outline-none"
-            >
-              {sites.length === 0 ? (
-                <option value="">Sites : Strelitzia School</option>
-              ) : (
-                sites.map((item) => (
-                  <option key={item.id} value={String(item.id)}>
-                    Sites : {item.name}
-                    {item.active ? " • actif" : ""}
-                  </option>
-                ))
-              )}
-            </select>
-
             <button
               onClick={openCreate}
-              className="h-8 rounded-[3px] border border-slate-900 bg-white px-3 text-[12px] font-semibold text-slate-900 shadow-sm hover:bg-slate-100"
+              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-red-700 to-red-600 px-3 font-normal text-white shadow-xl shadow-red-950/40 transition hover:from-red-600 hover:to-red-500"
             >
-              ⊕ Ajout
+              <span className="flex h-4 w-4 items-center justify-center rounded-full border border-white text-sm leading-none">
+                +
+              </span>
+              Ajouter
             </button>
           </div>
-        </div>
+        </header>
 
-        <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <div className="rounded-[4px] border border-blue-200 bg-blue-50 px-3 py-2 text-[11px] text-blue-900">
-            La trésorerie principale est marquée par une case bleue cochée. Une seule doit être principale par site et par année scolaire.
+        <section className="mb-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-lg border border-white/10 bg-white/[0.045] p-3 shadow-2xl shadow-black/20 backdrop-blur">
+            <p className="text-[10px] font-normal uppercase tracking-[0.11em] text-slate-500">
+              Trésoreries
+            </p>
+            <div className="mt-2 flex items-end justify-between gap-2">
+              <p className="text-lg font-semibold text-white">
+                {activeTreasuriesCount}
+              </p>
+              <span className="rounded-full bg-red-600/15 px-2.5 py-0.5 text-[11px] font-normal text-red-300">
+                Actives
+              </span>
+            </div>
           </div>
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Recherche..."
-            className="h-8 w-full border border-slate-300 bg-white px-2 outline-none focus:border-blue-500 md:max-w-[220px]"
-          />
-        </div>
+          <div className="rounded-lg border border-emerald-400/15 bg-emerald-400/[0.055] p-3 shadow-2xl shadow-black/20 backdrop-blur">
+            <p className="text-[10px] font-normal uppercase tracking-[0.11em] text-emerald-300/70">
+              Crédit sélectionné
+            </p>
+            <p className="mt-2 text-base font-semibold text-emerald-300">
+              {formatMoney(totalEntree)} Ar
+            </p>
+          </div>
+          <div className="rounded-lg border border-red-400/15 bg-red-400/[0.055] p-3 shadow-2xl shadow-black/20 backdrop-blur">
+            <p className="text-[10px] font-normal uppercase tracking-[0.11em] text-red-300/70">
+              Débit sélectionné
+            </p>
+            <p className="mt-2 text-base font-semibold text-red-300">
+              {formatMoney(totalSortie)} Ar
+            </p>
+          </div>
+          <div className="rounded-lg border border-blue-400/15 bg-blue-400/[0.055] p-3 shadow-2xl shadow-black/20 backdrop-blur">
+            <p className="text-[10px] font-normal uppercase tracking-[0.11em] text-blue-300/70">
+              Solde sélectionné
+            </p>
+            <p
+              className={
+                soldeGlobal < 0
+                  ? "mt-2 text-base font-semibold text-red-300"
+                  : "mt-2 text-base font-semibold text-blue-300"
+              }
+            >
+              {formatMoney(soldeGlobal)} Ar
+            </p>
+          </div>
+        </section>
 
-        <section className="mt-2 overflow-x-auto overflow-y-visible border border-slate-300 bg-white shadow-sm">
-          <table className="w-full min-w-[1220px] border-collapse text-[11px]">
-            <thead>
-              <tr className="bg-[#2d333c] text-left text-white">
-                <th className="w-[70px] border-r border-slate-500 px-2 py-2 text-center font-bold">Principale</th>
-                <th className="w-[230px] border-r border-slate-500 px-2 py-2 font-bold">Nom</th>
-                <th className="w-[130px] border-r border-slate-500 px-2 py-2 font-bold">Année scolaire</th>
-                <th className="w-[130px] border-r border-slate-500 px-2 py-2 font-bold">Site</th>
-                <th className="w-[95px] border-r border-slate-500 px-2 py-2 font-bold">TYPE</th>
-                <th className="w-[145px] border-r border-slate-500 px-2 py-2 font-bold">Nom du compte</th>
-                <th className="w-[155px] border-r border-slate-500 px-2 py-2 font-bold">numero du compte</th>
-                <th className="w-[190px] border-r border-slate-500 px-2 py-2 font-bold">banque Correspondante</th>
-                <th className="w-[95px] border-r border-slate-500 px-2 py-2 font-bold">solde</th>
-                <th className="w-[80px] border-r border-slate-500 px-2 py-2 font-bold">Adresse</th>
-                <th className="w-[45px] border-r border-slate-500 px-2 py-2 font-bold">bic</th>
-                <th className="w-[95px] px-2 py-2 text-center font-bold">Actions</th>
-              </tr>
-            </thead>
+        <section className="mb-3 rounded-lg border border-white/10 bg-white/[0.045] p-2.5 shadow-xl shadow-black/25 backdrop-blur sm:p-3">
+          <div className="grid gap-2.5 lg:grid-cols-[1fr_1fr_1fr_1.15fr_auto] lg:items-end">
+            <label className="block">
+              <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.12em] text-slate-500">
+                Année scolaire
+              </span>
+              <select
+                value={schoolYearName}
+                onChange={(e) => setSchoolYearName(cleanYear(e.target.value))}
+                className="h-8 w-full rounded-lg border border-white/10 bg-[#111827] px-2.5 text-[13px] font-normal text-white outline-none transition focus:border-red-500"
+              >
+                {schoolYears.length === 0 ? (
+                  <option value={DEFAULT_YEAR}>{DEFAULT_YEAR}</option>
+                ) : (
+                  schoolYears.map((year) => {
+                    const value = getYearName(year);
+                    return (
+                      <option key={value} value={value}>
+                        {value}
+                        {year.active ? " • active" : ""}
+                      </option>
+                    );
+                  })
+                )}
+              </select>
+            </label>
 
-            <tbody>
-              {rows.map((item) => {
-                const checked = item.id === principalId || isPrincipalTreasury(item);
-                return (
-                  <tr key={item.id} className="border-b border-slate-300 hover:bg-[#c1eee4]">
-                    <td className="border-r border-slate-300 px-2 py-[6px] text-center">
-                      <button
-                        type="button"
-                        onClick={() => setAsPrincipal(item)}
-                        title={checked ? "Trésorerie principale" : "Définir comme principale"}
-                        className={
-                          checked
-                            ? "inline-flex h-6 w-6 items-center justify-center rounded-[5px] border border-blue-700 bg-blue-600 text-white shadow-sm"
-                            : "inline-flex h-6 w-6 items-center justify-center rounded-[5px] border border-slate-300 bg-white text-transparent hover:border-blue-500 hover:bg-blue-50"
-                        }
-                      >
-                        ✓
-                      </button>
-                    </td>
-                    <td className="border-r border-slate-300 px-2 py-[6px] font-semibold text-slate-900">
+            <label className="block">
+              <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.12em] text-slate-500">
+                Site
+              </span>
+              <select
+                value={selectedSiteId}
+                onChange={(e) => changeSite(e.target.value)}
+                className="h-8 w-full rounded-lg border border-white/10 bg-[#111827] px-2.5 text-[13px] font-normal text-white outline-none transition focus:border-red-500"
+              >
+                {sites.length === 0 ? (
+                  <option value="">Strelitzia School</option>
+                ) : (
+                  sites.map((item) => (
+                    <option key={item.id} value={String(item.id)}>
                       {item.name}
-                      {checked && (
-                        <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
-                          Principale
-                        </span>
-                      )}
-                    </td>
-                    <td className="border-r border-slate-300 px-2 py-[6px] font-semibold text-blue-700">
-                      {item.schoolYearName || schoolYearName}
-                    </td>
-                    <td className="border-r border-slate-300 px-2 py-[6px]">
-                      {item.site || selectedSiteName}
-                    </td>
-                    <td className="border-r border-slate-300 px-2 py-[6px]">{normalizeType(item.type)}</td>
-                    <td className="border-r border-slate-300 px-2 py-[6px]">{item.accountName || ""}</td>
-                    <td className="border-r border-slate-300 px-2 py-[6px]">{item.accountNumber || ""}</td>
-                    <td className="border-r border-slate-300 px-2 py-[6px]">{item.bankName || ""}</td>
-                    <td
-                      className={`border-r border-slate-300 px-2 py-[6px] text-right font-black ${
-                        Number(item.solde || 0) < 0 ? "text-red-700" : "text-emerald-700"
-                      }`}
-                      title={`Solde réel = total CREDIT (${formatMoney(item.totalEntree)}) - total DEBIT (${formatMoney(item.totalSortie)})`}
-                    >
-                      {formatMoney(item.solde)} Ar
-                    </td>
-                    <td className="border-r border-slate-300 px-2 py-[6px]">{item.address || ""}</td>
-                    <td className="border-r border-slate-300 px-2 py-[6px]">{item.bic || ""}</td>
-                    <td className="px-2 py-[4px] text-center">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleActionMenu(e, item.id);
-                        }}
-                        className="inline-flex h-7 items-center gap-1 rounded-[4px] border border-slate-300 bg-white px-2 text-[11px] font-bold text-slate-800 shadow-sm hover:border-blue-500 hover:bg-blue-50 hover:text-blue-700"
-                      >
-                        Actions <span className="text-[10px]">▾</span>
-                      </button>
+                      {item.active ? " • actif" : ""}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
 
-                      {actionMenu?.id === item.id && (
-                        <div
-                          onClick={(e) => e.stopPropagation()}
-                          className="fixed z-[9999] w-[190px] overflow-hidden rounded-[6px] border border-slate-200 bg-white text-left shadow-2xl"
-                          style={{ top: actionMenu.top, left: actionMenu.left }}
+            <label className="block">
+              <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.12em] text-slate-500">
+                Trésorerie des statuts
+              </span>
+              <select
+                value={selectedStatusTreasuryId}
+                onChange={(e) => setSelectedStatusTreasuryId(e.target.value)}
+                className="h-8 w-full rounded-lg border border-white/10 bg-[#111827] px-2.5 text-[13px] font-normal text-white outline-none transition focus:border-red-500"
+              >
+                {sourceRows.length === 0 ? (
+                  <option value="">Aucune trésorerie</option>
+                ) : (
+                  sourceRows.map((item) => (
+                    <option key={item.id} value={String(item.id)}>
+                      {item.name}
+                      {item.id === principalId || isPrincipalTreasury(item)
+                        ? " • principale"
+                        : ""}
+                      {item.active === false ? " • inactive" : ""}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.12em] text-slate-500">
+                Recherche
+              </span>
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Rechercher par nom, site, banque, compte..."
+                className="h-8 w-full rounded-lg border border-white/10 bg-[#111827] px-2.5 text-[13px] font-normal text-white outline-none placeholder:text-slate-600 transition focus:border-red-500"
+              />
+            </label>
+
+            <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-2.5 py-1.5 text-[12px] text-red-100">
+              <span className="font-medium">Statut :</span>{" "}
+              {statusTreasury?.name || principalTreasury?.name || "Non définie"}
+            </div>
+          </div>
+        </section>
+
+        <section className="overflow-visible rounded-lg border border-white/10 bg-white/[0.045] shadow-xl shadow-black/30 backdrop-blur">
+          <div className="flex flex-col gap-2.5 border-b border-white/10 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-white">
+                Liste des trésoreries
+              </h2>
+              <p className="mt-0.5 text-[12px] text-slate-400">
+                Affichage de {rows.length} résultat{rows.length > 1 ? "s" : ""}{" "}
+                pour {selectedSiteName} • {schoolYearName}
+              </p>
+            </div>
+          </div>
+
+          <div className="hidden overflow-x-auto lg:block">
+            <table className="w-full min-w-[1080px] border-collapse text-left">
+              <thead>
+                <tr className="bg-white/[0.055] text-[10px] uppercase tracking-[0.07em] text-slate-300">
+                  <th className="px-3 py-2.5 font-medium">Principale</th>
+                  <th className="px-3 py-2.5 font-medium">Nom</th>
+                  <th className="px-3 py-2.5 font-medium">Année</th>
+                  <th className="px-3 py-2.5 font-medium">Site</th>
+                  <th className="px-3 py-2.5 font-medium">Type</th>
+                  <th className="px-3 py-2.5 font-medium">Compte</th>
+                  <th className="px-3 py-2.5 font-medium">Banque</th>
+                  <th className="px-3 py-2.5 text-right font-semibold">Solde</th>
+                  <th className="px-3 py-2.5 text-center font-medium">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {rows.map((item) => {
+                  const checked =
+                    item.id === principalId || isPrincipalTreasury(item);
+                  const isNegative = Number(item.solde || 0) < 0;
+
+                  return (
+                    <tr
+                      key={item.id}
+                      className="border-t border-white/10 text-[13px] transition hover:bg-white/[0.04]"
+                    >
+                      <td className="px-3 py-2.5">
+                        <button
+                          type="button"
+                          onClick={() => setAsPrincipal(item)}
+                          title={
+                            checked
+                              ? "Trésorerie principale"
+                              : "Définir comme principale"
+                          }
+                          className={
+                            checked
+                              ? "inline-flex h-5 w-5 items-center justify-center rounded-full bg-red-600 font-semibold text-white shadow-lg shadow-red-950/40"
+                              : "inline-flex h-5 w-5 items-center justify-center rounded-full border border-white/10 bg-white/5 font-medium text-slate-500 transition hover:border-red-500 hover:text-red-300"
+                          }
                         >
-                          <button
-                            type="button"
-                            onClick={() => openEdit(item)}
-                            className="flex w-full items-center gap-2 px-3 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-100"
-                          >
-                            <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-slate-800 text-white">✎</span>
-                            Modifier
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setAsPrincipal(item)}
-                            className="flex w-full items-center gap-2 px-3 py-2 text-[12px] font-semibold text-blue-700 hover:bg-blue-50"
-                          >
-                            <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-blue-600 text-white">✓</span>
-                            Mettre principale
-                          </button>
-                          <a
-                            href={`/user/treasury-movements?schoolYearName=${encodeURIComponent(schoolYearName)}&siteId=${encodeURIComponent(selectedSiteId)}&treasuryId=${item.id}`}
-                            className="flex w-full items-center gap-2 px-3 py-2 text-[12px] font-semibold text-emerald-700 hover:bg-emerald-50"
-                          >
-                            <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-emerald-600 text-white">↗</span>
-                            Mouvements
-                          </a>
-                          <button
-                            type="button"
-                            onClick={() => deleteTreasury(item.id)}
-                            className="flex w-full items-center gap-2 border-t border-slate-100 px-3 py-2 text-[12px] font-semibold text-red-700 hover:bg-red-50"
-                          >
-                            <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-red-600 text-white">×</span>
-                            Supprimer
-                          </button>
+                          ✓
+                        </button>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-2.5">
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-red-700 to-slate-800 text-sm font-normal text-white shadow-lg">
+                            {normalizeType(item.type) === "BANQUE" ? "B" : "C"}
+                          </span>
+                          <div>
+                            <p className="font-normal text-white">
+                              {item.name}
+                            </p>
+                            {checked && (
+                              <p className="mt-0.5 text-[11px] font-normal text-red-300">
+                                Trésorerie principale
+                              </p>
+                            )}
+                          </div>
                         </div>
-                      )}
+                      </td>
+                      <td className="px-3 py-2.5 font-normal text-slate-300">
+                        {item.schoolYearName || schoolYearName}
+                      </td>
+                      <td className="px-3 py-2.5 font-normal text-slate-300">
+                        {item.site || selectedSiteName}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <span className="rounded-md bg-blue-500/15 px-2 py-1 text-[11px] font-normal text-blue-300">
+                          {normalizeType(item.type)}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 text-slate-300">
+                        <p className="font-normal">{item.accountName || "—"}</p>
+                        <p className="mt-0.5 text-[11px] text-slate-500">
+                          {item.accountNumber || "Aucun numéro"}
+                        </p>
+                      </td>
+                      <td className="px-3 py-2.5 text-slate-300">
+                        <p className="font-normal">{item.bankName || "—"}</p>
+                        <p className="mt-0.5 text-[11px] text-slate-500">
+                          {item.bic || item.address || ""}
+                        </p>
+                      </td>
+                      <td
+                        className={
+                          isNegative
+                            ? "px-3 py-2.5 text-right font-semibold text-red-300"
+                            : "px-3 py-2.5 text-right font-semibold text-emerald-300"
+                        }
+                        title={`Solde réel = total CREDIT (${formatMoney(item.totalEntree)}) - total DEBIT (${formatMoney(item.totalSortie)})`}
+                      >
+                        {formatMoney(item.solde)} Ar
+                      </td>
+                      <td className="px-3 py-2.5 text-center">
+                        <button
+                          type="button"
+                          onClick={(e) => toggleActionMenu(e, item.id)}
+                          className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.06] px-3 text-[12px] font-normal text-white shadow-lg shadow-black/20 transition hover:border-red-500/40 hover:bg-red-500/15"
+                        >
+                          Actions
+                          <span
+                            className={
+                              actionMenu?.id === item.id
+                                ? "rotate-180 transition"
+                                : "transition"
+                            }
+                          >
+                            ⌄
+                          </span>
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {!loading && rows.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={9}
+                      className="px-4 py-10 text-center text-slate-400"
+                    >
+                      Aucune trésorerie trouvée pour l'année scolaire «{" "}
+                      {schoolYearName} » sur le site « {selectedSiteName} ».
                     </td>
                   </tr>
-                );
-              })}
+                )}
+              </tbody>
+            </table>
+          </div>
 
-              {!loading && rows.length === 0 && (
-                <tr>
-                  <td colSpan={12} className="px-3 py-8 text-center text-slate-500">
-                    Aucune trésorerie trouvée pour l'année scolaire « {schoolYearName} » sur le site « {selectedSiteName} ».
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+          <div className="grid gap-3 p-3 lg:hidden">
+            {rows.map((item) => {
+              const checked =
+                item.id === principalId || isPrincipalTreasury(item);
+              const isNegative = Number(item.solde || 0) < 0;
+
+              return (
+                <article
+                  key={item.id}
+                  className="rounded-lg border border-white/10 bg-[#0f1724] p-3 shadow-xl shadow-black/20"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-red-700 to-slate-800 text-sm font-semibold text-white">
+                        {normalizeType(item.type) === "BANQUE" ? "B" : "C"}
+                      </span>
+                      <div>
+                        <h3 className="font-normal text-white">{item.name}</h3>
+                        <p className="text-xs text-slate-400">
+                          {item.site || selectedSiteName} •{" "}
+                          {item.schoolYearName || schoolYearName}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setAsPrincipal(item)}
+                      className={
+                        checked
+                          ? "rounded-full bg-red-600 px-2.5 py-1 text-xs font-semibold text-white"
+                          : "rounded-full border border-white/10 px-3 py-1 text-xs font-normal text-slate-400"
+                      }
+                    >
+                      {checked ? "Principale" : "Définir"}
+                    </button>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-[13px]">
+                    <div className="rounded-lg bg-white/[0.04] p-2.5">
+                      <p className="text-xs text-slate-500">Type</p>
+                      <p className="mt-1 font-medium text-blue-300">
+                        {normalizeType(item.type)}
+                      </p>
+                    </div>
+                    <div className="rounded-lg bg-white/[0.04] p-2.5">
+                      <p className="text-xs text-slate-500">Solde</p>
+                      <p
+                        className={
+                          isNegative
+                            ? "mt-1 font-semibold text-red-300"
+                            : "mt-1 font-semibold text-emerald-300"
+                        }
+                      >
+                        {formatMoney(item.solde)} Ar
+                      </p>
+                    </div>
+                    <div className="rounded-lg bg-white/[0.04] p-2.5">
+                      <p className="text-xs text-slate-500">Compte</p>
+                      <p className="mt-1 font-normal text-slate-200">
+                        {item.accountName || "—"}
+                      </p>
+                    </div>
+                    <div className="rounded-lg bg-white/[0.04] p-2.5">
+                      <p className="text-xs text-slate-500">Banque</p>
+                      <p className="mt-1 font-normal text-slate-200">
+                        {item.bankName || "—"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 border-t border-white/10 pt-3">
+                    <button
+                      type="button"
+                      onClick={(e) => toggleActionMenu(e, item.id)}
+                      className="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.06] text-[12px] font-normal text-white transition hover:border-red-500/40 hover:bg-red-500/15"
+                    >
+                      Actions
+                      <span
+                        className={
+                          actionMenu?.id === item.id
+                            ? "rotate-180 transition"
+                            : "transition"
+                        }
+                      >
+                        ⌄
+                      </span>
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+
+            {!loading && rows.length === 0 && (
+              <div className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-8 text-center text-slate-400">
+                Aucune trésorerie trouvée pour l'année scolaire «{" "}
+                {schoolYearName} » sur le site « {selectedSiteName} ».
+              </div>
+            )}
+          </div>
         </section>
       </div>
 
+      {actionMenu &&
+        (() => {
+          const item = sourceRows.find((row) => row.id === actionMenu.id);
+          if (!item) return null;
+
+          const deletionAllowed = canDeleteTreasury(item);
+          const currentBalance = getTreasuryBalance(item);
+
+          return (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="fixed z-[80] w-[190px] overflow-visible rounded-lg border border-white/10 bg-[#101827] p-1 shadow-2xl shadow-black/50 backdrop-blur-xl"
+              style={{ top: actionMenu.top, left: actionMenu.left }}
+            >
+              <button
+                type="button"
+                onClick={() => openEdit(item)}
+                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[13px] font-normal text-blue-200 transition hover:bg-blue-500/15"
+              >
+                <span className="flex h-5 w-5 items-center justify-center rounded-lg bg-blue-500/15">
+                  ✎
+                </span>
+                Modifier
+              </button>
+              <a
+                href={`/user/treasury-movements?schoolYearName=${encodeURIComponent(schoolYearName)}&siteId=${encodeURIComponent(selectedSiteId)}&treasuryId=${item.id}`}
+                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[13px] font-normal text-emerald-200 transition hover:bg-emerald-500/15"
+              >
+                <span className="flex h-5 w-5 items-center justify-center rounded-lg bg-emerald-500/15">
+                  ↗
+                </span>
+                Mouvements
+              </a>
+              <button
+                type="button"
+                onClick={() => setAsPrincipal(item)}
+                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[13px] font-normal text-amber-100 transition hover:bg-amber-500/15"
+              >
+                <span className="flex h-5 w-5 items-center justify-center rounded-lg bg-amber-500/15">
+                  ✓
+                </span>
+                Définir principale
+              </button>
+              {!deletionAllowed && (
+                <div className="mx-1 my-1 rounded-md border border-amber-400/20 bg-amber-500/10 px-2.5 py-2 text-[11px] leading-4 text-amber-100">
+                  Suppression verrouillée : solde {formatMoney(currentBalance)} Ar.
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => deleteTreasury(item.id)}
+                disabled={!deletionAllowed || deletingId === item.id}
+                title={
+                  deletionAllowed
+                    ? deletingId === item.id
+                      ? "Suppression en cours..."
+                      : "Supprimer cette trésorerie"
+                    : "Impossible de supprimer tant que le solde n'est pas à 0 Ar"
+                }
+                className={
+                  deletionAllowed && deletingId !== item.id
+                    ? "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[13px] font-normal text-red-200 transition hover:bg-red-500/15"
+                    : "flex w-full cursor-not-allowed items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[13px] font-normal text-slate-500 opacity-70"
+                }
+              >
+                <span
+                  className={
+                    deletionAllowed && deletingId !== item.id
+                      ? "flex h-5 w-5 items-center justify-center rounded-lg bg-red-500/15"
+                      : "flex h-5 w-5 items-center justify-center rounded-lg bg-slate-700/60"
+                  }
+                >
+                  🗑
+                </span>
+                {deletingId === item.id
+                  ? "Suppression..."
+                  : deletionAllowed
+                    ? "Supprimer"
+                    : "Suppression bloquée"}
+              </button>
+            </div>
+          );
+        })()}
+
       {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 px-3 pt-[110px]">
-          <form onSubmit={saveTreasury} className="w-full max-w-[430px] overflow-hidden rounded-[6px] bg-white shadow-2xl">
-            <div className="flex items-center justify-between bg-[#303640] px-3 py-3 text-white">
-              <h2 className="text-[16px] font-black">
-                {editId ? "Modifier Trésorerie" : "Nouveau Trésorerie"}
-              </h2>
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 px-4 py-10 backdrop-blur-sm">
+          <form
+            onSubmit={saveTreasury}
+            className="w-full max-w-[460px] overflow-hidden rounded-lg border border-white/10 bg-[#0f1724] shadow-2xl shadow-black/50"
+          >
+            <div className="flex items-center justify-between border-b border-white/10 bg-white/[0.04] px-4 py-3">
+              <div>
+                <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-red-300">
+                  Trésorerie
+                </p>
+                <h2 className="mt-1 text-sm font-normal text-white">
+                  {editId ? "Modifier la trésorerie" : "Nouvelle trésorerie"}
+                </h2>
+              </div>
               <button
                 type="button"
                 onClick={() => setModalOpen(false)}
-                className="text-[22px] leading-none text-slate-300 hover:text-white"
+                className="flex h-8 w-8 items-center justify-center rounded-full border border-white/10 text-xl leading-none text-slate-300 transition hover:bg-white/10 hover:text-white"
               >
                 ×
               </button>
             </div>
 
-            <div className="space-y-3 px-3 py-4">
+            <div className="space-y-2.5 px-4 py-4">
               <label className="block">
-                <span className="mb-1 block text-[11px] font-semibold text-slate-700">Année scolaire</span>
+                <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.12em] text-slate-500">
+                  Année scolaire
+                </span>
                 <select
                   value={schoolYearName}
                   onChange={(e) => setSchoolYearName(cleanYear(e.target.value))}
-                  className="h-8 w-full border border-blue-300 bg-blue-50 px-2 text-[12px] font-bold text-blue-800 outline-none focus:border-blue-600"
+                  className="h-8 w-full rounded-lg border border-white/10 bg-[#111827] px-2.5 text-[13px] font-normal text-white outline-none transition focus:border-red-500"
                 >
                   {schoolYears.length === 0 ? (
                     <option value={DEFAULT_YEAR}>{DEFAULT_YEAR}</option>
@@ -845,11 +1385,13 @@ export default function TreasuriesPage() {
               </label>
 
               <label className="block">
-                <span className="mb-1 block text-[11px] font-semibold text-slate-700">Sites</span>
+                <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.12em] text-slate-500">
+                  Site
+                </span>
                 <select
                   value={selectedSiteId}
                   onChange={(e) => changeSite(e.target.value)}
-                  className="h-8 w-full border border-slate-300 bg-white px-2 text-[12px] outline-none focus:border-blue-500"
+                  className="h-8 w-full rounded-lg border border-white/10 bg-[#111827] px-2.5 text-[13px] font-normal text-white outline-none transition focus:border-red-500"
                 >
                   {sites.length === 0 ? (
                     <option value="">Strelitzia School</option>
@@ -865,12 +1407,14 @@ export default function TreasuriesPage() {
               </label>
 
               <label className="block">
-                <span className="mb-1 block text-[11px] font-semibold text-slate-700">Nom trésorerie</span>
+                <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.12em] text-slate-500">
+                  Nom trésorerie
+                </span>
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Nom du trésorerie"
-                  className="h-8 w-full border border-slate-300 px-2 text-[12px] outline-none focus:border-blue-500"
+                  placeholder="Ex : Caisse principale, Banque BOA..."
+                  className="h-8 w-full rounded-lg border border-white/10 bg-[#111827] px-2.5 text-[13px] font-normal text-white outline-none placeholder:text-slate-600 transition focus:border-red-500"
                 />
               </label>
 
@@ -879,15 +1423,15 @@ export default function TreasuriesPage() {
                 onClick={() => setIsDefault((value) => !value)}
                 className={
                   isDefault
-                    ? "flex w-full items-center gap-2 rounded-[5px] border border-blue-600 bg-blue-50 px-3 py-2 text-left text-[12px] font-bold text-blue-800"
-                    : "flex w-full items-center gap-2 rounded-[5px] border border-slate-300 bg-slate-50 px-3 py-2 text-left text-[12px] font-semibold text-slate-700 hover:border-blue-400 hover:bg-blue-50"
+                    ? "flex w-full items-center gap-3 rounded-lg border border-red-500/40 bg-red-500/15 px-3 py-2.5 text-left font-medium text-red-100"
+                    : "flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-left font-normal text-slate-300 transition hover:border-red-500/40 hover:bg-red-500/10"
                 }
               >
                 <span
                   className={
                     isDefault
-                      ? "inline-flex h-5 w-5 items-center justify-center rounded-[4px] bg-blue-600 text-white"
-                      : "inline-flex h-5 w-5 items-center justify-center rounded-[4px] border border-slate-400 bg-white text-transparent"
+                      ? "inline-flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-white"
+                      : "inline-flex h-5 w-5 items-center justify-center rounded-full border border-white/15 text-transparent"
                   }
                 >
                   ✓
@@ -896,11 +1440,13 @@ export default function TreasuriesPage() {
               </button>
 
               <label className="block">
-                <span className="mb-1 block text-[11px] font-semibold text-slate-700">Type trésorerie</span>
+                <span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.12em] text-slate-500">
+                  Type trésorerie
+                </span>
                 <select
                   value={type}
                   onChange={(e) => setType(e.target.value)}
-                  className="h-8 w-full border border-slate-300 bg-white px-2 text-[12px] outline-none focus:border-blue-500"
+                  className="h-8 w-full rounded-lg border border-white/10 bg-[#111827] px-2.5 text-[13px] font-normal text-white outline-none transition focus:border-red-500"
                 >
                   {TYPE_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
@@ -911,17 +1457,17 @@ export default function TreasuriesPage() {
               </label>
             </div>
 
-            <div className="flex justify-end gap-2 border-t bg-white px-3 py-3">
+            <div className="flex flex-col-reverse gap-3 border-t border-white/10 px-4 py-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 onClick={() => setModalOpen(false)}
-                className="rounded-[3px] bg-slate-600 px-4 py-2 text-[12px] font-bold text-white hover:bg-slate-700"
+                className="h-8 rounded-lg border border-white/10 bg-white/5 px-4 font-normal text-white transition hover:bg-white/10"
               >
                 Fermer
               </button>
               <button
                 disabled={saving}
-                className="rounded-[3px] bg-blue-600 px-4 py-2 text-[12px] font-bold text-white hover:bg-blue-700 disabled:opacity-50"
+                className="h-8 rounded-lg bg-gradient-to-r from-red-700 to-red-600 px-5 font-medium text-white shadow-lg shadow-red-950/35 transition hover:from-red-600 hover:to-red-500 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {saving ? "Enregistrement..." : "Enregistrer"}
               </button>
