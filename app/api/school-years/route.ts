@@ -51,23 +51,7 @@ async function ensureActiveSchoolYear() {
 
 async function countYearLinks(yearName: string) {
   const results = await Promise.allSettled([
-    prisma.student.count({
-      where: { schoolYearName: yearName },
-    }),
-
-    prisma.studentFee.count({
-      where: { schoolYearName: yearName },
-    }),
-
-    prisma.studentPayment.count({
-      where: { schoolYearName: yearName },
-    }),
-
-    prisma.treasuryMovement.count({
-      where: { schoolYearName: yearName },
-    }),
-
-    prisma.treasury.count({
+    prisma.classRoom.count({
       where: { schoolYearName: yearName },
     }),
   ]);
@@ -267,7 +251,7 @@ export async function DELETE(req: Request) {
       return NextResponse.json(
         {
           error:
-            "Suppression impossible : cette année scolaire contient déjà des données liées.",
+            "Suppression impossible : cette année scolaire contient déjà des classes liées.",
         },
         { status: 409 }
       );
