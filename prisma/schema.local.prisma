@@ -351,52 +351,78 @@ model Treasury {
 }
 
 model TreasuryMovement {
-  id            Int      @id @default(autoincrement())
+  id Int @id @default(autoincrement())
 
-  treasuryId    Int
+  treasuryId Int
 
   // MULTI SITE
-  siteId        Int?
-  site          String?
+  siteId Int?
+  site   String?
 
-  movementType  String
-  category      String
+  movementType String
+  category     String
 
-  amount        Int
+  amount Int
 
-  description   String?
-  reference     String?
+  description String?
+  reference   String?
 
+  // =========================
+  // AFFICHAGE TRÉSORERIE
+  // =========================
+  motif            String?
+  libelle          String?
+
+  modePaiement     String?
+  paymentMode      String?
+
+  studentName      String?
+  studentMatricule String?
+  studentClasse    String?
+  studentSection   String?
+
+  feeCode          String?
+  feeLabel         String?
+
+  source           String?
+  sourceType       String?
+
+  // =========================
+  // LIENS MÉTIER
+  // =========================
   studentId     Int?
   trainingFeeId Int?
   studentFeeId  Int?
 
   schoolYearName String @default("2025-2026")
 
-  createdBy     String?
+  createdBy String?
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   treasury Treasury @relation(fields: [treasuryId], references: [id], onDelete: Cascade)
 
   @@index([treasuryId])
-
   @@index([siteId])
 
   @@index([movementType])
   @@index([category])
 
   @@index([createdAt])
-
   @@index([schoolYearName])
 
   @@index([studentId])
   @@index([trainingFeeId])
   @@index([studentFeeId])
 
-  @@index([schoolYearName, treasuryId])
+  @@index([studentName])
+  @@index([studentMatricule])
 
+  @@index([feeCode])
+  @@index([feeLabel])
+
+  @@index([schoolYearName, treasuryId])
   @@index([schoolYearName, movementType])
   @@index([schoolYearName, category])
   @@index([schoolYearName, createdAt])

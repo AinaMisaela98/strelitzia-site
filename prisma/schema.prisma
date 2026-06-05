@@ -369,6 +369,29 @@ model TreasuryMovement {
   description String?
   reference   String?
 
+  // =========================
+  // AFFICHAGE TRÉSORERIE
+  // =========================
+  motif            String?
+  libelle          String?
+
+  modePaiement     String?
+  paymentMode      String?
+
+  studentName      String?
+  studentMatricule String?
+  studentClasse    String?
+  studentSection   String?
+
+  feeCode          String?
+  feeLabel         String?
+
+  source           String?
+  sourceType       String?
+
+  // =========================
+  // LIENS MÉTIER
+  // =========================
   studentId     Int?
   trainingFeeId Int?
   studentFeeId  Int?
@@ -384,27 +407,38 @@ model TreasuryMovement {
 
   @@index([treasuryId])
   @@index([siteId])
+
   @@index([movementType])
   @@index([category])
+
   @@index([createdAt])
   @@index([schoolYearName])
+
   @@index([studentId])
   @@index([trainingFeeId])
   @@index([studentFeeId])
+
+  @@index([studentName])
+  @@index([studentMatricule])
+
+  @@index([feeCode])
+  @@index([feeLabel])
+
   @@index([schoolYearName, treasuryId])
   @@index([schoolYearName, movementType])
   @@index([schoolYearName, category])
   @@index([schoolYearName, createdAt])
+
   // MULTI SITE
   @@index([siteId, treasuryId])
   @@index([siteId, schoolYearName])
   @@index([siteId, schoolYearName, treasuryId])
   @@index([siteId, movementType])
   @@index([siteId, category])
+
   // Recherche rapide
   @@index([reference])
 }
-
 model Site {
   id        Int      @id @default(autoincrement())
   name      String
