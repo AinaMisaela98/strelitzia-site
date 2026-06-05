@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import jwt from "jsonwebtoken";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+
 function readCookie(req: Request, names: string[]) {
   const cookie = req.headers.get("cookie") || "";
   for (const name of names) {
@@ -13,7 +15,6 @@ function readCookie(req: Request, names: string[]) {
 
 function getUserIdFromRequest(req: Request) {
   const token = readCookie(req, ["token", "authToken", "auth-token", "strelitzia_token"]);
-
   if (!token || !process.env.JWT_SECRET) return null;
 
   try {
@@ -55,19 +56,13 @@ export async function GET(req: Request) {
     });
 
     if (!user) {
-      return NextResponse.json(
-        { error: "Utilisateur introuvable" },
-        { status: 404 },
-      );
+      return NextResponse.json({ error: "Utilisateur introuvable" }, { status: 404 });
     }
 
     return NextResponse.json({ user: formatUser(user) });
   } catch (error) {
     console.error("USER_PROFILE_GET_ERROR", error);
-    return NextResponse.json(
-      { error: "Erreur chargement profil" },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: "Erreur chargement profil" }, { status: 500 });
   }
 }
 
@@ -80,24 +75,46 @@ export async function PATCH(req: Request) {
     }
 
     const body = await req.json();
+
     const name = String(body?.name || "").trim();
+    const profilePhoto =
+      typeof body?.profilePhoto === "string"
+        ? body.profilePhoto.trim()
+        : undefined;
 
     if (!name) {
       return NextResponse.json({ error: "Nom obligatoire" }, { status: 400 });
     }
 
+    const data: any = { name };
+
+    if (profilePhoto !== undefined) {
+      // Base64 accepté, pas d'upload fichier dans public sur Vercel
+      if (profilePhoto && !profilePhoto.startsWith("data:image/")) {
+        return NextResponse.json(
+          { error: "Format photo invalide" },
+          { status: 400 }
+        );
+      }
+
+      data.profilePhoto = profilePhoto || null;
+    }
+
     const user = await prisma.user.update({
       where: { id: userId },
-      data: { name },
+      data,
       include: { roleRef: true },
     });
 
-    return NextResponse.json({ success: true, user: formatUser(user) });
+    return NextResponse.json({
+      success: true,
+      user: formatUser(user),
+    });
   } catch (error) {
     console.error("USER_PROFILE_PATCH_ERROR", error);
     return NextResponse.json(
       { error: "Erreur modification profil" },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }
