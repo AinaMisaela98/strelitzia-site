@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
@@ -193,8 +192,6 @@ function ReinscriptionPage() {
   const initialStudentId = searchParams.get("studentId");
 
   const [step, setStep] = useState(1);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-
   const [q, setQ] = useState("");
   const [results, setResults] = useState<Student[]>([]);
   const [selected, setSelected] = useState<Student | null>(null);
@@ -988,51 +985,8 @@ function ReinscriptionPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 lg:flex">
-      {sidebarOpen && (
-        <button
-          type="button"
-          onClick={() => setSidebarOpen(false)}
-          className="fixed inset-0 z-40 bg-black/40 lg:hidden"
-        />
-      )}
-
-      <aside
-        className={`fixed left-0 top-0 z-50 flex h-full w-[265px] flex-col bg-slate-950 text-white shadow-2xl transition-transform duration-300 lg:static lg:translate-x-0 ${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
-      >
-        <div className="border-b border-white/10 px-5 py-5">
-          <div className="text-lg font-black">Strelitzia</div>
-          <div className="text-[11px] text-slate-400">Espace utilisateur</div>
-        </div>
-
-        <nav className="flex-1 space-y-1 px-3 py-4 text-[13px] font-bold">
-          <SideLink href="/user" icon="🏠" label="Tableau de bord" />
-          <SideLink href="/user/reinscription" icon="↻" label="Réinscription" active />
-        </nav>
-      </aside>
-
-      <main className="min-w-0 flex-1">
-        <header className="sticky top-0 z-30 border-b bg-white/90 px-3 py-3 backdrop-blur lg:hidden">
-          <div className="flex items-center justify-between">
-            <button
-              type="button"
-              onClick={() => setSidebarOpen(true)}
-              className="rounded-xl border px-3 py-2 font-black"
-            >
-              ☰
-            </button>
-
-            <div className="text-sm font-black">Réinscription</div>
-
-            <Link href="/user" prefetch={false} className="rounded-xl border px-3 py-2 text-xs font-bold">
-              Retour
-            </Link>
-          </div>
-        </header>
-
-        <div className="p-3 sm:p-5">
+    <main className="min-h-screen w-full min-w-0 bg-slate-100">
+      <div className="p-3 sm:p-5">
           <div className="mx-auto max-w-7xl overflow-hidden rounded-[24px] border bg-white shadow-xl">
             <div className="bg-slate-950 px-4 py-5 text-white sm:px-6">
               <h1 className="text-xl font-black sm:text-2xl">Réinscription étudiant</h1>
@@ -1311,9 +1265,8 @@ function ReinscriptionPage() {
               </div>
             </div>
           </div>
-        </div>
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }
 
@@ -1374,14 +1327,6 @@ function TrainingFeesChooser({
         );
       })}
     </div>
-  );
-}
-
-function SideLink({ href, icon, label, active }: { href: string; icon: string; label: string; active?: boolean }) {
-  return (
-    <Link href={href} prefetch={false} className={`flex items-center gap-3 rounded-2xl px-4 py-3 ${active ? "bg-white text-slate-950" : "text-slate-300 hover:bg-white/10"}`}>
-      <span>{icon}</span><span>{label}</span>
-    </Link>
   );
 }
 

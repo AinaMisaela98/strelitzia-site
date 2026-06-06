@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { usePathname, useRouter } from "next/navigation";
 
 type FeeSpecialTariff = {
   id: number;
@@ -62,16 +61,6 @@ type SavedTariffDraft = {
 };
 
 export default function FeeModelsPage() {
-  const router = useRouter();
-  const pathname = usePathname();
-
-  const sidebarLinks = [
-    { label: "Année scolaire", href: "/user/school-years" },
-    { label: "Liste des niveaux", href: "/user/academics" },
-    { label: "Modèles de frais", href: "/user/fee-models" },
-    { label: "Frais de formation", href: "/user/training-fees" },
-    { label: "Activités scolaires", href: "/user/school-activities" },
-  ];
 
   const [models, setModels] = useState<FeeModel[]>([]);
   const [search, setSearch] = useState("");
@@ -928,42 +917,14 @@ export default function FeeModelsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f4f6f8] text-[12px] text-slate-800">
+    <main className="min-h-full w-full min-w-0 overflow-x-hidden bg-[#f4f6f8] text-[12px] text-slate-800">
       {successMessage && (
         <div className="fixed right-4 top-4 z-[100] rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700 shadow-2xl">
           ✅ {successMessage}
         </div>
       )}
 
-      <div className="flex min-h-screen">
-        <aside className="hidden w-[205px] bg-[#3f3f3f] text-white md:block">
-          <div className="flex h-[70px] items-center border-b bg-white px-3">
-            <div className="text-lg font-black text-green-700">STRELITZIA</div>
-          </div>
-
-          <div className="bg-[#303030] px-3 py-3 font-bold">⚙ Paramètres</div>
-
-          <nav className="text-[12px]">
-            {sidebarLinks.map((item) => {
-              const active = pathname === item.href;
-
-              return (
-                <button
-                  key={item.href}
-                  type="button"
-                  onClick={() => router.push(item.href)}
-                  className={`block w-full px-5 py-2 text-left hover:bg-[#b7b7b7] ${
-                    active ? "bg-[#a8a8a8]" : ""
-                  }`}
-                >
-                  - {item.label}
-                </button>
-              );
-            })}
-          </nav>
-        </aside>
-
-        <section className="flex-1 overflow-hidden p-2 md:p-3">
+            <section className="h-full w-full min-w-0 overflow-x-hidden p-3 md:p-4">
           <div className="mb-2 flex items-center justify-between gap-2">
             <h1 className="text-[16px] font-semibold">
               Modèles de frais ({models.length})
@@ -1118,9 +1079,7 @@ export default function FeeModelsPage() {
               </tbody>
             </table>
           </div>
-        </section>
-      </div>
-
+      </section>
 
       {duplicateConfirmOpen && modelToDuplicate && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-3">

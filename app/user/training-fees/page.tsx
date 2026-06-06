@@ -137,7 +137,6 @@ function amountToNumber(value: string) {
   return Number(String(value || "").replace(/\s/g, "")) || 0;
 }
 
-
 function normalizeSpecialTariffs(value: any): FeeSpecialTariff[] {
   const raw = value?.specials ?? value?.specialTariffs ?? value?.tarifs ?? [];
 
@@ -166,17 +165,23 @@ function normalizeSpecialTariffs(value: any): FeeSpecialTariff[] {
 }
 
 function specialsToDraft(value: any) {
-  return normalizeSpecialTariffs(value).reduce<Record<string, string>>((acc, item) => {
-    acc[item.name] = formatAmount(item.amount ?? item.montant ?? 0);
-    return acc;
-  }, {});
+  return normalizeSpecialTariffs(value).reduce<Record<string, string>>(
+    (acc, item) => {
+      acc[item.name] = formatAmount(item.amount ?? item.montant ?? 0);
+      return acc;
+    },
+    {},
+  );
 }
 
-function specialColumnsFromRows(items: Array<FeeRow | FeeTariff | TrainingFee>) {
+function specialColumnsFromRows(
+  items: Array<FeeRow | FeeTariff | TrainingFee>,
+) {
   const columns: string[] = [];
   for (const item of items) {
     for (const special of normalizeSpecialTariffs(item)) {
-      if (special.name && !columns.includes(special.name)) columns.push(special.name);
+      if (special.name && !columns.includes(special.name))
+        columns.push(special.name);
     }
     const row = item as FeeRow;
     if (row.specials && !Array.isArray(row.specials)) {
@@ -189,20 +194,30 @@ function specialColumnsFromRows(items: Array<FeeRow | FeeTariff | TrainingFee>) 
 }
 
 function getSpecialAmount(value: any, name: string) {
-  const found = normalizeSpecialTariffs(value).find((item) => item.name === name);
+  const found = normalizeSpecialTariffs(value).find(
+    (item) => item.name === name,
+  );
   return Number(found?.amount ?? found?.montant ?? 0);
 }
 
 function serializeSpecials(row: FeeRow) {
-  const entries = Object.entries(row.specials || {}).filter(([, amount]) => String(amount || "").trim());
-  const specials = entries.reduce<Record<string, number>>((acc, [name, amount]) => {
-    acc[name] = amountToNumber(amount);
-    return acc;
-  }, {});
+  const entries = Object.entries(row.specials || {}).filter(([, amount]) =>
+    String(amount || "").trim(),
+  );
+  const specials = entries.reduce<Record<string, number>>(
+    (acc, [name, amount]) => {
+      acc[name] = amountToNumber(amount);
+      return acc;
+    },
+    {},
+  );
 
   return {
     specials,
-    specialTariffs: Object.entries(specials).map(([name, amount]) => ({ name, amount })),
+    specialTariffs: Object.entries(specials).map(([name, amount]) => ({
+      name,
+      amount,
+    })),
   };
 }
 
@@ -252,7 +267,7 @@ function getFeeRows(fee: TrainingFee): FeeTariff[] {
 async function fetchJsonWithTimeout(
   url: string,
   options: RequestInit = {},
-  timeoutMs = 15000
+  timeoutMs = 15000,
 ) {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -295,7 +310,6 @@ async function fetchJsonWithTimeout(
   }
 }
 
-
 function stableInsertionOrderValue(item: any, fallback = 0) {
   const explicit =
     item?.ordre ??
@@ -332,7 +346,6 @@ function sortByInsertionOrder<T>(items: T[] | undefined | null): T[] {
   });
 }
 
-
 export default function TrainingFeesPage() {
   const [academics, setAcademics] = useState<AcademicsData>({
     year: "",
@@ -351,12 +364,15 @@ export default function TrainingFeesPage() {
   const [open, setOpen] = useState(false);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(
-    null
-  );
+  const [message, setMessage] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
 
   const selectedSite = useMemo(() => {
-    return sites.find((site) => String(site.id) === String(selectedSiteId)) || null;
+    return (
+      sites.find((site) => String(site.id) === String(selectedSiteId)) || null
+    );
   }, [sites, selectedSiteId]);
 
   const selectedSiteName = selectedSite?.name || "Strelitzia School";
@@ -400,7 +416,9 @@ export default function TrainingFeesPage() {
 
   function normalizeSchoolYears(value: any): SchoolYear[] {
     return normalizeArray(
-      Array.isArray(value) ? value : value?.schoolYears || value?.data || value?.items || []
+      Array.isArray(value)
+        ? value
+        : value?.schoolYears || value?.data || value?.items || [],
     ) as SchoolYear[];
   }
 
@@ -411,11 +429,15 @@ export default function TrainingFeesPage() {
 
       const [yearsData, sitesData] = await Promise.all([
         fetchJsonWithTimeout("/api/school-years").catch(() => []),
-        fetchJsonWithTimeout(`/api/sites?_ts=${Date.now()}`).catch(() => ({ sites: [] })),
+        fetchJsonWithTimeout(`/api/sites?_ts=${Date.now()}`).catch(() => ({
+          sites: [],
+        })),
       ]);
 
       const yearsList = normalizeSchoolYears(yearsData);
-      const sitesList = normalizeArray((sitesData as any)?.sites || sitesData) as Site[];
+      const sitesList = normalizeArray(
+        (sitesData as any)?.sites || sitesData,
+      ) as Site[];
 
       const activeYear =
         yearsList.find((item) => item.active)?.name ||
@@ -425,12 +447,13 @@ export default function TrainingFeesPage() {
         "";
 
       const activeSite =
-        sitesList.find((item) => item.active) ||
-        sitesList[0] ||
-        null;
+        sitesList.find((item) => item.active) || sitesList[0] || null;
 
       const targetYear = yearOverride || selectedSchoolYear || activeYear;
-      const targetSiteId = siteIdOverride || selectedSiteId || (activeSite ? String(activeSite.id) : "");
+      const targetSiteId =
+        siteIdOverride ||
+        selectedSiteId ||
+        (activeSite ? String(activeSite.id) : "");
 
       const query = buildDataQuery(targetYear, targetSiteId);
       const suffix = query ? `?${query}` : "";
@@ -503,7 +526,9 @@ export default function TrainingFeesPage() {
       const feeSiteName = String(fee.site || "").trim();
       const siteOk =
         !selectedSiteId ||
-        (feeSiteId ? feeSiteId === String(selectedSiteId) : !feeSiteName || feeSiteName === selectedSiteName);
+        (feeSiteId
+          ? feeSiteId === String(selectedSiteId)
+          : !feeSiteName || feeSiteName === selectedSiteName);
 
       return yearOk && siteOk;
     });
@@ -512,8 +537,12 @@ export default function TrainingFeesPage() {
   const visibleLevels = useMemo(() => {
     return academics.levels.filter((level) => {
       const levelYear = String(level.schoolYearName || "").trim();
-      const yearOk = !activeYearName || !levelYear || levelYear === activeYearName;
-      const siteOk = !selectedSiteId || !level.siteId || String(level.siteId) === String(selectedSiteId);
+      const yearOk =
+        !activeYearName || !levelYear || levelYear === activeYearName;
+      const siteOk =
+        !selectedSiteId ||
+        !level.siteId ||
+        String(level.siteId) === String(selectedSiteId);
 
       return yearOk && siteOk;
     });
@@ -524,20 +553,26 @@ export default function TrainingFeesPage() {
       (level.classes || [])
         .filter((classe) => {
           const classYear = String(classe.schoolYearName || "").trim();
-          const yearOk = !activeYearName || !classYear || classYear === activeYearName;
-          const siteOk = !selectedSiteId || !classe.siteId || String(classe.siteId) === String(selectedSiteId);
+          const yearOk =
+            !activeYearName || !classYear || classYear === activeYearName;
+          const siteOk =
+            !selectedSiteId ||
+            !classe.siteId ||
+            String(classe.siteId) === String(selectedSiteId);
           return yearOk && siteOk;
         })
         .map((classe) => ({
           ...classe,
           levelName: level.name,
           levelId: level.id,
-        }))
+        })),
     );
   }, [visibleLevels, activeYearName]);
 
   const classesForSelectedLevel = useMemo(() => {
-    const level = visibleLevels.find((item) => String(item.id) === selectedLevel);
+    const level = visibleLevels.find(
+      (item) => String(item.id) === selectedLevel,
+    );
     return level?.classes || [];
   }, [visibleLevels, selectedLevel]);
 
@@ -554,7 +589,12 @@ export default function TrainingFeesPage() {
     const map = new Map<string, ClassGroup>();
 
     for (const fee of visibleTrainingFees) {
-      const classId = fee.classId || fee.classRoomId || fee.class?.id || fee.classRoom?.id || null;
+      const classId =
+        fee.classId ||
+        fee.classRoomId ||
+        fee.class?.id ||
+        fee.classRoom?.id ||
+        null;
       const className =
         fee.class?.name ||
         fee.classRoom?.name ||
@@ -593,7 +633,9 @@ export default function TrainingFeesPage() {
 
     return Array.from(map.values())
       .filter((group) => {
-        const levelOk = filterLevel ? String(group.levelId) === filterLevel : true;
+        const levelOk = filterLevel
+          ? String(group.levelId) === filterLevel
+          : true;
         const classOk = filterClass
           ? group.classId
             ? String(group.classId) === filterClass
@@ -602,15 +644,28 @@ export default function TrainingFeesPage() {
 
         return levelOk && classOk;
       })
-      .sort((a, b) => a.levelName.localeCompare(b.levelName) || a.className.localeCompare(b.className));
-  }, [visibleTrainingFees, allClasses, activeYearName, filterLevel, filterClass]);
+      .sort(
+        (a, b) =>
+          a.levelName.localeCompare(b.levelName) ||
+          a.className.localeCompare(b.className),
+      );
+  }, [
+    visibleTrainingFees,
+    allClasses,
+    activeYearName,
+    filterLevel,
+    filterClass,
+  ]);
 
   const totalModels = visibleTrainingFees.length;
   const totalClassesWithFees = classGroups.length;
   const totalAmount = useMemo(() => {
     return visibleTrainingFees.reduce((sum, fee) => {
       const rows = getFeeRows(fee);
-      const local = rows.reduce((s, row) => s + Number(row.montant || row.amount || 0), 0);
+      const local = rows.reduce(
+        (s, row) => s + Number(row.montant || row.amount || 0),
+        0,
+      );
       return sum + local;
     }, 0);
   }, [visibleTrainingFees]);
@@ -643,7 +698,9 @@ export default function TrainingFeesPage() {
 
     try {
       const data = await fetchJsonWithTimeout(`/api/fee-models/${modelId}`);
-      const modelRows = normalizeArray(data?.tariffs || data?.rows || data?.details);
+      const modelRows = normalizeArray(
+        data?.tariffs || data?.rows || data?.details,
+      );
 
       setRows(
         modelRows.map((item: FeeTariff) => ({
@@ -651,12 +708,12 @@ export default function TrainingFeesPage() {
           code: item.code || "",
           montant: formatAmount(item.montant || item.amount || 0),
           specials: specialsToDraft(item),
-        }))
+        })),
       );
     } catch (error: any) {
       const fallback = feeModels.find((model) => String(model.id) === modelId);
       const fallbackRows = normalizeArray(
-        fallback?.tariffs || fallback?.rows || fallback?.details
+        fallback?.tariffs || fallback?.rows || fallback?.details,
       );
 
       setRows(
@@ -665,7 +722,7 @@ export default function TrainingFeesPage() {
           code: item.code || "",
           montant: formatAmount(item.montant || item.amount || 0),
           specials: specialsToDraft(item),
-        }))
+        })),
       );
 
       if (!fallbackRows.length) {
@@ -677,13 +734,20 @@ export default function TrainingFeesPage() {
     }
   }
 
-  function updateRow(index: number, field: "libelle" | "code" | "montant", value: string) {
+  function updateRow(
+    index: number,
+    field: "libelle" | "code" | "montant",
+    value: string,
+  ) {
     setRows((prev) =>
       prev.map((row, i) =>
         i === index
-          ? { ...row, [field]: field === "montant" ? formatAmount(value) : value }
-          : row
-      )
+          ? {
+              ...row,
+              [field]: field === "montant" ? formatAmount(value) : value,
+            }
+          : row,
+      ),
     );
   }
 
@@ -698,13 +762,16 @@ export default function TrainingFeesPage() {
                 [name]: formatAmount(value),
               },
             }
-          : row
-      )
+          : row,
+      ),
     );
   }
 
   function addRow() {
-    setRows((prev) => [...prev, { libelle: "", code: "", montant: "", specials: {} }]);
+    setRows((prev) => [
+      ...prev,
+      { libelle: "", code: "", montant: "", specials: {} },
+    ]);
   }
 
   function removeRow(index: number) {
@@ -715,10 +782,16 @@ export default function TrainingFeesPage() {
     if (saving) return;
 
     const validRows = rows.filter(
-      (row) => row.libelle.trim() || row.code.trim() || row.montant.trim()
+      (row) => row.libelle.trim() || row.code.trim() || row.montant.trim(),
     );
 
-    if (!activeYearName || !selectedSiteId || !selectedLevel || !selectedClasse || !selectedModel) {
+    if (
+      !activeYearName ||
+      !selectedSiteId ||
+      !selectedLevel ||
+      !selectedClasse ||
+      !selectedModel
+    ) {
       setMessage({
         type: "error",
         text: "Données incomplètes : choisissez site, niveau, classe et modèle.",
@@ -771,7 +844,7 @@ export default function TrainingFeesPage() {
             })),
           }),
         },
-        20000
+        20000,
       );
 
       setMessage({
@@ -794,7 +867,7 @@ export default function TrainingFeesPage() {
     if (deletingKey) return;
 
     const confirmed = window.confirm(
-      `Supprimer tous les modèles de frais de la classe "${group.className}" ?`
+      `Supprimer tous les modèles de frais de la classe "${group.className}" ?`,
     );
     if (!confirmed) return;
 
@@ -818,12 +891,20 @@ export default function TrainingFeesPage() {
       const query = params.toString();
 
       try {
-        await fetchJsonWithTimeout(`/api/training-fees?${query}`, { method: "DELETE" }, 20000);
+        await fetchJsonWithTimeout(
+          `/api/training-fees?${query}`,
+          { method: "DELETE" },
+          20000,
+        );
       } catch {
         await Promise.all(
           sortByInsertionOrder(group.fees).map((fee) =>
-            fetchJsonWithTimeout(`/api/training-fees/${fee.id}`, { method: "DELETE" }, 20000)
-          )
+            fetchJsonWithTimeout(
+              `/api/training-fees/${fee.id}`,
+              { method: "DELETE" },
+              20000,
+            ),
+          ),
         );
       }
 
@@ -855,7 +936,10 @@ export default function TrainingFeesPage() {
     setMessage(null);
   }
 
-  function updateEditForm(field: "libelle" | "code" | "montant", value: string) {
+  function updateEditForm(
+    field: "libelle" | "code" | "montant",
+    value: string,
+  ) {
     setEditForm((prev) => ({
       ...prev,
       [field]: field === "montant" ? formatAmount(value) : value,
@@ -865,7 +949,11 @@ export default function TrainingFeesPage() {
   async function saveEditedFee() {
     if (!editingFee || savingEdit) return;
 
-    if (!editForm.libelle.trim() || !editForm.code.trim() || !editForm.montant.trim()) {
+    if (
+      !editForm.libelle.trim() ||
+      !editForm.code.trim() ||
+      !editForm.montant.trim()
+    ) {
       setMessage({
         type: "error",
         text: "Libellé, Code et Montant sont obligatoires.",
@@ -892,7 +980,7 @@ export default function TrainingFeesPage() {
             ...serializeSpecials(editForm),
           }),
         },
-        20000
+        20000,
       );
 
       setMessage({
@@ -915,7 +1003,7 @@ export default function TrainingFeesPage() {
     if (deletingFeeId) return;
 
     const confirmed = window.confirm(
-      `Supprimer "${feeLibelle(fee) || "ce frais"}" ?`
+      `Supprimer "${feeLibelle(fee) || "ce frais"}" ?`,
     );
     if (!confirmed) return;
 
@@ -926,7 +1014,7 @@ export default function TrainingFeesPage() {
       await fetchJsonWithTimeout(
         `/api/training-fees?id=${encodeURIComponent(fee.id)}&siteId=${encodeURIComponent(selectedSiteId)}`,
         { method: "DELETE" },
-        20000
+        20000,
       );
 
       setMessage({
@@ -944,7 +1032,10 @@ export default function TrainingFeesPage() {
     }
   }
 
-  const rowsSpecialColumns = useMemo(() => specialColumnsFromRows(rows), [rows]);
+  const rowsSpecialColumns = useMemo(
+    () => specialColumnsFromRows(rows),
+    [rows],
+  );
 
   function classTotal(group: ClassGroup) {
     return group.fees.reduce((sum, fee) => {
@@ -952,33 +1043,34 @@ export default function TrainingFeesPage() {
         sum +
         getFeeRows(fee).reduce(
           (local, row) => local + Number(row.montant || row.amount || 0),
-          0
+          0,
         )
       );
     }, 0);
   }
 
   return (
-    <div className="min-h-screen bg-[#f6f8fb] p-3 text-slate-900 md:p-6">
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-4 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-200 bg-slate-900 p-5 text-white md:p-6">
+    <div className="min-h-screen bg-[#070d18] bg-[radial-gradient(circle_at_top_left,rgba(199,168,109,0.12),transparent_30%),radial-gradient(circle_at_top_right,rgba(30,58,138,0.20),transparent_28%)] p-3 text-slate-100 md:p-6">
+      <div className="mx-auto max-w-7xl">
+        <div className="mb-5 overflow-hidden rounded-2xl border border-[#c7a86d]/15 bg-[#0b1220]/95 shadow-2xl shadow-black/25 backdrop-blur">
+          <div className="border-b border-[#c7a86d]/15 bg-gradient-to-r from-[#07101f] via-[#0c1730] to-[#111f3d] p-5 text-white md:p-7">
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
-                <div className="mb-2 inline-flex rounded-full bg-white/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] ring-1 ring-white/20">
+                <div className="mb-2 inline-flex rounded-full bg-[#c7a86d]/12 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.14em] text-[#f0d69a] ring-1 ring-[#c7a86d]/25">
                   Gestion scolaire
                 </div>
-                <h1 className="text-2xl font-extrabold tracking-tight md:text-3xl">
+                <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
                   Frais de formation
                 </h1>
-                <p className="mt-1 text-sm text-indigo-50">
-                  Frais attachés par niveau et par classe pour les paiements étudiants.
+                <p className="mt-1 text-sm text-slate-300">
+                  Frais attachés par niveau et par classe pour les paiements
+                  étudiants.
                 </p>
               </div>
 
               <button
                 onClick={openAddModal}
-                className="rounded-xl bg-white px-5 py-3 text-sm font-bold text-slate-900 shadow-sm transition hover:bg-slate-100 active:scale-[0.99]"
+                className="rounded-xl bg-gradient-to-r from-[#c7a86d] to-[#e3c37f] px-5 py-3 text-sm font-medium text-[#081120] shadow-lg shadow-[#c7a86d]/20 transition hover:from-[#d8b978] hover:to-[#f0d69a] active:scale-[0.99]"
               >
                 + Ajouter des frais
               </button>
@@ -986,38 +1078,38 @@ export default function TrainingFeesPage() {
           </div>
 
           <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4 md:p-5">
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+            <div className="rounded-2xl border border-[#c7a86d]/12 bg-white/[0.045] p-4 shadow-sm shadow-black/10">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-slate-400">
                 Année scolaire
               </p>
-              <p className="mt-1 text-xl font-extrabold text-slate-900">
+              <p className="mt-1 text-xl font-medium text-white">
                 {activeYearName || "—"}
               </p>
             </div>
 
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+            <div className="rounded-2xl border border-[#c7a86d]/12 bg-white/[0.045] p-4 shadow-sm shadow-black/10">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-slate-400">
                 Site
               </p>
-              <p className="mt-1 text-xl font-extrabold text-slate-900">
+              <p className="mt-1 text-xl font-medium text-white">
                 {selectedSiteName || "—"}
               </p>
             </div>
 
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+            <div className="rounded-2xl border border-[#c7a86d]/12 bg-white/[0.045] p-4 shadow-sm shadow-black/10">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-slate-400">
                 Classes configurées
               </p>
-              <p className="mt-1 text-xl font-extrabold text-slate-900">
+              <p className="mt-1 text-xl font-medium text-white">
                 {totalClassesWithFees}
               </p>
             </div>
 
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+            <div className="rounded-2xl border border-[#c7a86d]/12 bg-white/[0.045] p-4 shadow-sm shadow-black/10">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-slate-400">
                 Total prévisionnel
               </p>
-              <p className="mt-1 text-xl font-extrabold text-slate-900">
+              <p className="mt-1 text-xl font-medium text-white">
                 {formatAmount(totalAmount)} Ar
               </p>
             </div>
@@ -1026,27 +1118,28 @@ export default function TrainingFeesPage() {
 
         {message && (
           <div
-            className={`mb-4 rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm ${
+            className={`mb-4 rounded-2xl border px-4 py-3 text-sm font-medium shadow-sm ${
               message.type === "success"
-                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                : "border-rose-200 bg-rose-50 text-rose-800"
+                ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-200"
+                : "border-rose-400/20 bg-rose-500/10 text-rose-200"
             }`}
           >
             {message.text}
           </div>
         )}
 
-        <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-4 rounded-2xl border border-white/10 bg-[#0b1220]/95 p-4 shadow-2xl shadow-black/20 backdrop-blur">
           <div className="grid gap-3 md:grid-cols-[1fr_1fr_1fr_1fr_auto]">
             <select
               value={activeYearName}
               onChange={(e) => changeSchoolYear(e.target.value)}
-              className="h-11 rounded-xl border border-slate-300 bg-white px-4 text-sm font-bold outline-none transition focus:border-slate-500 focus:ring-4 focus:ring-slate-100"
+              className="h-11 rounded-xl border border-white/10 bg-[#0f172a] px-4 text-sm font-normal text-slate-100 outline-none transition focus:border-[#c7a86d]/70 focus:ring-4 focus:ring-[#c7a86d]/10"
             >
               <option value="">Toutes les années scolaires</option>
               {schoolYears.map((year) => (
                 <option key={year.id || year.name} value={year.name}>
-                  {year.active ? "⭐ " : ""}{year.name}
+                  {year.active ? "⭐ " : ""}
+                  {year.name}
                 </option>
               ))}
             </select>
@@ -1054,12 +1147,13 @@ export default function TrainingFeesPage() {
             <select
               value={selectedSiteId}
               onChange={(e) => changeSite(e.target.value)}
-              className="h-11 rounded-xl border border-slate-300 bg-white px-4 text-sm font-bold outline-none transition focus:border-slate-500 focus:ring-4 focus:ring-slate-100"
+              className="h-11 rounded-xl border border-white/10 bg-[#0f172a] px-4 text-sm font-normal text-slate-100 outline-none transition focus:border-[#c7a86d]/70 focus:ring-4 focus:ring-[#c7a86d]/10"
             >
               <option value="">Choisir un site</option>
               {sites.map((site) => (
                 <option key={site.id} value={site.id}>
-                  {site.active ? "⭐ " : ""}{site.name}
+                  {site.active ? "⭐ " : ""}
+                  {site.name}
                 </option>
               ))}
             </select>
@@ -1070,7 +1164,7 @@ export default function TrainingFeesPage() {
                 setFilterLevel(e.target.value);
                 setFilterClass("");
               }}
-              className="h-11 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium outline-none transition focus:border-slate-500 focus:ring-4 focus:ring-slate-100"
+              className="h-11 rounded-xl border border-white/10 bg-[#0f172a] px-4 text-sm font-normal text-slate-100 outline-none transition focus:border-[#c7a86d]/70 focus:ring-4 focus:ring-[#c7a86d]/10"
             >
               <option value="">Tous les niveaux</option>
               {visibleLevels.map((level) => (
@@ -1083,7 +1177,7 @@ export default function TrainingFeesPage() {
             <select
               value={filterClass}
               onChange={(e) => setFilterClass(e.target.value)}
-              className="h-11 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium outline-none transition focus:border-slate-500 focus:ring-4 focus:ring-slate-100"
+              className="h-11 rounded-xl border border-white/10 bg-[#0f172a] px-4 text-sm font-normal text-slate-100 outline-none transition focus:border-[#c7a86d]/70 focus:ring-4 focus:ring-[#c7a86d]/10"
             >
               <option value="">Toutes les classes</option>
               {classesForFilterLevel.map((classe) => (
@@ -1096,7 +1190,7 @@ export default function TrainingFeesPage() {
             <button
               onClick={() => loadAll(activeYearName)}
               disabled={loading}
-              className="h-11 rounded-xl border border-slate-300 bg-white px-5 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
+              className="h-11 rounded-xl border border-white/10 bg-white/[0.05] px-5 text-sm font-medium text-slate-200 shadow-sm transition hover:bg-white/[0.08] disabled:opacity-60"
             >
               {loading ? "Chargement..." : "Actualiser"}
             </button>
@@ -1104,18 +1198,23 @@ export default function TrainingFeesPage() {
         </div>
 
         {loading ? (
-          <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm">
-            <div className="mx-auto mb-3 h-10 w-10 animate-spin rounded-full border-4 border-indigo-100 border-t-indigo-600" />
-            <p className="font-bold text-slate-600">Chargement des frais...</p>
+          <div className="rounded-2xl border border-white/10 bg-[#0b1220]/90 p-10 text-center shadow-2xl shadow-black/20">
+            <div className="mx-auto mb-3 h-10 w-10 animate-spin rounded-full border-4 border-[#c7a86d]/20 border-t-[#c7a86d]" />
+            <p className="font-medium text-slate-300">
+              Chargement des frais...
+            </p>
           </div>
         ) : classGroups.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center shadow-sm">
-            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-3xl bg-indigo-50 text-3xl">
+          <div className="rounded-2xl border border-dashed border-white/15 bg-[#0b1220]/90 p-10 text-center shadow-2xl shadow-black/20">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-3xl bg-[#c7a86d]/10 text-3xl">
               🧾
             </div>
-            <h2 className="text-lg font-extrabold text-slate-900">Aucun frais enregistré</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Ajoutez des frais puis ils apparaîtront automatiquement par classe.
+            <h2 className="text-lg font-medium text-slate-100">
+              Aucun frais enregistré
+            </h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Ajoutez des frais puis ils apparaîtront automatiquement par
+              classe.
             </p>
           </div>
         ) : (
@@ -1129,43 +1228,51 @@ export default function TrainingFeesPage() {
               return (
                 <div
                   key={group.key}
-                  className="overflow-hidden overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:border-slate-300 hover:shadow-md"
+                  className="overflow-hidden rounded-2xl border border-[#c7a86d]/18 bg-gradient-to-br from-[#0b1220] via-[#0d1628] to-[#111f3d] shadow-xl shadow-black/25 transition hover:border-[#c7a86d]/38 hover:shadow-2xl"
                 >
-                  <div className="border-b border-slate-200 bg-slate-50 p-4 text-slate-900">
+                  <div className="border-b border-[#c7a86d]/15 bg-[#c7a86d]/[0.055] p-4 text-slate-100">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                        <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400">
                           {group.levelName}
                         </p>
-                        <h3 className="mt-1 text-xl font-extrabold">{group.className}</h3>
-                        <p className="mt-1 text-xs text-slate-500">{group.year}</p>
+                        <h3 className="mt-1 text-xl font-medium">
+                          {group.className}
+                        </h3>
+                        <p className="mt-1 text-xs text-slate-400">
+                          {group.year}
+                        </p>
                       </div>
-                      <div className="rounded-xl bg-white px-3 py-2 text-right ring-1 ring-slate-200">
-                        <p className="text-lg font-extrabold">{group.fees.length}</p>
-                        <p className="text-[10px] font-bold uppercase text-slate-500">frais</p>
+                      <div className="rounded-xl bg-[#c7a86d]/10 px-3 py-2 text-right ring-1 ring-[#c7a86d]/20">
+                        <p className="text-lg font-medium">
+                          {group.fees.length}
+                        </p>
+                        <p className="text-[10px] font-medium uppercase text-slate-400">
+                          frais
+                        </p>
                       </div>
                     </div>
                   </div>
 
                   <div className="p-4">
-                    <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                    <div className="mb-4 rounded-xl border border-white/10 bg-white/[0.04] p-3">
+                      <p className="text-[11px] font-medium uppercase tracking-wider text-slate-400">
                         Montant total classe
                       </p>
-                      <p className="text-2xl font-extrabold text-slate-900">
+                      <p className="text-2xl font-medium text-[#f0d69a]">
                         {formatAmount(total)} Ar
                       </p>
                     </div>
 
-                    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-                      <div className="grid grid-cols-[1.3fr_0.7fr_0.9fr_1fr] bg-slate-100 px-3 py-2 text-[11px] font-extrabold uppercase tracking-wide text-slate-600">
+                    <div className="overflow-hidden rounded-xl border border-white/10 bg-[#0f172a]">
+                      <div className="grid grid-cols-[1.3fr_0.7fr_0.9fr_1fr] bg-white/[0.06] px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-slate-300">
                         <span>Libellé</span>
                         <span>Code</span>
                         <span className="text-right">Principal</span>
                         <span className="text-right">Action</span>
                       </div>
 
-                      <div className="divide-y divide-slate-100">
+                      <div className="divide-y divide-white/10">
                         {group.fees
                           .slice(0, isExpanded ? group.fees.length : 4)
                           .map((fee) => {
@@ -1173,26 +1280,29 @@ export default function TrainingFeesPage() {
                             return (
                               <div
                                 key={fee.id}
-                                className="grid grid-cols-[1.3fr_0.7fr_0.9fr_1fr] items-center gap-2 px-3 py-3 text-xs transition hover:bg-slate-50"
+                                className="grid grid-cols-[1.3fr_0.7fr_0.9fr_1fr] items-center gap-2 px-3 py-3 text-xs transition hover:bg-white/[0.04]"
                               >
                                 <div className="min-w-0">
-                                  <p className="truncate font-extrabold text-slate-900">
+                                  <p className="truncate font-medium text-slate-100">
                                     {feeLibelle(fee) || "—"}
                                   </p>
                                 </div>
 
-                                <p className="font-bold text-slate-700">
+                                <p className="font-medium text-slate-300">
                                   {feeCode(fee) || "—"}
                                 </p>
 
                                 <div className="text-right">
-                                  <p className="font-extrabold text-emerald-700">
+                                  <p className="font-medium text-emerald-300">
                                     {formatAmount(feeMontant(fee))} Ar
                                   </p>
                                   {specialColumns.length > 0 && (
-                                    <div className="mt-1 space-y-0.5 text-[10px] font-bold text-slate-500">
+                                    <div className="mt-1 space-y-0.5 text-[10px] font-medium text-slate-400">
                                       {specialColumns.map((name) => {
-                                        const amount = getSpecialAmount(fee, name);
+                                        const amount = getSpecialAmount(
+                                          fee,
+                                          name,
+                                        );
                                         return amount > 0 ? (
                                           <p key={name}>
                                             {name}: {formatAmount(amount)} Ar
@@ -1207,14 +1317,14 @@ export default function TrainingFeesPage() {
                                   <button
                                     onClick={() => openEditFee(fee)}
                                     disabled={!!deletingFeeId}
-                                    className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                                    className="rounded-lg border border-blue-400/20 bg-blue-500/10 px-2 py-1.5 text-[11px] font-medium text-blue-300 transition hover:bg-blue-500/20 disabled:opacity-50"
                                   >
                                     Modifier
                                   </button>
                                   <button
                                     onClick={() => deleteFee(fee)}
                                     disabled={!!deletingFeeId}
-                                    className="rounded-lg bg-rose-50 px-2 py-1.5 text-[11px] font-bold text-rose-700 transition hover:bg-rose-100 disabled:opacity-50"
+                                    className="rounded-lg bg-rose-500/10 px-2 py-1.5 text-[11px] font-medium text-rose-300 transition hover:bg-rose-500/20 disabled:opacity-50"
                                   >
                                     {deletingLine ? "..." : "Suppr."}
                                   </button>
@@ -1227,8 +1337,10 @@ export default function TrainingFeesPage() {
 
                     <div className="mt-4 grid grid-cols-2 gap-2">
                       <button
-                        onClick={() => setExpandedKey(isExpanded ? null : group.key)}
-                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
+                        onClick={() =>
+                          setExpandedKey(isExpanded ? null : group.key)
+                        }
+                        className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-medium text-slate-200 transition hover:bg-white/[0.08]"
                       >
                         {isExpanded ? "Réduire" : "Voir détails"}
                       </button>
@@ -1236,7 +1348,7 @@ export default function TrainingFeesPage() {
                       <button
                         onClick={() => deleteClassFees(group)}
                         disabled={!!deletingKey}
-                        className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="rounded-xl bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-300 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {deleting ? "Suppression..." : "Supprimer classe"}
                       </button>
@@ -1250,22 +1362,24 @@ export default function TrainingFeesPage() {
       </div>
 
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-3 backdrop-blur-sm">
-          <div className="w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-xl">
-            <div className="border-b border-slate-200 bg-slate-900 p-5 text-white">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 backdrop-blur-sm">
+          <div className="w-full max-w-3xl overflow-hidden rounded-2xl border border-[#c7a86d]/15 bg-[#0b1220] text-slate-100 shadow-2xl shadow-black/40">
+            <div className="border-b border-[#c7a86d]/15 bg-gradient-to-r from-[#07101f] via-[#0c1730] to-[#111f3d] p-5 text-white">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                  <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400">
                     Nouveau paramétrage
                   </p>
-                  <h2 className="mt-1 text-xl font-extrabold">Ajouter des frais</h2>
-                  <p className="mt-1 text-xs text-indigo-50">
+                  <h2 className="mt-1 text-xl font-medium">
+                    Ajouter des frais
+                  </h2>
+                  <p className="mt-1 text-xs text-[#ead49c]">
                     Les lignes seront liées à la classe sélectionnée.
                   </p>
                 </div>
                 <button
                   onClick={() => !saving && setOpen(false)}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-2xl font-bold transition hover:bg-white/20"
+                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-2xl font-light transition hover:bg-white/20"
                 >
                   ×
                 </button>
@@ -1275,42 +1389,43 @@ export default function TrainingFeesPage() {
             <div className="max-h-[76vh] overflow-y-auto p-4 md:p-5">
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
-                  <label className="mb-1 block text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
                     Année scolaire
                   </label>
                   <input
                     value={activeYearName}
                     readOnly
-                    className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm font-bold text-slate-900"
+                    className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 text-sm font-normal text-slate-200"
                   />
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
                     Site
                   </label>
                   <select
                     value={selectedSiteId}
                     onChange={(e) => changeSite(e.target.value)}
-                    className="h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium outline-none focus:border-slate-500 focus:ring-4 focus:ring-slate-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:opacity-70"
+                    className="h-11 w-full rounded-xl border border-white/10 bg-[#0f172a] px-4 text-sm font-normal text-slate-100 outline-none focus:border-[#c7a86d]/70 focus:ring-4 focus:ring-[#c7a86d]/10 disabled:cursor-not-allowed disabled:bg-white/[0.06] disabled:opacity-70"
                   >
                     <option value="">Choisir un site</option>
                     {sites.map((site) => (
                       <option key={site.id} value={site.id}>
-                        {site.name}{site.active ? " — Actif" : ""}
+                        {site.name}
+                        {site.active ? " — Actif" : ""}
                       </option>
                     ))}
                   </select>
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
                     Niveau d'étude
                   </label>
                   <select
                     value={selectedLevel}
                     onChange={(e) => selectLevel(e.target.value)}
-                    className="h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium outline-none focus:border-slate-500 focus:ring-4 focus:ring-slate-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:opacity-70"
+                    className="h-11 w-full rounded-xl border border-white/10 bg-[#0f172a] px-4 text-sm font-normal text-slate-100 outline-none focus:border-[#c7a86d]/70 focus:ring-4 focus:ring-[#c7a86d]/10 disabled:cursor-not-allowed disabled:bg-white/[0.06] disabled:opacity-70"
                   >
                     <option value="">Choisissez un niveau</option>
                     {visibleLevels.map((level) => (
@@ -1322,7 +1437,7 @@ export default function TrainingFeesPage() {
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
                     Classe
                   </label>
                   <select
@@ -1333,10 +1448,12 @@ export default function TrainingFeesPage() {
                       setRows([]);
                     }}
                     disabled={!selectedLevel}
-                    className="h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium outline-none focus:border-slate-500 focus:ring-4 focus:ring-slate-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:opacity-70 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="h-11 w-full rounded-xl border border-white/10 bg-[#0f172a] px-4 text-sm font-normal text-slate-100 outline-none focus:border-[#c7a86d]/70 focus:ring-4 focus:ring-[#c7a86d]/10 disabled:cursor-not-allowed disabled:bg-white/[0.06] disabled:opacity-70 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <option value="">
-                      {selectedLevel ? "Choisissez une classe" : "Sélectionnez d'abord un niveau"}
+                      {selectedLevel
+                        ? "Choisissez une classe"
+                        : "Sélectionnez d'abord un niveau"}
                     </option>
                     {classesForSelectedLevel.map((classe) => (
                       <option key={classe.id} value={classe.id}>
@@ -1347,14 +1464,14 @@ export default function TrainingFeesPage() {
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="mb-1 block text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
                     Type de modèle
                   </label>
                   <select
                     value={selectedModel}
                     onChange={(e) => selectModel(e.target.value)}
                     disabled={!selectedClasse}
-                    className="h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium outline-none focus:border-slate-500 focus:ring-4 focus:ring-slate-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:opacity-70 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="h-11 w-full rounded-xl border border-white/10 bg-[#0f172a] px-4 text-sm font-normal text-slate-100 outline-none focus:border-[#c7a86d]/70 focus:ring-4 focus:ring-[#c7a86d]/10 disabled:cursor-not-allowed disabled:bg-white/[0.06] disabled:opacity-70 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <option value="">
                       {selectedClasse
@@ -1363,8 +1480,13 @@ export default function TrainingFeesPage() {
                     </option>
                     {feeModels
                       .filter((model) => {
-                        const modelYear = String(model.schoolYearName || "").trim();
-                        const yearOk = !activeYearName || !modelYear || modelYear === activeYearName;
+                        const modelYear = String(
+                          model.schoolYearName || "",
+                        ).trim();
+                        const yearOk =
+                          !activeYearName ||
+                          !modelYear ||
+                          modelYear === activeYearName;
                         const siteOk =
                           !selectedSiteId ||
                           !model.siteId ||
@@ -1381,25 +1503,27 @@ export default function TrainingFeesPage() {
               </div>
 
               {rowsSpecialColumns.length > 0 && (
-                <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-800">
-                  Tarifs spéciaux détectés depuis le modèle : {rowsSpecialColumns.join(", ")}. Ils seront enregistrés avec la classe pour la réinscription.
+                <div className="mt-4 rounded-xl border border-[#c7a86d]/20 bg-[#c7a86d]/10 px-4 py-3 text-xs font-normal text-[#ead49c]">
+                  Tarifs spéciaux détectés depuis le modèle :{" "}
+                  {rowsSpecialColumns.join(", ")}. Ils seront enregistrés avec
+                  la classe pour la réinscription.
                 </div>
               )}
 
-              <div className="mt-5 overflow-hidden rounded-xl border border-slate-200">
-                <div className="flex items-center justify-between border-b border-slate-200 bg-slate-100 px-4 py-3 text-slate-900">
-                  <h3 className="text-sm font-extrabold">Détail des frais</h3>
+              <div className="mt-5 overflow-hidden rounded-xl border border-white/10">
+                <div className="flex items-center justify-between border-b border-[#c7a86d]/15 bg-[#c7a86d]/[0.06] px-4 py-3 text-slate-100">
+                  <h3 className="text-sm font-medium">Détail des frais</h3>
                   <button
                     onClick={addRow}
-                    className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-slate-700"
+                    className="rounded-lg bg-gradient-to-r from-[#c7a86d] to-[#e3c37f] px-3 py-1.5 text-xs font-medium text-[#081120] transition hover:from-[#d8b978] hover:to-[#f0d69a]"
                   >
                     + Ligne
                   </button>
                 </div>
 
-                <div className="divide-y divide-slate-100">
+                <div className="divide-y divide-white/10">
                   {rows.length === 0 ? (
-                    <div className="p-6 text-center text-sm font-semibold text-slate-500">
+                    <div className="p-6 text-center text-sm font-normal text-slate-400">
                       Sélectionnez un modèle ou ajoutez une ligne.
                     </div>
                   ) : (
@@ -1408,40 +1532,55 @@ export default function TrainingFeesPage() {
                         <div className="grid gap-2 md:grid-cols-[1fr_130px_150px_44px]">
                           <input
                             value={row.libelle}
-                            onChange={(e) => updateRow(index, "libelle", e.target.value)}
+                            onChange={(e) =>
+                              updateRow(index, "libelle", e.target.value)
+                            }
                             placeholder="Intitulé"
-                            className="h-10 rounded-xl border border-slate-300 bg-white px-3 text-sm outline-none focus:border-slate-500 focus:ring-4 focus:ring-slate-100"
+                            className="h-10 rounded-xl border border-white/10 bg-[#0f172a] px-3 text-sm text-slate-100 outline-none focus:border-[#c7a86d]/70 focus:ring-4 focus:ring-[#c7a86d]/10"
                           />
                           <input
                             value={row.code}
-                            onChange={(e) => updateRow(index, "code", e.target.value)}
+                            onChange={(e) =>
+                              updateRow(index, "code", e.target.value)
+                            }
                             placeholder="Code"
-                            className="h-10 rounded-xl border border-slate-300 bg-white px-3 text-sm outline-none focus:border-slate-500 focus:ring-4 focus:ring-slate-100"
+                            className="h-10 rounded-xl border border-white/10 bg-[#0f172a] px-3 text-sm text-slate-100 outline-none focus:border-[#c7a86d]/70 focus:ring-4 focus:ring-[#c7a86d]/10"
                           />
                           <input
                             value={row.montant}
-                            onChange={(e) => updateRow(index, "montant", e.target.value)}
+                            onChange={(e) =>
+                              updateRow(index, "montant", e.target.value)
+                            }
                             placeholder="Montant principal"
-                            className="h-10 rounded-xl border border-slate-300 bg-white px-3 text-right text-sm font-bold outline-none focus:border-slate-500 focus:ring-4 focus:ring-slate-100"
+                            className="h-10 rounded-xl border border-white/10 bg-[#0f172a] px-3 text-right text-sm font-normal text-slate-100 outline-none focus:border-[#c7a86d]/70 focus:ring-4 focus:ring-[#c7a86d]/10"
                           />
                           <button
                             onClick={() => removeRow(index)}
-                            className="h-10 rounded-xl bg-rose-50 text-sm font-bold text-rose-600 transition hover:bg-rose-100"
+                            className="h-10 rounded-xl bg-rose-500/10 text-sm font-medium text-rose-300 transition hover:bg-rose-500/20"
                           >
                             ×
                           </button>
                         </div>
 
                         {rowsSpecialColumns.length > 0 && (
-                          <div className="grid gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 md:grid-cols-3">
+                          <div className="grid gap-2 rounded-xl border border-white/10 bg-white/[0.04] p-2 md:grid-cols-3">
                             {rowsSpecialColumns.map((name) => (
-                              <label key={name} className="block text-[11px] font-bold uppercase tracking-wide text-slate-600">
+                              <label
+                                key={name}
+                                className="block text-[11px] font-medium uppercase tracking-wide text-slate-300"
+                              >
                                 Tarif {name}
                                 <input
                                   value={row.specials?.[name] || ""}
-                                  onChange={(e) => updateSpecialRow(index, name, e.target.value)}
+                                  onChange={(e) =>
+                                    updateSpecialRow(
+                                      index,
+                                      name,
+                                      e.target.value,
+                                    )
+                                  }
                                   placeholder={`Montant ${name}`}
-                                  className="mt-1 h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-right text-xs font-bold text-slate-900 outline-none focus:border-slate-500 focus:ring-4 focus:ring-slate-100"
+                                  className="mt-1 h-9 w-full rounded-lg border border-white/10 bg-[#0f172a] px-3 text-right text-xs font-normal text-slate-100 outline-none focus:border-[#c7a86d]/70 focus:ring-4 focus:ring-[#c7a86d]/10"
                                 />
                               </label>
                             ))}
@@ -1454,18 +1593,18 @@ export default function TrainingFeesPage() {
               </div>
             </div>
 
-            <div className="flex flex-col-reverse gap-2 border-t border-slate-200 bg-slate-50 p-4 sm:flex-row sm:justify-end">
+            <div className="flex flex-col-reverse gap-2 border-t border-white/10 bg-white/[0.04] p-4 sm:flex-row sm:justify-end">
               <button
                 onClick={() => setOpen(false)}
                 disabled={saving}
-                className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100 disabled:opacity-60"
+                className="rounded-xl border border-white/10 bg-white/[0.05] px-5 py-3 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] disabled:opacity-60"
               >
                 Fermer
               </button>
               <button
                 onClick={saveTrainingFee}
                 disabled={saving}
-                className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-xl bg-gradient-to-r from-[#c7a86d] to-[#e3c37f] px-5 py-3 text-sm font-medium text-[#081120] shadow-lg shadow-[#c7a86d]/20 transition hover:from-[#d8b978] hover:to-[#f0d69a] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {saving ? "Enregistrement..." : "Enregistrer"}
               </button>
@@ -1474,19 +1613,21 @@ export default function TrainingFeesPage() {
         </div>
       )}
       {editingFee && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-3 backdrop-blur-sm">
-          <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-xl">
-            <div className="border-b border-slate-200 bg-slate-900 p-5 text-white">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 backdrop-blur-sm">
+          <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-[#c7a86d]/15 bg-[#0b1220] text-slate-100 shadow-2xl shadow-black/40">
+            <div className="border-b border-[#c7a86d]/15 bg-gradient-to-r from-[#07101f] via-[#0c1730] to-[#111f3d] p-5 text-white">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-orange-50">
+                  <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-orange-50">
                     Modification
                   </p>
-                  <h2 className="mt-1 text-xl font-extrabold">Modifier ce frais</h2>
+                  <h2 className="mt-1 text-xl font-medium">
+                    Modifier ce frais
+                  </h2>
                 </div>
                 <button
                   onClick={() => !savingEdit && setEditingFee(null)}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-2xl font-bold transition hover:bg-white/20"
+                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-2xl font-light transition hover:bg-white/20"
                 >
                   ×
                 </button>
@@ -1495,51 +1636,51 @@ export default function TrainingFeesPage() {
 
             <div className="space-y-3 p-5">
               <div>
-                <label className="mb-1 block text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
                   Libellé
                 </label>
                 <input
                   value={editForm.libelle}
                   onChange={(e) => updateEditForm("libelle", e.target.value)}
-                  className="h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium outline-none focus:border-slate-500 focus:ring-4 focus:ring-slate-100"
+                  className="h-11 w-full rounded-xl border border-white/10 bg-[#0f172a] px-4 text-sm font-normal text-slate-100 outline-none focus:border-[#c7a86d]/70 focus:ring-4 focus:ring-[#c7a86d]/10"
                 />
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
                   Code
                 </label>
                 <input
                   value={editForm.code}
                   onChange={(e) => updateEditForm("code", e.target.value)}
-                  className="h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium outline-none focus:border-slate-500 focus:ring-4 focus:ring-slate-100"
+                  className="h-11 w-full rounded-xl border border-white/10 bg-[#0f172a] px-4 text-sm font-normal text-slate-100 outline-none focus:border-[#c7a86d]/70 focus:ring-4 focus:ring-[#c7a86d]/10"
                 />
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
                   Montant
                 </label>
                 <input
                   value={editForm.montant}
                   onChange={(e) => updateEditForm("montant", e.target.value)}
-                  className="h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-right text-sm font-bold outline-none focus:border-slate-500 focus:ring-4 focus:ring-slate-100"
+                  className="h-11 w-full rounded-xl border border-white/10 bg-[#0f172a] px-4 text-right text-sm font-normal text-slate-100 outline-none focus:border-[#c7a86d]/70 focus:ring-4 focus:ring-[#c7a86d]/10"
                 />
               </div>
             </div>
 
-            <div className="flex flex-col-reverse gap-2 border-t border-slate-200 bg-slate-50 p-4 sm:flex-row sm:justify-end">
+            <div className="flex flex-col-reverse gap-2 border-t border-white/10 bg-white/[0.04] p-4 sm:flex-row sm:justify-end">
               <button
                 onClick={() => setEditingFee(null)}
                 disabled={savingEdit}
-                className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100 disabled:opacity-60"
+                className="rounded-xl border border-white/10 bg-white/[0.05] px-5 py-3 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] disabled:opacity-60"
               >
                 Annuler
               </button>
               <button
                 onClick={saveEditedFee}
                 disabled={savingEdit}
-                className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-xl bg-gradient-to-r from-[#c7a86d] to-[#e3c37f] px-5 py-3 text-sm font-medium text-[#081120] shadow-lg shadow-[#c7a86d]/20 transition hover:from-[#d8b978] hover:to-[#f0d69a] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {savingEdit ? "Modification..." : "Enregistrer modification"}
               </button>
@@ -1547,7 +1688,6 @@ export default function TrainingFeesPage() {
           </div>
         </div>
       )}
-
     </div>
   );
 }

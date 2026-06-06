@@ -449,3 +449,16 @@ model Site {
 
   students Student[]
 }
+
+model PermissionSetting {
+  id        Int      @id @default(autoincrement())
+  role      String
+  module    String
+  action    String
+  allowed   Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([role, module, action])
+}

@@ -689,43 +689,9 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
   }
 
   return (
-    <main className="fixed inset-0 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 flex text-[13px] text-slate-900 overflow-hidden">
-      <aside className="hidden lg:flex w-[245px] bg-slate-950/95 text-white flex-col border-r border-white/10 shadow-2xl">
-        <div className="h-[76px] bg-white px-4 flex items-center border-b border-slate-200">
-          <div>
-            <div className="text-[22px] font-black text-red-600 leading-none tracking-tight">
-              STRELITZIA
-            </div>
-            <div className="text-[14px] font-black text-green-600 tracking-[0.2em]">
-              SCHOOL
-            </div>
-          </div>
-        </div>
+    <main className="min-h-screen w-full min-w-0 bg-slate-100 text-[13px] text-slate-900 overflow-x-hidden">
 
-        <div className="bg-slate-900 px-4 py-4 flex gap-3 items-center border-b border-white/10">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-orange-300 to-yellow-500 flex items-center justify-center text-xl shadow-lg">
-            👤
-          </div>
-          <div className="min-w-0">
-            <p className="font-bold truncate">{user.name}</p>
-            <p className="text-[11px] text-blue-300">{user.role}</p>
-            <p className="text-[10px] text-slate-400 truncate">{user.email}</p>
-          </div>
-        </div>
-
-        <nav className="flex-1 overflow-y-auto p-3 space-y-2">
-          <SideButton label="Tableau de bord" />
-          <SideButton label="Étudiants" active />
-          <SideButton label="Liste des inscrits" />
-          <SideButton label="Inscrire un étudiant" active />
-          <SideButton label="Réinscription" />
-          <SideButton label="Paiement" />
-          <SideButton label="Activités extras" />
-          <SideButton label="Paramètres" />
-        </nav>
-      </aside>
-
-      <section className="flex-1 overflow-y-auto">
+      <section className="w-full min-w-0">
         <div className="min-h-screen p-3 md:p-6">
           <div className="mx-auto max-w-7xl">
             <div className="rounded-[28px] bg-white/95 shadow-2xl overflow-hidden border border-white/50">
@@ -1158,29 +1124,6 @@ export default function InscriptionWizard({ user }: { user: AuthUser }) {
         </div>
       </section>
     </main>
-  );
-}
-
-function SideButton({
-  label,
-  active = false,
-  onClick,
-}: {
-  label: string;
-  active?: boolean;
-  onClick?: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`w-full text-left px-4 py-3 rounded-2xl font-semibold transition ${
-        active
-          ? "bg-blue-600 text-white shadow-lg shadow-blue-900/30"
-          : "hover:bg-white/10 text-slate-200"
-      }`}
-    >
-      {active ? "● " : "- "} {label}
-    </button>
   );
 }
 
