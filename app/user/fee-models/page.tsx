@@ -79,6 +79,8 @@ export default function FeeModelsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [selectedModel, setSelectedModel] = useState<FeeModel | null>(null);
+  const [duplicateConfirmOpen, setDuplicateConfirmOpen] = useState(false);
+  const [modelToDuplicate, setModelToDuplicate] = useState<FeeModel | null>(null);
 
   const [title, setTitle] = useState("");
   const [classe, setClasse] = useState("GENERAL");
@@ -408,6 +410,24 @@ export default function FeeModelsPage() {
     }
   }
 
+  function askDuplicateModel(model: FeeModel) {
+    setMessage("");
+    setModelToDuplicate(model);
+    setDuplicateConfirmOpen(true);
+  }
+
+  function cancelDuplicateModel() {
+    if (isSaving) return;
+    setDuplicateConfirmOpen(false);
+    setModelToDuplicate(null);
+  }
+
+  async function confirmDuplicateModel() {
+    if (!modelToDuplicate || isSaving) return;
+
+    await duplicateModel(modelToDuplicate);
+  }
+
   async function duplicateModel(model: FeeModel) {
     if (isSaving) return;
 
@@ -506,7 +526,9 @@ export default function FeeModelsPage() {
       setEditOpen(true);
 
       await loadModels();
-      showSuccess("Modèle dupliqué. Modifiez la copie puis enregistrez.");
+      setDuplicateConfirmOpen(false);
+      setModelToDuplicate(null);
+      showSuccess("Modèle dupliqué avec tous ses frais et tarifs. Modifiez la copie puis enregistrez.");
     } catch (error: any) {
       console.error("Erreur duplication modèle:", error);
       setMessage(error?.message || "Erreur duplication modèle.");
@@ -1066,7 +1088,7 @@ export default function FeeModelsPage() {
 
                         <button
                           type="button"
-                          onClick={() => duplicateModel(model)}
+                          onClick={() => askDuplicateModel(model)}
                           disabled={isSaving}
                           className="rounded border px-2 py-1 disabled:cursor-not-allowed disabled:opacity-50"
                           title="Dupliquer"
@@ -1098,6 +1120,64 @@ export default function FeeModelsPage() {
           </div>
         </section>
       </div>
+
+
+      {duplicateConfirmOpen && modelToDuplicate && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-3">
+          <div className="w-full max-w-[460px] overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="bg-[#2d333d] px-4 py-3 text-white">
+              <h2 className="text-[14px] font-black">Confirmation duplication</h2>
+            </div>
+
+            <div className="space-y-3 p-4 text-[12px]">
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 font-bold text-amber-800">
+                Voulez-vous vraiment dupliquer ce modèle de frais ?
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <div className="font-black text-slate-800">{modelToDuplicate.title}</div>
+                <div className="mt-1 text-slate-600">
+                  Année scolaire : {modelToDuplicate.schoolYearName || "-"}
+                </div>
+                <div className="text-slate-600">
+                  Site : {modelToDuplicate.siteRef?.name || selectedSite?.name || "-"}
+                </div>
+              </div>
+
+              <p className="leading-relaxed text-slate-600">
+                La copie gardera automatiquement tous les frais, tous les tarifs et les montants
+                déjà créés. Vous pourrez ensuite modifier seulement ce qui doit changer.
+              </p>
+
+              {message && (
+                <div className="rounded bg-red-50 p-2 font-bold text-red-600">
+                  {message}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={cancelDuplicateModel}
+                  disabled={isSaving}
+                  className="rounded bg-slate-500 px-3 py-2 text-[12px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Annuler
+                </button>
+
+                <button
+                  type="button"
+                  onClick={confirmDuplicateModel}
+                  disabled={isSaving}
+                  className="rounded bg-blue-600 px-3 py-2 text-[12px] font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isSaving ? "Duplication..." : "Oui, dupliquer"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {createOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3">
